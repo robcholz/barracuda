@@ -30,6 +30,8 @@ cargo image deploy
 - `cargo run` 构建固件，并用 `probe-rs run` 运行它。
 - `cargo image deploy` 构建插件资源镜像，并用 `probe-rs download` 写入。
 
+[发布](/zh/contributing/releases)里，STM32 开发板有 `firmware.elf` 和 `resources.img`，浏览器安装页不写入它们。用 `probe-rs download` 写入：ELF 直接写；资源镜像加上 `--binary-format bin`，并把 `--base-address` 设为它在 `manifest.json` 里的偏移。
+
 ## 平台驱动的硬件
 
 `stm32` 平台提供数字输入和输出、GPIO、I2C 设备和 SPI 总线。运行时 I/O 让 Lua 脚本可以在开发板的可用引脚上占用这些控制器：

@@ -11,7 +11,8 @@ credentials, and the provisioning page and API.
 - Dependencies: `webserver`, `captive-portal`
 - Settings: none
 - Context resources: `wifi` (`take()` of the selected Platform's `WifiDevice`), `ip_stack`
-  (the access-point stack when no radio is present)
+  (the station stack, whose address the Plugin reports; also the access-point stack when no
+  radio is present)
 - Provided capabilities: `WifiControl`
 - Required capabilities: `WebServer` from `webserver`, `CaptivePortal` from `captive-portal`
 - Workflow: none
@@ -23,9 +24,10 @@ credentials, and the provisioning page and API.
   `/library/test/success.html`, `/ncsi.txt`, `/connecttest.txt` and `/fwlink`,
   answered with `CaptivePortal::landing()`; and, when the radio supports an
   access point, a WebServer listener on the access-point stack's port 80
-- Tasks: when the Platform supports station configuration, three tasks in the
-  `run_wifi_runtime` pool (size 3): the station/AP policy task, the DHCP server
-  task, and the captive DNS task
+- Tasks: when the Platform supports station configuration, four tasks in the
+  `run_wifi_runtime` pool (size 4): the station/AP policy task, the DHCP server
+  task, the captive DNS task, and the task that writes the `online` console line
+  each time the station gets an address
 - Storage: station credentials under the Plugin-scoped KV key `station`; the portal
   files `/resources/entry.js`, `/resources/figure.js` and `/resources/icon.svg`
 
@@ -38,19 +40,33 @@ station connection, or forget it and return to the setup AP. The capability
 owns these policy transitions, erases the selected Platform's concrete
 `WifiDevice` type, and serializes storage and radio operations. The HTTP routes
 are adapters over the same capability rather than a separate policy path.
+`WifiControl::setup_ssid` names this device's setup access point, and
+`WifiControl::station_address` returns the station's IPv4 address while its
+network has given it one.
 
 The Plugin owns Wi-Fi policy rather than a specific radio driver. On a managed
 embedded Platform it restores persisted station credentials during startup. A
 successful restore leaves the device in station mode. Missing or unusable
-credentials start the open `Barracuda Setup` access point at `192.168.4.1/24`;
+credentials start the open setup access point at `192.168.4.1/24`;
 the Plugin assigns that address to the radio's access-point stack, which the
 Platform creates unconfigured. The Plugin then supplies DHCP and captive DNS while the WebServer Plugin serves
 the shared route table on AP port 80 with one connection worker.
 
+The setup access point is named `Barracuda-` followed by the last two bytes of
+the station MAC in upper-case hex, such as `Barracuda-B2C3`, from
+`WifiDevice::station_mac_address`. On an ESP chip that is the chip's base MAC,
+the address `esptool` reads while flashing, so a setup tool that flashed the
+board knows the name, and boards set up side by side differ. A radio that
+reports no MAC names it `Barracuda Setup`.
+
 `GET /api/wifi/status` returns capabilities plus current station and
-access-point state. `GET /api/wifi/scan` returns nearby networks. `PUT /api/wifi` validates,
-connects, and only then persists `{ "ssid", "password" }`; after the response,
-the setup AP stops. A failed connection keeps or restores the setup AP so the
+access-point state; a connected station also carries its IPv4 `address`.
+`GET /api/wifi/scan` returns nearby networks. `PUT /api/wifi` validates,
+connects, and only then persists `{ "ssid", "password" }`. It answers `200`
+with `{ "address", "port" }`: the station's address on the joined network (left
+out while it has none) and the portal's port there, `8787`. The setup AP stops
+right after that response, so the reply is how a client on the hotspot learns
+where the portal went. A failed connection keeps or restores the setup AP so the
 caller can retry. `DELETE /api/wifi` removes persisted credentials,
 disconnects station mode, and starts the setup AP. `/api/wifi` takes changes
 only (`PUT`, `DELETE`); other methods, including `GET`, answer `405`, as do
@@ -89,16 +105,48 @@ Radio state, socket state, futures, locks, and atomics remain in internal RAM.
 WebServer TCP and HTTP byte buffers use `BulkBox<[u8]>`, allowing the selected
 Platform to place those POD buffers in PSRAM safely.
 
-Portal page: the `wifi` entry (group Device, order 10) is built on the
+## Console lines
+
+On a Platform that configures its own station, the Plugin writes one fixed
+line to the console at each setup step, for a setup tool attached to the serial
+port, such as a web installer that flashed the board over USB:
+
+```text
+BARRACUDA wifi=hotspot ip=192.168.4.1 ssid=Barracuda-B2C3
+BARRACUDA wifi=connecting ssid=HomeNet
+BARRACUDA wifi=failed reason=connection_failed ssid=HomeNet
+BARRACUDA wifi=online ip=192.168.1.42 port=8787
+```
+
+| Line | Written when |
+| --- | --- |
+| `hotspot` | An access point starts accepting stations |
+| `connecting` | The station starts joining a network, at startup or for `PUT /api/wifi` |
+| `failed` | The join failed; `reason` is `invalid_configuration` or `connection_failed`, the codes `PUT /api/wifi` answers with |
+| `online` | The station's network gave it an address, each time it does |
+
+Each line starts with `BARRACUDA wifi=`, then `key=value` fields. The `ssid`
+field, when present, is the last one and runs to the end of the line, with
+control characters removed. A wrong password reports `connection_failed`, like
+any other failed join. The lines go through the `log` facade at `info`, so the
+Platform's logger prefixes them, and a firmware built with
+`BARRACUDA_LOG_LEVEL` below `info` leaves them out.
+
+## Portal page
+
+The `wifi` entry (group Device, order 10) is built on the
 portal UI kit from `resources/web/entry.ts`. Its header shows the station
-state, network and setup-hotspot state from `GET /api/wifi/status`, beside the
+state, network, address and setup-hotspot state from `GET /api/wifi/status`, beside the
 `router` figure (`resources/web/figure.js`), whose antennas sweep while
 `GET /api/wifi/scan` runs. The page scans on open and on "Rescan", lists
 nearby networks strongest first with signal bars and a lock for secured
 ones, joins a listed or manually named network with `PUT /api/wifi`, and
-offers `DELETE /api/wifi` for the connected network. After an accepted join or
-forget it calls `context.refreshStatus()`, so the portal's top bar badge, sidebar
-and overview follow. Phones get the design's list layout. Results are reported
+offers `DELETE /api/wifi` for the connected network. After an accepted join it
+keeps a result card under the header with the portal's address on the joined
+network, from the `PUT` reply, as a link: the setup hotspot closes right after
+the join, so a phone that joined through it takes the address along. After an
+accepted join or forget it calls `context.refreshStatus()`, so the portal's top
+bar badge, sidebar and overview follow. Phones get the design's list layout. Results are reported
 as portal toasts, in Chinese or English.
 
 Cargo automatically runs the declared `build` task before compiling this

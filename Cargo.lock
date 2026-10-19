@@ -2497,6 +2497,8 @@ dependencies = [
  "generic-array",
  "littlefs2",
  "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "yaml-peg",
 ]

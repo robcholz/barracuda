@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use anstream::{eprintln, println};
 use barracuda_cli_style::{DIM, EMPHASIS, ERROR, SUCCESS};
 use barracuda_system_image::{
-    build_selected, deploy_selected, flash_selected, ResourcesFilesystem,
+    build_selected, deploy_selected, flash_selected, package_selected, ResourcesFilesystem,
 };
 use clap::{Parser, Subcommand};
 
@@ -32,6 +32,10 @@ enum Command {
     Flash,
     /// Build and flash the selected Board's configured resource image.
     Deploy,
+    /// Package the selected Board's release build, its resource image, and a
+    /// manifest of where each part is flashed. The version is the one the
+    /// build was given in `BARRACUDA_VERSION`.
+    Package,
 }
 
 fn main() -> ExitCode {
@@ -39,6 +43,42 @@ fn main() -> ExitCode {
         Command::Build => build(),
         Command::Flash => flash(),
         Command::Deploy => deploy(),
+        Command::Package => package(),
+    }
+}
+
+fn package() -> ExitCode {
+    let Some(workspace) = workspace_root(Path::new(env!("CARGO_MANIFEST_DIR"))) else {
+        eprintln!(
+            "{ERROR}error:{ERROR:#} image tool crate is not located below the workspace root"
+        );
+        return ExitCode::FAILURE;
+    };
+    let version = std::env::var("BARRACUDA_VERSION").unwrap_or_else(|_| String::from("dev"));
+    match package_selected(workspace, &version) {
+        Ok(package) => {
+            println!(
+                "{SUCCESS}✔{SUCCESS:#} Packaged {EMPHASIS}Board `{}`{EMPHASIS:#} release {DIM}{}{DIM:#} at `{}`:",
+                package.board(),
+                package.version(),
+                package.directory().display()
+            );
+            for part in package.parts() {
+                match part.offset() {
+                    Some(offset) => println!(
+                        "  {} {DIM}{} bytes at {offset:#x}{DIM:#}",
+                        part.path(),
+                        part.size()
+                    ),
+                    None => println!("  {} {DIM}{} bytes{DIM:#}", part.path(), part.size()),
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{ERROR}error:{ERROR:#} {error}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -160,6 +200,11 @@ mod tests {
     #[test]
     fn command_accepts_flash_without_parameters() {
         assert!(Cli::try_parse_from(["cargo image", "flash"]).is_ok());
+    }
+
+    #[test]
+    fn command_accepts_package_without_parameters() {
+        assert!(Cli::try_parse_from(["cargo image", "package"]).is_ok());
     }
 
     #[test]

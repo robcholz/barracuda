@@ -159,7 +159,7 @@ async fn host_registers_portal_entry_and_reports_platform_managed_network() {
                 "scanning": false,
                 "station_configuration": false
             },
-            "station": { "state": "connected" },
+            "station": { "state": "connected", "address": "10.0.0.1" },
             "access_point": { "state": "stopped" }
         })
     );

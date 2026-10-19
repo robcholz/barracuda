@@ -7,10 +7,21 @@ body{margin:0;background:#F5F5F7}
    translucent strip, and every section below is its own panel. Panels follow the system: background on the
    background-200 page, a border hairline, radius-lg. */
 .w{background:#F5F5F7}
-.w>.bc-site-header{margin-bottom:8px}
+/* The banner and the nav stay stuck to the top together, so Safari tints its toolbar from the banner as it does on
+   the docs. Anchored sections land below them. */
+.w-chrome{position:sticky;top:0;z-index:20}
+.w>.w-chrome{margin-bottom:8px}
+html{scroll-padding-top:calc(var(--topbar-height) + 8px)}
+html:has(.w-chrome>.bc-banner){scroll-padding-top:calc(var(--topbar-height) + 44px)}
 .w>section,.w>footer{margin:0 8px 8px;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
 .w>section.w-hero{border:0;background:#BCD0E2 url(/images/painting.jpg) center 30%/cover}
-.w-hero .w-lead{color:var(--nav-foreground)}
+/* Text over the painting is a deep slate drawn from its sky, not the system's near-black: the painting holds no
+   darks, so pure ink reads as pasted on. Still above 7:1 on the sky. */
+.w-hero,.w-foot-band{--painting-ink:#1B2A35;--painting-ink-soft:#2F3E48}
+.w-hero .w-display{color:var(--painting-ink)}
+.w-hero .w-lead{color:var(--painting-ink-soft)}
+/* The install note lands on the grass, so it sits on the same frosted ground as the brands strip. */
+.w-hero .w-install .bc-muted{padding:2px 8px;border-radius:var(--radius-sm);background:#FAFAFBCC;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
 /* Signal is a fill carrying ink, or signal-text on light grounds; never lime text on white. */
 .w [data-theme="light"] .w-accent{color:var(--signal-text)}
 .w [data-theme="light"] .w-display .w-accent,.w [data-theme="light"] .w-h2 .w-accent{background:var(--signal);color:var(--signal-foreground);padding:0 .1em;border-radius:var(--radius-sm)}
@@ -28,7 +39,7 @@ a.w-chipcmd:hover{background:var(--muted);border-color:var(--input-hover)}
 .w-foot-band>.w-wrap{max-width:none;padding:0}
 .w-foot-band .w-foot{margin-top:0;padding:40px max(40px,calc((100% - 1120px) / 2)) 32px;border-bottom:1px solid #E1E1E5B3;background:#FAFAFBCC;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);max-width:none}
 .w-foot-band .w-foot__h{color:var(--muted-foreground)}
-.w-foot-band .w-word{color:var(--foreground);padding:120px max(40px,calc((100% - 1120px) / 2)) 0}
+.w-foot-band .w-word{color:var(--painting-ink);padding:120px max(40px,calc((100% - 1120px) / 2)) 0}
 @media (max-width:720px){.w-foot-band .w-foot{padding:32px 16px 24px}
 .w-foot-band .w-word{padding:64px 16px 0}
 }

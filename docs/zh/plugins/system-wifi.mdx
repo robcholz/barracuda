@@ -23,6 +23,6 @@ description: "在设备的系统界面中显示 Wi-Fi 状态和控制项。"
 
 - 站点（station）的连接状态成为 `NetworkState`（带网络名称的 `Connected`、`Connecting` 或 `Offline`）；网络由主机管理的主机开发板始终处于已连接状态；
 - 接入点正在启动或已启动时，设置热点处于打开状态；
-- 门户磁贴用 `SETUP_AP_PASSWORD` 打开接入点 `SETUP_AP_SSID`，显示如何通过 `SETUP_AP_ADDRESS` 访问门户，并能再次关闭它。
+- 门户磁贴用 `SETUP_AP_PASSWORD` 打开配置接入点（名称由 `WifiControl::setup_ssid` 给出），显示如何通过 `SETUP_AP_ADDRESS` 访问门户，并能再次关闭它。
 
 需要联网的设备开发板会同时启用本插件和 `app-manager`；不带网络功能构建的开发板则不启用它，系统界面也不显示网络。

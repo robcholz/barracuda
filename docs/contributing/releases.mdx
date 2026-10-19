@@ -1,0 +1,88 @@
+---
+title: "Releases"
+description: "Publish firmware for every device Board by pushing a version tag."
+---
+
+Push a version tag and GitHub Actions builds every device Board at that version,
+then publishes the firmware as the tag's GitHub Release. The browser
+[installer](/get-started/installation) offers the newest release.
+
+```bash terminal
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+A tag is `v<major>.<minor>.<patch>`. A suffix such as `v0.2.0-rc.1` publishes a
+prerelease, which the installer offers as a preview beside the newest stable
+release.
+
+## What the workflow does
+
+`.github/workflows/release.yml` runs on every `v*` tag:
+
+1. Reads the version from the tag: `v0.1.0` gives `0.1.0`.
+2. Builds every device Board with `BARRACUDA_VERSION` set to that version, then
+   runs `cargo image package` for it. Boards are grouped by Rust target, as CI
+   groups them with `.github/scripts/board-matrix.sh`. Host Boards are not
+   released.
+3. Publishes one archive per Board and `SHA256SUMS`, with GitHub's generated
+   notes.
+
+A Board that fails to build stops the whole release, so a release always has
+every device Board.
+
+## What a release holds
+
+Each Board's archive, `barracuda-<version>-<board>.tar.gz`, holds one folder of
+the same name:
+
+| File | Holds |
+| --- | --- |
+| `firmware.bin` | ESP Boards: the bootloader, partition table and app, merged from `0x0` |
+| `firmware.elf` | STM32 Boards: the app, which flash tools place by its own addresses |
+| `resources.img` | The Plugin resource image, written at the Board's `resources` region |
+| `manifest.json` | The version, Board, chip and Platform, and every part's offset, size and SHA-256 |
+
+```json manifest.json
+{
+  "version": "0.1.0",
+  "board": "esp32c3-devkitc-02",
+  "chip": "esp32c3",
+  "platform": "esp32c3",
+  "parts": [
+    { "path": "firmware.bin", "format": "raw", "offset": 0, "size": 4103760, "sha256": "…" },
+    { "path": "resources.img", "format": "raw", "offset": 11141120, "size": 1441792, "sha256": "…" }
+  ]
+}
+```
+
+An ESP `firmware.bin` ends inside `ota_0`. Its padding erases `otadata`, so a
+Board that had switched to `ota_1` boots the new app, and it leaves
+`kv_database` and `system` alone, so an update keeps the Board's settings.
+Barracuda keeps nothing in `nvs`, which the padding also erases.
+
+## The version in the firmware
+
+`FIRMWARE_VERSION`, from the Plugin API, is `BARRACUDA_VERSION` at build time,
+or `dev` when it is unset.
+
+- At boot, System logs `BARRACUDA system=boot board=<board> version=<version>`.
+- The Settings app shows it on the device page.
+- ESP firmware names it in the app descriptor, with the project name
+  `barracuda`. The installer reads the descriptor of `ota_0` to tell which
+  release a Board already holds.
+
+## Package a Board yourself
+
+Build and package one Board as the workflow does:
+
+```bash terminal
+cargo board select esp32c3-devkitc-02
+BARRACUDA_VERSION=0.1.0 cargo build --release
+BARRACUDA_VERSION=0.1.0 cargo image package
+```
+
+The package lands in `target/package/barracuda-0.1.0-esp32c3-devkitc-02/`.
+ESP Boards need `espflash` installed before `cargo board select`, which records
+the `PATH` the build uses. See [System image](/tools/system-image) for how each
+Platform makes its firmware file.

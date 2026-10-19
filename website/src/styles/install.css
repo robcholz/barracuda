@@ -1,0 +1,131 @@
+/* The installer's layout over the design system: layout glue only, as in the
+   onboarding design. Components are the design system's `.bc-*` classes. */
+
+.ob-root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+  color: var(--foreground);
+}
+.ob-page {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--space-8);
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+.ob-rail {
+  flex: 1 1 200px;
+  max-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding-top: var(--space-2);
+}
+.ob-rail__sep {
+  height: 1px;
+  background: var(--border);
+}
+.ob-content {
+  flex: 999 1 560px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.ob-body {
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.ob-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.ob-split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  align-items: flex-start;
+}
+.ob-split > .bc-kv {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.ob-hotspot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-6);
+}
+.ob-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 120px;
+  width: 100%;
+  padding: var(--space-4);
+  box-sizing: border-box;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  color: var(--foreground);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.ob-drop:hover,
+.ob-drop[data-dragging="true"] {
+  border-color: var(--ring);
+}
+.ob-drop:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ob-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.ob-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.ob-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .ob-page {
+    padding: var(--space-4);
+    gap: var(--space-4);
+  }
+  .ob-rail {
+    max-width: none;
+  }
+  .ob-pair {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+  .ob-hide-sm {
+    display: none;
+  }
+}

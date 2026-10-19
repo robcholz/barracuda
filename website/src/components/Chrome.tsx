@@ -8,7 +8,7 @@ import { Icon } from "./Icon";
 
 const BANNER_KEY = "barracuda-banner-closed";
 
-/** The banner, then the top bar with its language menu. */
+/** The banner, then the top bar with its language menu, stuck together to the top of the page. */
 export function Chrome({
   copy,
   current,
@@ -56,7 +56,7 @@ export function Chrome({
   const home = page(lang, "/");
 
   return (
-    <>
+    <div className="w-chrome">
       {bannerOpen && (
         <div className="bc-banner" role="region" aria-label={copy.banner.label}>
           <span>{copy.banner.text}</span>
@@ -166,6 +166,6 @@ export function Chrome({
           </a>
         </div>
       </header>
-    </>
+    </div>
   );
 }

@@ -248,6 +248,7 @@
                   "architecture/repository",
                   "contributing/docs",
                   "contributing/website",
+                  "contributing/releases",
                   "get-started/tooling",
                   "architecture/codestyle",
                   "architecture/agent-oriented-api-design",
@@ -535,6 +536,26 @@
             "label": "Get started",
             "href": "/get-started/quickstart"
           }
+        },
+        "footer": {
+          "socials": {
+            "github": "https://github.com/robcholz/barracuda"
+          },
+          "links": [
+            {
+              "header": "Barracuda",
+              "items": [
+                {
+                  "label": "Quickstart",
+                  "href": "/get-started/quickstart"
+                },
+                {
+                  "label": "Changelog",
+                  "href": "https://github.com/robcholz/barracuda/releases"
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -736,6 +757,7 @@
                   "zh/architecture/repository",
                   "zh/contributing/docs",
                   "zh/contributing/website",
+                  "zh/contributing/releases",
                   "zh/get-started/tooling",
                   "zh/architecture/codestyle",
                   "zh/architecture/agent-oriented-api-design",
@@ -1023,31 +1045,27 @@
             "label": "开始使用",
             "href": "/zh/get-started/quickstart"
           }
+        },
+        "footer": {
+          "socials": {
+            "github": "https://github.com/robcholz/barracuda"
+          },
+          "links": [
+            {
+              "header": "Barracuda",
+              "items": [
+                {
+                  "label": "快速开始",
+                  "href": "/zh/get-started/quickstart"
+                },
+                {
+                  "label": "更新日志",
+                  "href": "https://github.com/robcholz/barracuda/releases"
+                }
+              ]
+            }
+          ]
         }
-      }
-    ]
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/robcholz/barracuda"
-    },
-    "links": [
-      {
-        "header": "Barracuda",
-        "items": [
-          {
-            "label": "GitHub",
-            "href": "https://github.com/robcholz/barracuda"
-          },
-          {
-            "label": "Changelog",
-            "href": "https://github.com/robcholz/barracuda/releases"
-          },
-          {
-            "label": "Quickstart",
-            "href": "/get-started/quickstart"
-          }
-        ]
       }
     ]
   },

@@ -65,6 +65,8 @@ cargo image deploy
 - `cargo run` 用 `--release` 构建固件，用 `espflash flash --monitor` 烧录，并在终端中持续显示串口日志。
 - `cargo image deploy` 构建插件资源镜像，并用 `espflash write-bin` 写入 `resources` 分区。
 
+[发布](/zh/contributing/releases)里，每块 ESP 开发板有一个 `firmware.bin`（bootloader、分区表和应用从 `0x0` 合并成的文件）和一个 `resources.img`。浏览器[安装页](/zh/get-started/installation)会写入这两个文件；要自己写入，就按 `manifest.json` 里每个文件的偏移运行 `espflash write-bin`。
+
 ## 平台驱动的硬件
 
 每个 ESP32 平台都提供数字输入和输出、GPIO、SPI 设备、SPI 总线、SPI 输出和 I2C 设备。运行时 I/O 让 Lua 脚本可以在开发板的可用引脚上占用这些控制器：

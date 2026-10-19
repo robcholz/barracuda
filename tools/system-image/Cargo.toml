@@ -27,6 +27,8 @@ futures-lite = "2"
 generic-array = "0.14"
 littlefs2 = { version = "0.8", default-features = false, features = ["alloc", "c-stubs"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
 yaml-peg = { version = "1.0.8", features = ["serde"] }
 
 [dev-dependencies]

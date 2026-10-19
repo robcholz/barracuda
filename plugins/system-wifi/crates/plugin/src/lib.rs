@@ -10,7 +10,7 @@ use barracuda_app_manager_plugin::{HotspotFuture, NetworkSource, NetworkState, S
 use barracuda_platform::{AccessPointState, StationState};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginRegisterContext, PluginResult};
-use barracuda_wifi_plugin::{SETUP_AP_ADDRESS, SETUP_AP_PASSWORD, SETUP_AP_SSID, WifiControl};
+use barracuda_wifi_plugin::{SETUP_AP_ADDRESS, SETUP_AP_PASSWORD, WifiControl};
 
 /// Hands the system UI the `wifi` Plugin's link and setup hotspot.
 #[barracuda_plugin::macros::plugin]
@@ -55,13 +55,16 @@ impl NetworkSource for Wifi {
     }
 
     fn hotspot_hint(&self) -> String {
-        format!("连接热点“{SETUP_AP_SSID}”，打开 http://{SETUP_AP_ADDRESS}/")
+        format!(
+            "连接热点“{}”，打开 http://{SETUP_AP_ADDRESS}/",
+            self.0.setup_ssid()
+        )
     }
 
     fn open_hotspot(&self) -> HotspotFuture<'_> {
         Box::pin(async move {
             self.0
-                .start_access_point(SETUP_AP_SSID, SETUP_AP_PASSWORD)
+                .start_access_point(self.0.setup_ssid(), SETUP_AP_PASSWORD)
                 .await
                 .map_err(|error| error.to_string())
         })

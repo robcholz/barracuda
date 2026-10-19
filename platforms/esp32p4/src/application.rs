@@ -10,6 +10,8 @@ use static_cell::StaticCell;
 use crate::{Esp32P4PlatformBindings, Esp32P4PlatformError};
 
 #[doc(hidden)]
+pub use barracuda_platform::FIRMWARE_VERSION as __FIRMWARE_VERSION;
+#[doc(hidden)]
 pub use esp_backtrace as __backtrace;
 #[doc(hidden)]
 pub use esp_bootloader_esp_idf as __bootloader;
@@ -77,7 +79,19 @@ macro_rules! platform_entry {
     ($board:expr, $board_bindings:ident, $board_bindings_type:path, |$spawner:ident, $platform_bindings:ident, $board_bindings_value:ident| $application:expr) => {
         use $crate::application::__backtrace as _;
 
-        $crate::application::__bootloader::esp_app_desc!();
+        // The app descriptor names the release, so a flasher can read which
+        // Barracuda a board already holds.
+        $crate::application::__bootloader::esp_app_desc!(
+            $crate::application::__FIRMWARE_VERSION,
+            "barracuda",
+            $crate::application::__bootloader::BUILD_TIME,
+            $crate::application::__bootloader::BUILD_DATE,
+            $crate::application::__bootloader::ESP_IDF_COMPATIBLE_VERSION,
+            $crate::application::__bootloader::MMU_PAGE_SIZE,
+            0,
+            u16::MAX,
+            $crate::application::__bootloader::SECURE_VERSION
+        );
 
         #[embassy_executor::task]
         async fn __barracuda_application_task(

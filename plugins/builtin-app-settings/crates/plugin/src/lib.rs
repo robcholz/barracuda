@@ -20,7 +20,7 @@ use barracuda_app_manager_plugin::{
     WIFI_SETTINGS, icons,
 };
 use barracuda_platform::StationState;
-use barracuda_plugin::api::{PluginContext, TargetIdentity};
+use barracuda_plugin::api::{FIRMWARE_VERSION, PluginContext, TargetIdentity};
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
 };
@@ -31,8 +31,6 @@ use serde_json::{Value, json};
 
 /// The app's ID, and its package's name.
 pub const SETTINGS: &str = "settings";
-/// The system's version, shown on the device page.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Shared Workspace areas whose size the storage page shows: its name,
 /// icon, and directory.
 const AREAS: [(&str, &str, &str); 2] = [
@@ -154,7 +152,7 @@ impl Settings {
             "quiet": values.quiet,
             "screen_off": values.screen_off,
             "device": {
-                "version": VERSION,
+                "version": FIRMWARE_VERSION,
                 "board": board.name(),
                 "chip": board.hardware().chip(),
                 "platform": self.identity.platform().name(),

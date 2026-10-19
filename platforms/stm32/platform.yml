@@ -57,3 +57,5 @@ application:
   launcher:
     program: probe-rs
     arguments: [run, --chip, STM32U5A5ZJTxQ, "{application}"]
+  release:
+    driver: elf

@@ -1,8 +1,11 @@
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, string::String, string::ToString, vec::Vec};
+use core::net::Ipv4Addr;
 
 use alloc::rc::Rc;
 use barracuda_platform::{AccessPointState, StationState, VisibleNetwork, WifiCapabilities};
-use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
+use barracuda_webserver_plugin::{
+    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WEB_SERVER_PORT,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{WifiControl, WifiControlErrorKind};
@@ -74,7 +77,18 @@ impl HttpEndpoint for WifiEndpoint {
                             }
                         };
                     };
-                    Self::static_response(204, b"")
+                    // the setup hotspot closes right after this reply, so it carries
+                    // where the portal is on the joined network
+                    Self::json_response(
+                        200,
+                        &JoinedResponse {
+                            address: self
+                                .control
+                                .station_address()
+                                .map(|address| address.to_string()),
+                            port: WEB_SERVER_PORT,
+                        },
+                    )
                 }
                 HttpMethod::Delete => {
                     if !self.control.capabilities().station_configuration {
@@ -117,7 +131,10 @@ impl HttpEndpoint for StatusEndpoint {
             if request.method() != HttpMethod::Get {
                 return WifiEndpoint::static_response(405, br#"{"error":"method_not_allowed"}"#);
             }
-            WifiEndpoint::json_response(200, &StatusResponse::from(self.control.status()))
+            WifiEndpoint::json_response(
+                200,
+                &StatusResponse::new(self.control.status(), self.control.station_address()),
+            )
         })
     }
 }
@@ -158,6 +175,15 @@ impl HttpEndpoint for ScanEndpoint {
     }
 }
 
+/// `PUT` [`WIFI_API_PATH`] success: the station's address on the joined network and the
+/// portal's port there.
+#[derive(Serialize)]
+struct JoinedResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    address: Option<String>,
+    port: u16,
+}
+
 #[derive(Serialize)]
 struct StatusResponse {
     capabilities: CapabilitiesResponse,
@@ -165,11 +191,12 @@ struct StatusResponse {
     access_point: AccessPointResponse,
 }
 
-impl From<crate::WifiStatus> for StatusResponse {
-    fn from(status: crate::WifiStatus) -> Self {
+impl StatusResponse {
+    /// `address` is the station's, reported only while it is connected.
+    fn new(status: crate::WifiStatus, address: Option<Ipv4Addr>) -> Self {
         Self {
             capabilities: status.capabilities().into(),
-            station: status.station().clone().into(),
+            station: StationResponse::new(status.station().clone(), address),
             access_point: status.access_point().clone().into(),
         }
     }
@@ -200,15 +227,20 @@ enum StationResponse {
     Connected {
         #[serde(skip_serializing_if = "Option::is_none")]
         ssid: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        address: Option<String>,
     },
 }
 
-impl From<StationState> for StationResponse {
-    fn from(state: StationState) -> Self {
+impl StationResponse {
+    fn new(state: StationState, address: Option<Ipv4Addr>) -> Self {
         match state {
             StationState::Disconnected => Self::Disconnected,
             StationState::Connecting => Self::Connecting,
-            StationState::Connected { ssid } => Self::Connected { ssid },
+            StationState::Connected { ssid } => Self::Connected {
+                ssid,
+                address: address.map(|address| address.to_string()),
+            },
         }
     }
 }

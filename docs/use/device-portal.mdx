@@ -11,9 +11,13 @@ portal always matches the firmware.
 
 | Where the device is | Address |
 | --- | --- |
-| A Board that has no Wi-Fi yet | Join the open `Barracuda Setup` network, then open `http://192.168.4.1/portal/` |
+| A Board that has no Wi-Fi yet | Join the open `Barracuda-XXXX` network, where `XXXX` is the end of the Board's MAC address, then open `http://192.168.4.1/portal/` |
 | A Board on your network | `http://DEVICE_ADDRESS:8787/portal/` |
 | `local-linux` | `http://10.42.0.2:8787/portal/` |
+
+When you join your network on the **Wi-Fi** page, the setup hotspot closes and
+the page shows the portal's address on that network. Open it once you are back
+on the same network.
 
 The portal follows your browser's language, Chinese or English.
 

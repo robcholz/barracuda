@@ -9,23 +9,25 @@ description: "加入 Wi-Fi 网络、运行配置热点，并通过网页配置�
 - 插件 ID：`wifi`
 - 依赖：`webserver`、`captive-portal`
 - 设置：无
-- 上下文资源：`wifi`（对所选平台的 `WifiDevice` 调用 `take()`）、`ip_stack`（没有无线电时的接入点协议栈）
+- 上下文资源：`wifi`（对所选平台的 `WifiDevice` 调用 `take()`）、`ip_stack`（站点协议栈，本插件报告它的地址；没有无线电时也作为接入点协议栈）
 - 提供的能力：`WifiControl`
 - 所需能力：来自 `webserver` 的 `WebServer`，来自 `captive-portal` 的 `CaptivePortal`
 - Workflow：无
 - Agent 工具：无
 - Lua 包：无
 - Web：带状态的门户入口 `wifi`；`GET /api/wifi/status`、`GET /api/wifi/scan`、`PUT /api/wifi`、`DELETE /api/wifi`；强制门户检测路径 `/`、`/generate_204`、`/gen_204`、`/hotspot-detect.html`、`/library/test/success.html`、`/ncsi.txt`、`/connecttest.txt` 和 `/fwlink`，用 `CaptivePortal::landing()` 应答；以及在无线电支持接入点时，接入点协议栈 80 端口上的一个 WebServer 监听器
-- 任务：当平台支持站点配置时，`run_wifi_runtime` 池（大小 3）中的三个任务：站点/AP 策略任务、DHCP 服务器任务和强制门户 DNS 任务
+- 任务：当平台支持站点配置时，`run_wifi_runtime` 池（大小 4）中的四个任务：站点/AP 策略任务、DHCP 服务器任务、强制门户 DNS 任务，以及每次站点拿到地址时写出 `online` 控制台行的任务
 - 存储：站点凭据保存在插件作用域的 KV 键 `station` 下；门户文件 `/resources/entry.js`、`/resources/figure.js` 和 `/resources/icon.svg`
 
 本插件声明一个私有文件系统，它的门户入口从中提供这些打包好的文件。
 
-依赖它的插件可以从 `wifi` 获取 `WifiControl`，用来查看支持情况和状态、扫描网络、启动或停止接入点、配置一个持久保存的站点连接，或者忘记该连接并回到配置 AP。这个能力拥有这些策略状态转换，擦除所选平台具体的 `WifiDevice` 类型，并把存储和无线电操作串行化。HTTP 路由是基于同一个能力的适配器，而不是一条单独的策略路径。
+依赖它的插件可以从 `wifi` 获取 `WifiControl`，用来查看支持情况和状态、扫描网络、启动或停止接入点、配置一个持久保存的站点连接，或者忘记该连接并回到配置 AP。这个能力拥有这些策略状态转换，擦除所选平台具体的 `WifiDevice` 类型，并把存储和无线电操作串行化。HTTP 路由是基于同一个能力的适配器，而不是一条单独的策略路径。`WifiControl::setup_ssid` 给出本设备配置接入点的名称，`WifiControl::station_address` 在站点所在网络给它分配了地址时返回它的 IPv4 地址。
 
-本插件拥有的是 Wi-Fi 策略，而不是某个具体的无线电驱动。在受管理的嵌入式平台上，它在启动时恢复持久保存的站点凭据。恢复成功后，设备处于站点模式。凭据缺失或不可用时，会在 `192.168.4.1/24` 上启动开放的 `Barracuda Setup` 接入点；本插件把这个地址分配给无线电的接入点协议栈，该协议栈由平台创建但未配置。随后本插件提供 DHCP 和强制门户 DNS，而 WebServer 插件用一个连接工作者在 AP 的 80 端口上提供共享的路由表。
+本插件拥有的是 Wi-Fi 策略，而不是某个具体的无线电驱动。在受管理的嵌入式平台上，它在启动时恢复持久保存的站点凭据。恢复成功后，设备处于站点模式。凭据缺失或不可用时，会在 `192.168.4.1/24` 上启动开放的配置接入点；本插件把这个地址分配给无线电的接入点协议栈，该协议栈由平台创建但未配置。随后本插件提供 DHCP 和强制门户 DNS，而 WebServer 插件用一个连接工作者在 AP 的 80 端口上提供共享的路由表。
 
-`GET /api/wifi/status` 返回能力以及当前的站点和接入点状态。`GET /api/wifi/scan` 返回附近的网络。`PUT /api/wifi` 先校验、再连接，成功后才持久保存 `{ "ssid", "password" }`；响应之后，配置 AP 停止。连接失败时会保持或恢复配置 AP，以便调用方重试。`DELETE /api/wifi` 删除持久保存的凭据，断开站点模式，并启动配置 AP。`/api/wifi` 只接受修改（`PUT`、`DELETE`）；其他方法，包括 `GET`，都返回 `405`；`/status` 和 `/scan` 上除 `GET` 之外的方法也一样。
+配置接入点的名称是 `Barracuda-` 加上站点 MAC 最后两个字节的大写十六进制，例如 `Barracuda-B2C3`，MAC 来自 `WifiDevice::station_mac_address`。在 ESP 芯片上，它是芯片的基础 MAC，也就是 `esptool` 在烧录时读到的地址，所以烧录过这块板子的配置工具知道这个名称，并排配置的多块板子也不会重名。不报告 MAC 的无线电把它命名为 `Barracuda Setup`。
+
+`GET /api/wifi/status` 返回能力以及当前的站点和接入点状态；已连接的站点还带有它的 IPv4 `address`。`GET /api/wifi/scan` 返回附近的网络。`PUT /api/wifi` 先校验、再连接，成功后才持久保存 `{ "ssid", "password" }`。它以 `200` 应答 `{ "address", "port" }`：站点在所加入网络中的地址（还没有地址时省略）以及门户在那里的端口 `8787`。配置 AP 在这次响应之后立即停止，所以热点上的客户端要靠这个回复得知门户去了哪里。连接失败时会保持或恢复配置 AP，以便调用方重试。`DELETE /api/wifi` 删除持久保存的凭据，断开站点模式，并启动配置 AP。`/api/wifi` 只接受修改（`PUT`、`DELETE`）；其他方法，包括 `GET`，都返回 `405`；`/status` 和 `/scan` 上除 `GET` 之外的方法也一样。
 
 门户注册一个 Wi-Fi 模块，以及常见的 Android、Apple 和 Windows 客户端所用的精确强制门户检测路径，这些路径用 `CaptivePortal::landing()` 应答。该入口通过 `CaptivePortal::register_with_status` 注册；它的 `GET /portal/status` 记录映射 `WifiControl::status` 最后观测到的状态，不会查询无线电：
 
@@ -43,6 +45,28 @@ description: "加入 Wi-Fi 网络、运行配置热点，并通过网页配置�
 
 所选的 ESP32-S3 实现拥有 ESP 无线电控制器和两个 Embassy 网络接口。平台拥有的运行器驱动站点 DHCP 和 AP 协议栈。Wi-Fi 插件拥有策略、配网服务和 AP 地址。无线电状态、套接字状态、future、锁和原子量都留在内部 RAM 中。WebServer 的 TCP 和 HTTP 字节缓冲区使用 `BulkBox<[u8]>`，让所选平台可以安全地把这些 POD 缓冲区放在 PSRAM 中。
 
-门户页面：`wifi` 入口（分组“设备”，排序 10）基于门户 UI 套件，由 `resources/web/entry.ts` 构建。它的页头显示来自 `GET /api/wifi/status` 的站点状态、网络和配置热点状态，旁边是 `router` 插图（`resources/web/figure.js`），在 `GET /api/wifi/scan` 运行时它的天线会扫动。页面在打开时和点击“重新扫描”时进行扫描，按信号从强到弱列出附近的网络，显示信号格，加密网络带锁形图标；用 `PUT /api/wifi` 加入列表中的网络或手动输入名称的网络，并为已连接的网络提供 `DELETE /api/wifi`。加入或忘记被接受后，它会调用 `context.refreshStatus()`，让门户顶栏的徽标、侧边栏和概览随之更新。手机上使用设计中的列表布局。结果以门户提示（toast）的形式报告，使用中文或英文。
+## 控制台行
+
+在自行配置站点的平台上，本插件在每个配置步骤向控制台写出一行固定格式的文字，供接在串口上的配置工具读取，例如通过 USB 烧录了这块板子的网页安装器：
+
+```text
+BARRACUDA wifi=hotspot ip=192.168.4.1 ssid=Barracuda-B2C3
+BARRACUDA wifi=connecting ssid=HomeNet
+BARRACUDA wifi=failed reason=connection_failed ssid=HomeNet
+BARRACUDA wifi=online ip=192.168.1.42 port=8787
+```
+
+| 行 | 何时写出 |
+| --- | --- |
+| `hotspot` | 一个接入点开始接受站点连接 |
+| `connecting` | 站点开始加入一个网络，发生在启动时或处理 `PUT /api/wifi` 时 |
+| `failed` | 加入失败；`reason` 是 `invalid_configuration` 或 `connection_failed`，与 `PUT /api/wifi` 应答的错误码相同 |
+| `online` | 站点所在网络给它分配了地址，每次分配都会写出 |
+
+每行以 `BARRACUDA wifi=` 开头，后面是 `key=value` 字段。`ssid` 字段出现时总是最后一个，一直到行尾，其中的控制字符会被去掉。密码错误和其他加入失败一样报告为 `connection_failed`。这些行经由 `log` facade 以 `info` 级别写出，所以平台的日志器会给它们加上前缀；用低于 `info` 的 `BARRACUDA_LOG_LEVEL` 构建的固件不会写出它们。
+
+## 门户页面
+
+`wifi` 入口（分组“设备”，排序 10）基于门户 UI 套件，由 `resources/web/entry.ts` 构建。它的页头显示来自 `GET /api/wifi/status` 的站点状态、网络、地址和配置热点状态，旁边是 `router` 插图（`resources/web/figure.js`），在 `GET /api/wifi/scan` 运行时它的天线会扫动。页面在打开时和点击“重新扫描”时进行扫描，按信号从强到弱列出附近的网络，显示信号格，加密网络带锁形图标；用 `PUT /api/wifi` 加入列表中的网络或手动输入名称的网络，并为已连接的网络提供 `DELETE /api/wifi`。加入被接受后，它在页头下方保留一张结果卡片，以链接形式显示门户在所加入网络中的地址（来自 `PUT` 的回复）：配置热点在加入后立即关闭，这样通过热点加入的手机可以把地址带走。加入或忘记被接受后，它会调用 `context.refreshStatus()`，让门户顶栏的徽标、侧边栏和概览随之更新。手机上使用设计中的列表布局。结果以门户提示（toast）的形式报告，使用中文或英文。
 
 Cargo 会在编译本插件之前自动运行声明的 `build` 任务。如果只想重新构建门户资源，在仓库根目录运行 `cargo plugin run --plugin wifi build`。它会写出 `filesystem/resources/entry.js`、`figure.js` 和 `icon.svg`（Lucide 的 `wifi` 图标），作为本插件私有的 `/resources/` 文件打包。

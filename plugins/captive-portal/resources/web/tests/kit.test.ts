@@ -347,6 +347,25 @@ test("header, kv and definePage build the page frame and clean up", async () => 
   expect(root.childElementCount).toBe(0);
 });
 
+test("submitJson hands an accepted reply's JSON to onAccepted", async () => {
+  const { context: ctx } = context();
+  const replies: unknown[] = [];
+  const onAccepted = (reply: unknown) => replies.push(reply);
+  respond = async () =>
+    new Response(JSON.stringify({ address: "192.168.1.42" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  expect(
+    await submitJson(ctx, { endpoint: "/api/x", body: {}, onAccepted }),
+  ).toBe("accepted");
+  respond = async () => new Response(null, { status: 204 });
+  expect(
+    await submitJson(ctx, { endpoint: "/api/x", body: {}, onAccepted }),
+  ).toBe("accepted");
+  expect(replies).toEqual([{ address: "192.168.1.42" }, null]);
+});
+
 test("submitJson reports 404 and 5xx distinctly", async () => {
   const { context: ctx, toasts } = context();
   respond = async () => new Response(null, { status: 404 });

@@ -5,10 +5,11 @@
 
 extern crate alloc;
 
+mod console;
 mod control;
 mod endpoint;
 
-use alloc::{boxed::Box, rc::Rc};
+use alloc::{boxed::Box, format, rc::Rc, string::String};
 use core::{future::Future, net::Ipv4Addr, pin::Pin, time::Duration};
 
 use barracuda_captive_portal_plugin::{
@@ -36,8 +37,8 @@ use endpoint::{
 
 pub use control::{WifiControl, WifiControlError, WifiControlErrorKind, WifiStatus};
 
-/// Name of the open provisioning access point, where the portal is reachable.
-pub const SETUP_AP_SSID: &str = "Barracuda Setup";
+/// Name of the open provisioning access point on a radio that reports no MAC address.
+pub const SETUP_AP_FALLBACK_SSID: &str = "Barracuda Setup";
 /// Password of the provisioning access point: none.
 pub const SETUP_AP_PASSWORD: &str = "";
 /// The device's address on the provisioning access point.
@@ -57,11 +58,25 @@ const CAPTIVE_DETECTION_PATHS: [&str; 8] = [
 
 type BoxedWifiRuntime = Pin<Box<dyn Future<Output = ()> + 'static>>;
 
+/// Name of the open provisioning access point, where the portal is reachable:
+/// `Barracuda-` and the last two bytes of the station MAC in upper-case hex
+/// (`Barracuda-B2C3`). A setup tool that read the MAC while flashing knows the
+/// name, and boards set up side by side differ.
+#[must_use]
+pub fn setup_access_point_ssid(station_mac: Option<[u8; 6]>) -> String {
+    match station_mac {
+        Some(mac) => format!("Barracuda-{:02X}{:02X}", mac[4], mac[5]),
+        None => String::from(SETUP_AP_FALLBACK_SSID),
+    }
+}
+
 /// Plugin owning Wi-Fi provisioning, access-point fallback, and station policy.
 #[barracuda_plugin::macros::plugin]
 pub struct WifiPlugin {
     radio: Option<RadioControl>,
     control: Option<Rc<WifiControl>>,
+    setup_ssid: String,
+    station_stack: Stack<'static>,
     access_point_stack: Stack<'static>,
     access_point_shutdown: Rc<Signal<NoopRawMutex, u64>>,
 }
@@ -77,9 +92,13 @@ impl WifiPlugin {
         let access_point_stack = device
             .as_ref()
             .map_or(context.ip_stack, WifiDevice::access_point_stack);
+        let setup_ssid =
+            setup_access_point_ssid(device.as_ref().and_then(WifiDevice::station_mac_address));
         Self {
             radio: device.map(RadioControl::new),
             control: None,
+            setup_ssid,
+            station_stack: context.ip_stack,
             access_point_stack,
             access_point_shutdown: Rc::new(Signal::new()),
         }
@@ -104,6 +123,8 @@ impl Plugin for WifiPlugin {
             radio,
             context.storage().clone(),
             Rc::clone(&self.access_point_shutdown),
+            self.setup_ssid.clone(),
+            self.station_stack,
         ));
         let entry = WebEntry {
             id: "wifi",
@@ -198,7 +219,11 @@ impl Plugin for WifiPlugin {
         );
         let dhcp = cancellable(context.task_token(), Box::pin(run_dhcp(stack)));
         let dns = cancellable(context.task_token(), Box::pin(run_captive_dns(stack)));
-        let tasks = [policy, dhcp, dns]
+        let announce = cancellable(
+            context.task_token(),
+            Box::pin(announce_station_address(self.station_stack)),
+        );
+        let tasks = [policy, dhcp, dns, announce]
             .map(run_wifi_runtime)
             .into_iter()
             .collect::<Result<alloc::vec::Vec<_>, _>>()
@@ -357,7 +382,21 @@ async fn run_captive_dns(stack: Stack<'static>) {
     }
 }
 
-#[embassy_executor::task(pool_size = 3)]
+/// Writes the online console line each time the station's network gives it an address.
+async fn announce_station_address(stack: Stack<'static>) {
+    loop {
+        stack.wait_config_up().await;
+        if let Some(config) = stack.config_v4() {
+            console::SetupLine::Online {
+                address: config.address.address(),
+            }
+            .emit();
+        }
+        stack.wait_config_down().await;
+    }
+}
+
+#[embassy_executor::task(pool_size = 4)]
 async fn run_wifi_runtime(runtime: BoxedWifiRuntime) {
     runtime.await;
 }
@@ -421,6 +460,15 @@ mod tests {
             status(StationState::Disconnected, AccessPointState::Stopped),
             json!({"state": "off", "label": {"zh": "未连接", "en": "Not connected"}})
         );
+    }
+
+    #[test]
+    fn the_setup_hotspot_is_named_after_the_station_mac() {
+        assert_eq!(
+            super::setup_access_point_ssid(Some([0x3c, 0x84, 0x27, 0xa1, 0xb2, 0xc3])),
+            "Barracuda-B2C3"
+        );
+        assert_eq!(super::setup_access_point_ssid(None), "Barracuda Setup");
     }
 
     #[test]
