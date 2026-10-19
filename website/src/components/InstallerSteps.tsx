@@ -134,115 +134,113 @@ export function Frame({
   ];
 
   return (
-    <div className="ob-scene">
-      <div className="bc ob-root" data-theme={theme}>
-        <header className="bc-topbar">
-          <a className="bc-brand" href={page(lang, "/")}>
-            <BrandMark />
-            <span className="bc-wordmark">Barracuda</span>
-          </a>
-          <span className="bc-crumb">/</span>
-          <span className="bc-crumb--current">{t.crumb}</span>
-          <span style={{ flex: "1 1 auto" }} />
-          <a className="bc-button bc-button--ghost bc-button--sm" href={docs(lang, "get-started/installation")}>
-            <Icon name="help" />
-            <span className="ob-hide-sm">{t.help}</span>
-          </a>
-          <div className="bc-menu-anchor ob-hide-sm" ref={menu}>
-            <button
-              className="bc-button bc-button--ghost bc-button--sm"
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={langOpen}
-              onClick={() => setLangOpen(!langOpen)}
-            >
-              <Icon name="languages" />
-              {t.languageName}
-              <Icon name="chevronDown" />
-            </button>
-            {langOpen && (
-              <div className="bc-menu" role="menu" aria-label={t.language}>
-                <a className="bc-menu-item" role="menuitemradio" aria-checked={lang === "zh"} href={page("zh", "/install/")} lang="zh-Hans">
-                  <span style={{ flex: 1 }}>简体中文</span>
-                  {lang === "zh" && <Icon name="check" />}
-                </a>
-                <a className="bc-menu-item" role="menuitemradio" aria-checked={lang === "en"} href={page("en", "/install/")} lang="en">
-                  <span style={{ flex: 1 }}>English</span>
-                  {lang === "en" && <Icon name="check" />}
-                </a>
-              </div>
-            )}
-          </div>
-          <div className="bc-segmented" role="group" aria-label={t.theme.label}>
-            {themes.map(([pref, icon, label]) => (
-              <button key={pref} type="button" aria-pressed={themePref === pref} aria-label={label} onClick={() => chooseTheme(pref)}>
-                <Icon name={icon} />
-              </button>
-            ))}
-          </div>
-        </header>
-
-        <main className="ob-page">
-          <nav className="ob-rail" aria-label={t.rail.label}>
-            <ol className="bc-stepper bc-stepper--collapse">
-              {labels.map((label, index) => {
-                const number = index + 1;
-                const done = number < step;
-                return (
-                  <li
-                    key={label}
-                    className={done ? "bc-stepper__item bc-stepper__item--done" : "bc-stepper__item"}
-                    aria-current={number === step ? "step" : undefined}
-                  >
-                    <span className="bc-stepper__mark">{done ? <Icon name="check" /> : number}</span>
-                    <span className="bc-stepper__label">{label}</span>
-                  </li>
-                );
-              })}
-            </ol>
-            <div className="ob-rail__sep ob-hide-sm" />
-            <dl className="bc-kv ob-hide-sm">
-              <dt>{t.rail.board}</dt>
-              <dd>{summary.board}</dd>
-              <dt>{t.rail.chip}</dt>
-              <dd className="bc-mono">{summary.chip}</dd>
-              <dt>{t.rail.version}</dt>
-              <dd className="bc-mono">{summary.version}</dd>
-              <dt>{t.rail.device}</dt>
-              <dd className="bc-mono">{summary.device}</dd>
-            </dl>
-          </nav>
-
-          <div className="ob-content">
-            {noSerial && (
-              <ErrorAlert title={t.noSerial.title}>
-                <div className="bc-small">{t.noSerial.body}</div>
-                <div className="ob-inline" style={{ marginTop: "var(--space-2)" }}>
-                  <button className="bc-button bc-button--outline bc-button--sm" type="button" onClick={copyLink}>
-                    <Icon name="copy" />
-                    {t.noSerial.copy}
-                  </button>
-                </div>
-              </ErrorAlert>
-            )}
-            {children}
-          </div>
-        </main>
-
-        {toast && (
-          <div className="bc-toaster">
-            <div className="bc-toast bc-toast--success" role="status">
-              <Icon name="circleCheck" className="bc-toast__icon" />
-              <div className="bc-toast__body">
-                <span className="bc-toast__title">{toast}</span>
-              </div>
-              <button className="bc-toast__close" type="button" aria-label="×" onClick={closeToast}>
-                <Icon name="x" />
-              </button>
+    <div className="bc ob-root" data-theme={theme}>
+      <header className="bc-topbar">
+        <a className="bc-brand" href={page(lang, "/")}>
+          <BrandMark />
+          <span className="bc-wordmark">Barracuda</span>
+        </a>
+        <span className="bc-crumb">/</span>
+        <span className="bc-crumb--current">{t.crumb}</span>
+        <span style={{ flex: "1 1 auto" }} />
+        <a className="bc-button bc-button--ghost bc-button--sm" href={docs(lang, "get-started/installation")}>
+          <Icon name="help" />
+          <span className="ob-hide-sm">{t.help}</span>
+        </a>
+        <div className="bc-menu-anchor ob-hide-sm" ref={menu}>
+          <button
+            className="bc-button bc-button--ghost bc-button--sm"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={langOpen}
+            onClick={() => setLangOpen(!langOpen)}
+          >
+            <Icon name="languages" />
+            {t.languageName}
+            <Icon name="chevronDown" />
+          </button>
+          {langOpen && (
+            <div className="bc-menu" role="menu" aria-label={t.language}>
+              <a className="bc-menu-item" role="menuitemradio" aria-checked={lang === "zh"} href={page("zh", "/install/")} lang="zh-Hans">
+                <span style={{ flex: 1 }}>简体中文</span>
+                {lang === "zh" && <Icon name="check" />}
+              </a>
+              <a className="bc-menu-item" role="menuitemradio" aria-checked={lang === "en"} href={page("en", "/install/")} lang="en">
+                <span style={{ flex: 1 }}>English</span>
+                {lang === "en" && <Icon name="check" />}
+              </a>
             </div>
+          )}
+        </div>
+        <div className="bc-segmented" role="group" aria-label={t.theme.label}>
+          {themes.map(([pref, icon, label]) => (
+            <button key={pref} type="button" aria-pressed={themePref === pref} aria-label={label} onClick={() => chooseTheme(pref)}>
+              <Icon name={icon} />
+            </button>
+          ))}
+        </div>
+      </header>
+
+      <main className="ob-page">
+        <nav className="ob-rail" aria-label={t.rail.label}>
+          <ol className="bc-stepper bc-stepper--collapse">
+            {labels.map((label, index) => {
+              const number = index + 1;
+              const done = number < step;
+              return (
+                <li
+                  key={label}
+                  className={done ? "bc-stepper__item bc-stepper__item--done" : "bc-stepper__item"}
+                  aria-current={number === step ? "step" : undefined}
+                >
+                  <span className="bc-stepper__mark">{done ? <Icon name="check" /> : number}</span>
+                  <span className="bc-stepper__label">{label}</span>
+                </li>
+              );
+            })}
+          </ol>
+          <div className="ob-rail__sep ob-hide-sm" />
+          <dl className="bc-kv ob-hide-sm">
+            <dt>{t.rail.board}</dt>
+            <dd>{summary.board}</dd>
+            <dt>{t.rail.chip}</dt>
+            <dd className="bc-mono">{summary.chip}</dd>
+            <dt>{t.rail.version}</dt>
+            <dd className="bc-mono">{summary.version}</dd>
+            <dt>{t.rail.device}</dt>
+            <dd className="bc-mono">{summary.device}</dd>
+          </dl>
+        </nav>
+
+        <div className="ob-content">
+          {noSerial && (
+            <ErrorAlert title={t.noSerial.title}>
+              <div className="bc-small">{t.noSerial.body}</div>
+              <div className="ob-inline" style={{ marginTop: "var(--space-2)" }}>
+                <button className="bc-button bc-button--outline bc-button--sm" type="button" onClick={copyLink}>
+                  <Icon name="copy" />
+                  {t.noSerial.copy}
+                </button>
+              </div>
+            </ErrorAlert>
+          )}
+          {children}
+        </div>
+      </main>
+
+      {toast && (
+        <div className="bc-toaster">
+          <div className="bc-toast bc-toast--success" role="status">
+            <Icon name="circleCheck" className="bc-toast__icon" />
+            <div className="bc-toast__body">
+              <span className="bc-toast__title">{toast}</span>
+            </div>
+            <button className="bc-toast__close" type="button" aria-label="×" onClick={closeToast}>
+              <Icon name="x" />
+            </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
