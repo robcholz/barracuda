@@ -25,6 +25,11 @@
 > Flash a board from your browser and test ideas on it live.
 > [Get started](https://barracuda-os.mintlify.site/get-started/installation).
 
+> [!WARNING]
+> Barracuda is in early, rapid development. Plugin contracts, board files,
+> settings, and the device APIs can change from one commit to the next, and
+> there is no stable release yet. If you build on Barracuda, pin a commit.
+
 <h1></h1>
 
 ## About
