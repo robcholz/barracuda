@@ -75,6 +75,34 @@ while one is mounted under `/workspace/removable`. The tree and pane rules
 come with the page, added while it is open: the shell's stylesheet is held to
 its flash budget and does not carry them.
 
+## Live Editor
+
+[Live Editor](/apps/live-editor) runs on an HTTPS site, and a browser does not
+let such a page call `http://` addresses on the local network. It opens the
+device's `/portal/#files` in a window instead, and the two windows talk with
+`postMessage`; the page then installs the app with the routes above
+(`resources/web/incoming.ts`).
+
+1. Opened by another window, the page posts
+   `{"type": "barracuda/ready", "v": 1}` to it.
+2. Live Editor answers with
+   `{"type": "barracuda/app", "v": 1, "id", "name", "version", "files"}`,
+   `files` mapping each file name to its bytes as an `ArrayBuffer`: at most 32
+   files and 2 MiB, `app.json` among them. The page takes it only from the
+   window that opened it, and shows that window's origin with the app, its
+   version, and the installed version it replaces.
+3. Nothing changes until the person chooses **安装到设备** (**Install on
+   device**). The page then writes the files into
+   `/workspace/media/apps/.<id>.bapp/`, which the app manager skips, moves an
+   installed `<id>.bapp/` aside, renames the new directory into place and
+   deletes the old one, so the app manager never sees half an app
+   ([App format](/plugins/app-manager/app-format)).
+4. The page reports each step to that origin as
+   `{"type": "barracuda/status", "v": 1, "id", "state", "message"?}`,
+   `state` being `review`, `writing`, `installed`, `refused` (the person did
+   not install it) or `failed` (with the device's `message`; the person can
+   try again).
+
 ## Retained registrations
 
 The Plugin retains its portal entry and six route registrations for its

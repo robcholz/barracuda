@@ -26,3 +26,6 @@ trace.json
 # Repository-wide frontend tooling
 node_modules/
 coverage/
+
+# Live Editor build-site.sh cache
+.live-editor-build/

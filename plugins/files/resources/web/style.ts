@@ -1,6 +1,7 @@
 /**
- * The design system's Files rules (`.bc-tree`, `.bc-pane`, `.bc-lines`) and the menu, spinner and
- * shimmer parts this page shares with the design's chat sessions. The shell's stylesheet is held
+ * The design system's Files rules (`.bc-tree`, `.bc-pane`, `.bc-lines`), the menu, spinner and
+ * shimmer parts this page shares with the design's chat sessions, and the Card progress line the
+ * Live Editor card shows while it writes. The shell's stylesheet is held
  * to the device's flash budget and carries none of them, so the page adds them while it is open.
  * Copied from the design system's `components/bundle.css`; keep them in step.
  */
@@ -18,6 +19,8 @@ export const STYLE =
   ".bc-menu-item--destructive{color:var(--destructive)}" +
   ".bc-menu-item--destructive:hover,.bc-menu-item--destructive:active{background:var(--destructive-surface)}" +
   ".bc-menu--confirm{width:256px;padding:12px;display:flex;flex-direction:column;gap:12px}" +
+  ".bc-card--progress{position:relative;overflow:hidden}" +
+  '.bc-card--progress::after{content:"";position:absolute;left:0;bottom:0;height:2px;width:var(--progress,0%);background:var(--signal)}' +
   ".bc-spinner{animation:bc-spin .8s linear infinite}" +
   ".bc-shimmer{color:transparent;background:linear-gradient(90deg,var(--muted-foreground) 35%,var(--foreground) 50%,var(--muted-foreground) 65%) 0 0/300% 100%;-webkit-background-clip:text;background-clip:text;animation:bc-sweep 2s linear infinite}" +
   "@keyframes bc-spin{to{transform:rotate(360deg)}}" +

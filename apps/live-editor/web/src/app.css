@@ -1,0 +1,175 @@
+/* Live Editor's layout glue over the design system (ds/bundle.css): grid placement, widths and
+   the few patterns the design system has no component for yet (the diff, the console rows, the
+   preview device). Colours, radii, type and spacing all come from tokens. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--background);
+}
+
+/* Syntax colours: the web chat's .bc-tok-* palette (imessage-web markdown/style.ts). */
+.bc-tok-k { color: var(--red-900); }
+.bc-tok-f { color: var(--blue-900); }
+.bc-tok-s { color: var(--lime-900); }
+.bc-tok-n { color: var(--amber-900); }
+.bc-tok-c { color: var(--muted-foreground); font-style: italic; }
+
+/* The shell: the AppShell, filling the window. */
+.le-app { height: 100vh; min-height: 640px; flex-wrap: nowrap; overflow: hidden; }
+.le-side { flex: none; height: 100%; min-height: 0; box-sizing: border-box; overflow-x: hidden; overflow-y: auto; }
+.le-group { display: flex; flex-direction: column; gap: 2px; }
+.le-bottom { margin-top: auto; }
+/* Chats have no icon, so a collapsed rail leaves them out. */
+.bc-sidebar--collapsed .le-chats { display: none; }
+.le-main { min-height: 0; min-width: 0; container-type: inline-size; }
+.le-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.le-grow { flex: 1 1 auto; }
+.le-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.le-pad { padding: 16px var(--space-5); }
+.le-stack { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.le-scrim { position: fixed; inset: 0; z-index: 15; }
+.le-menu .bc-menu-item { white-space: nowrap; }
+.le-menu-note { margin: 0; padding: 6px 8px 4px; border-top: 1px solid var(--border); font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.le-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.le-phone, .le-phone-list { display: none; }
+
+/* Tooltips show in a layer above the page (ui/tooltips.ts): the columns would clip them in place.
+   The design system's rules still decide when one shows; in place it is only invisible. */
+.le-app .bc-tooltip { visibility: hidden; }
+.bc-tooltip.le-float-tip { position: fixed; right: auto; bottom: auto; transform: none; z-index: 1000; display: block; visibility: visible; }
+.bc-tooltip.le-float-tip[hidden] { display: none; }
+.le-install { position: relative; }
+.le-crumb { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.le-views-toggle { gap: 2px; flex-wrap: nowrap; }
+/* Narrow places keep one line: labels give way to their icons. */
+@container (max-width: 900px) {
+  .le-main .le-wide { display: none; }
+  .le-install:hover > .le-install-tip,
+  .le-install:focus-visible > .le-install-tip { display: block; }
+}
+
+/* The workspace: the chat, a resizable divider, and the views. */
+.le-work { flex: 1 1 auto; min-height: 0; display: grid; }
+.le-chat { min-width: 0; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
+.le-thread { width: 100%; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+.le-dock-thread { gap: 6px; }
+.le-chat .bc-chat-log { min-height: 0; overflow-anchor: none; }
+.le-views { min-width: 0; min-height: 0; display: flex; overflow-x: auto; }
+.le-view { flex: 1 1 0; min-width: 300px; min-height: 0; border-left: 1px solid var(--border); container-type: inline-size; }
+.le-view--first { border-left: 0; }
+.le-view .bc-pane__body { overflow: auto; }
+.le-view > .bc-pane__bar { flex-wrap: nowrap; min-width: 0; }
+.le-view > .bc-pane__bar > .bc-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.le-bar-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow: hidden; white-space: nowrap; }
+@container (max-width: 480px) {
+  .le-chat .bc-chat-log { padding: var(--space-4); }
+  .le-chat .bc-chat-dock { padding: 0 var(--space-4) var(--space-4); }
+}
+@container (max-width: 420px) { .le-view .le-wide { display: none; } }
+/* A pane too narrow for its title keeps its controls; the close button still names it. */
+@container (max-width: 360px) {
+  .le-view .le-pane-title { display: none; }
+  .le-view .le-bar-text > .bc-caption { display: none; }
+}
+/* A view the person asked for, already open: its bar flashes once. */
+@keyframes le-flash { from { background: var(--muted-active); } to { background: transparent; } }
+.le-flash > .bc-pane__bar { animation: le-flash 0.9s ease-out; }
+/* The resizable divider between the chat and the views (shadcn's ResizableHandle), drawn from tokens. */
+.le-handle { position: relative; width: 1px; background: var(--border); cursor: col-resize; }
+.le-handle::after { content: ""; position: absolute; inset: 0 -4px; }
+.le-grip { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1; display: flex; align-items: center; justify-content: center; width: 12px; height: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--sidebar); color: var(--muted-foreground); }
+.le-grip .bc-icon { width: 10px; height: 10px; }
+
+/* Chat: markdown in replies keeps the reply's type. */
+.le-reply p { margin: 0 0 8px; }
+.le-reply p:last-child { margin-bottom: 0; }
+.le-reply ul, .le-reply ol { margin: 0 0 8px; padding-left: 20px; }
+.le-reply pre { margin: 0 0 8px; }
+
+/* Code: CodeMirror inside the pane, drawn from tokens. */
+.le-editor { flex: 1 1 auto; min-height: 0; display: flex; }
+.le-editor .cm-editor { flex: 1 1 auto; min-width: 0; height: 100%; background: var(--background); color: var(--foreground); font-size: 13px; }
+.le-editor .cm-editor.cm-focused { outline: none; }
+.le-editor .cm-scroller { font-family: var(--font-mono); line-height: 20px; }
+.le-editor .cm-gutters { background: var(--background); border-right: 0; color: var(--muted-foreground); }
+.le-editor .cm-activeLine, .le-editor .cm-activeLineGutter { background: var(--muted); }
+.le-editor .cm-content { caret-color: var(--foreground); padding: 12px 0 24px; }
+.le-editor .cm-cursor { border-left-color: var(--foreground); }
+.le-editor .cm-selectionBackground, .le-editor .cm-focused .cm-selectionBackground { background: var(--muted-active) !important; }
+.le-editor .cm-searchMatch { background: var(--warning-surface); box-shadow: 0 0 0 1px var(--warning-border); border-radius: 2px; }
+.le-editor .cm-searchMatch-selected { background: var(--warning-border); }
+.le-editor .cm-lintRange-error { background-image: none; text-decoration: underline wavy var(--destructive); text-decoration-thickness: 1px; text-underline-offset: 4px; }
+.le-editor .cm-tooltip { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--background); color: var(--foreground); box-shadow: var(--shadow-xs); }
+.le-editor .cm-panels { display: none; }
+@keyframes le-flash-line { from { background: var(--warning-surface); } to { background: var(--muted); } }
+.le-editor .le-line--flash { animation: le-flash-line 1.2s ease-out; }
+
+/* Diff: no component yet. Added lines on success-surface, removed on destructive-surface. */
+.le-diff { display: grid; grid-template-columns: 36px 36px 18px minmax(0, 1fr); border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; line-height: 20px; }
+.le-diff > span { white-space: pre-wrap; overflow-wrap: anywhere; padding-right: 8px; }
+.le-diff .n { text-align: right; color: var(--muted-foreground); user-select: none; }
+.le-diff .s { text-align: center; user-select: none; }
+.le-diff .add { background: var(--success-surface); }
+.le-diff .s.add { color: var(--success); }
+.le-diff .del { background: var(--destructive-surface); }
+.le-diff .s.del { color: var(--destructive); }
+.le-diff .hunk { grid-column: 1 / -1; padding: 2px 12px; color: var(--muted-foreground); background: var(--sidebar); }
+
+/* Console: AI Elements' WebPreviewConsole (Vercel) inside a terminal Window — one row per log. */
+.le-logs { margin: 0; padding: 0; list-style: none; font-family: var(--font-mono); font-size: 13px; line-height: 21px; }
+.le-log { display: flex; gap: 12px; padding: 4px 18px; border-bottom: 1px solid var(--border); }
+.le-log > :last-child { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.le-log__time { flex: none; color: var(--muted-foreground); }
+.le-log__level { flex: none; width: 40px; color: var(--muted-foreground); }
+.le-log--system > :last-child { color: var(--muted-foreground); }
+.le-log--warn { background: var(--warning-surface); }
+.le-log--warn .le-log__level { color: var(--warning); }
+.le-log--error { background: var(--destructive-surface); }
+.le-log--error .le-log__level { color: var(--destructive); }
+
+/* The preview device: a picture of the app on its panel. What the app draws keeps its own colours. */
+.le-stage { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px 20px; }
+.le-bezel { position: relative; width: min(320px, 100%); aspect-ratio: 1; box-sizing: border-box; padding: 10px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 1px var(--border); }
+.le-bezel--square { border-radius: 28px; }
+.le-screen { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 50%; background: #09090b; color: #fafafa; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 11px; font-family: var(--font-sans); }
+.le-bezel--square .le-screen { border-radius: 18px; }
+.le-screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; image-rendering: auto; }
+.le-screen-text { position: relative; font-size: 13px; color: #a1a1aa; text-align: center; padding: 0 32px; }
+.le-screen-title { position: relative; font-size: 15px; font-weight: 500; }
+.le-key { position: relative; border: 0; padding: 8px 16px; border-radius: 6px; font: inherit; font-size: 14px; cursor: pointer; }
+.le-key:focus-visible { outline: 2px solid #fafafa; outline-offset: 2px; }
+.le-key--lime { background: #ccff00; color: #09090b; }
+.le-key--gray { background: #27272a; color: #fafafa; }
+/* notify.ask: the device's question card, over the app. */
+.le-ask { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 48px; background: rgba(9, 9, 11, 0.92); text-align: center; }
+
+/* Pages: settings and install. */
+.le-result { display: flex; flex-direction: column; gap: 4px; }
+.le-result > .bc-option-title { display: flex; align-items: center; gap: 8px; }
+.le-inline { display: flex; gap: 8px; }
+.le-inline > .bc-input { flex: 1 1 auto; min-width: 0; }
+/* RadioCard: a two-column radiogroup grid. */
+.le-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+.le-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+
+/* New app: a fresh conversation; the log and the dock share the page, so the composer sits mid-page. */
+.le-fresh { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.le-fresh > .bc-chat-log { overflow: visible; }
+.le-column { width: 100%; max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+.le-examples { margin-top: 24px; }
+.le-examples .bc-option-title { white-space: nowrap; }
+
+/* Phones: no sidebar (the design system's rule below 768px); the top bar leads back to the apps. */
+@media (max-width: 767px) {
+  .le-app { height: auto; overflow: visible; background: var(--background); }
+  .le-side, .le-desk, .le-handle { display: none; }
+  .le-phone { display: inline-flex; }
+  .le-phone-list { display: flex; flex-direction: column; }
+  .le-work { grid-template-columns: minmax(0, 1fr) !important; }
+  .le-chat { min-height: 640px; }
+  .le-views { flex-direction: column; overflow: visible; }
+  .le-view { min-height: 640px; border-left: 0; border-top: 1px solid var(--border); }
+  .le-cards, .le-pair { grid-template-columns: minmax(0, 1fr); }
+  .le-fresh { overflow: visible; }
+}

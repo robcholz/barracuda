@@ -59,5 +59,8 @@ Vercel 从这个仓库构建站点：
 - **Root Directory**：`website`
 - **Framework Preset**：Next.js（自动识别）
 - **Production branch**：`master`
+- **Include files outside the Root Directory in the Build Step**：打开（默认）
 
 每次推送到 `master` 都会部署站点，每个 pull request 都会得到一个预览链接。
+
+站点还在 `/editor/` 提供 [Live Editor](/zh/apps/live-editor)。`vercel.json` 在 `next build` 之前运行 `apps/live-editor/web/build-site.sh public/editor`：它在构建机器上安装 Rust 和 PocketJS，并把 Live Editor 构建到 `public/editor/`；这个目录不提交。本地的 `bun run build` 不包含 Live Editor。脚本做了什么，见 [Live Editor 内部实现](/zh/tools/live-editor)。

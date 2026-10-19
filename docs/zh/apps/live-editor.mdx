@@ -1,0 +1,108 @@
+---
+title: "Live Editor"
+description: "在浏览器里和智能体一起编写应用，像设备一样运行它，再把它安装到设备上。"
+---
+
+Live Editor 在浏览器里编写 Barracuda 应用。说出设备要做什么，它的智能体就编写屏幕和程序、构建它们，并在预览里检查结果；预览运行应用的方式与设备完全相同。应用可用后，把它发送到你网络里的设备。
+
+从官网顶栏，或在 [barracuda-os.vercel.app/editor](https://barracuda-os.vercel.app/editor/) 打开 Live Editor。也可以从检出中运行它：
+
+```sh
+bun install
+rustup target add wasm32-unknown-unknown
+POCKETJS_ROOT=~/src/pocketjs bun apps/live-editor/web/build.ts
+bun apps/live-editor/web/serve.ts
+```
+
+打开 `http://localhost:8790/`。构建视图编译器需要一个 PocketJS 检出，提交与[内置的 PocketJS](/zh/plugins/app-manager/pocketjs) 中写明的一致；构建产物见 [Live Editor 内部实现](/zh/tools/live-editor)。
+
+## 设置智能体
+
+打开 **Settings**，选择智能体使用的模型服务：
+
+| 服务 | 需要填写 |
+| --- | --- |
+| Anthropic | 你的 API 密钥和模型（默认 `claude-opus-5-5`） |
+| OpenAI compatible | 服务的基础 URL（例如 `https://api.example.com/v1`）、服务需要时的密钥，以及模型 |
+
+密钥保存在这个浏览器里，只发送给该服务。OpenAI 兼容服务必须接受来自 Live Editor 页面的请求（CORS）。
+
+两个开关决定智能体能自己走多远：
+
+- **Review before applying**：它的修改在 **Changes** 里等你应用。关闭后，修改在它这一轮结束时直接应用。
+- **Let Barracuda tap the preview**：它会点按预览来检查自己的修改。
+
+## 创建应用
+
+<Steps>
+  <Step title="开始">
+    在 **New app** 页描述应用并发送，或选择一个示例：Counter、Air quality、Light strip 或 Camera。先选好预览设备：圆形 360 × 360 屏幕，或方形 320 × 320 屏幕。
+  </Step>
+  <Step title="提出修改">
+    在聊天里和智能体对话。它会列出并读取应用的文件、修改它们、构建、查看并点按预览，最后说明改了什么、在预览里看到了什么。**Stop** 结束它这一轮。
+  </Step>
+  <Step title="审阅">
+    打开 **Changes** 查看每个文件的差异。在 **Preview** 里，**Before** 和 **After** 分别运行不含和包含这些修改的应用。**Apply** 保留修改，**Discard** 丢弃修改。
+  </Step>
+  <Step title="安装">
+    选择 **Install**，把应用发送到设备。见下文“安装到设备”。
+  </Step>
+</Steps>
+
+## 工作区
+
+聊天始终在中间；视图从顶栏打开，作为列排在它旁边。打开三个视图时（在笔记本屏幕上是两个），侧边栏收起为图标；也可以用 **Ctrl B**（**⌘ B**）自己收起和展开。
+
+| 视图 | 显示 |
+| --- | --- |
+| Preview | 预览设备上的应用。点按屏幕；**Back**、**Background** 和 **Terminate** 发送设备的生命周期事件；**Reset storage** 清空应用保存的内容；**Restart app** 重新打开它 |
+| Code | 应用的文件。可以直接编辑：每次编辑都会重新构建。构建失败时会标出问题并继续运行上一次的构建；**Ask Barracuda to fix** 把问题交给智能体 |
+| Changes | 等待审阅的智能体修改 |
+| Console | 程序打印的内容、它的错误、视图调用和生命周期事件，以及它用 `app.kv` 保存的内容 |
+
+每次应用的修改都会成为一个版本。顶栏的 **Versions** 可以恢复某个版本；较新的版本会保留，尚未成为版本的编辑会先保存为一个版本。
+
+应用的文件就是[应用格式](/zh/plugins/app-manager/app-format)中描述的那些：`app.json`、`main.lua`，有屏幕的应用还有 `app.tsx`、`app.d.ts` 和 `pocket.json`。**Settings** 还可以修改打开的应用的名称、版本和屏幕形状。应用 ID 是固定的：设备靠它识别应用。
+
+## 预览
+
+预览按工具链的方式构建应用，并在与设备相同的 UI 核心和 Lua 5.4 上运行它，使用设备的系统字体。它遵守[应用 API](/zh/plugins/app-manager/app-api) 中设备的规则：以 `app:active` 开始的同一个事件流，`app:background` 和 `app:terminate` 之后 1 秒的宽限期，以及 `app.kv` 和 `app.fs` 的限制。构建会像设备一样检查清单和程序的语法。
+
+有些东西只有设备才有：
+
+- 开发板软件包，例如 `light` 和 `camera`：在预览里 `require` 会失败。把它们写在 `permissions` 里，到设备上试用。
+- 预览里的 `app.fs` 只保存文本；二进制文件需要设备。
+- `notify.post` 显示为提示，`notify.ask` 在预览屏幕上显示它的卡片。
+
+程序运行 5 秒仍不回到 `app.events()` 时会被停止。
+
+## 安装到设备
+
+设备必须和你的电脑在同一网络中，并带有门户的 **文件** 页（`files` 插件）。
+
+<Steps>
+  <Step title="打开设备门户">
+    输入门户的地址，例如 `192.168.1.42:8787`，然后选择 **Open device portal**。门户的文件页会在 Live Editor 旁边的窗口中打开，Live Editor 把应用的文件交给它。
+  </Step>
+  <Step title="在门户窗口中安装">
+    门户会显示它收到了什么、来自哪个网页，以及它将替换的版本。在那里选择 **安装到设备**。
+  </Step>
+  <Step title="在设备上打开">
+    门户把应用写入 `media/apps/<id>.bapp/`，设备从这里运行应用；Live Editor 会显示它已安装。在设备的启动器中打开它。安装更新的版本会替换它。
+  </Step>
+</Steps>
+
+门户无法访问时，**Download** 会把应用的文件夹保存为 zip：解压后，在门户的 **文件** 中新建文件夹 `media/apps/<id>.bapp`，再把其中的文件上传进去。
+
+## 你的作品保存在哪里
+
+应用及其版本、对话和保存的数据以及设置都保存在这个浏览器为该页面提供的存储里。除了发给模型服务的请求和你发送到设备的应用，没有任何内容离开浏览器。
+
+<CardGroup cols={2}>
+  <Card title="应用格式" icon="box" href="/zh/plugins/app-manager/app-format">
+    文件、清单、Lua 程序和视图。
+  </Card>
+  <Card title="应用 API" icon="plug" href="/zh/plugins/app-manager/app-api">
+    应用在每台设备上都能使用什么。
+  </Card>
+</CardGroup>
