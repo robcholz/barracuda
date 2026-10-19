@@ -130,11 +130,13 @@ Settings form (`settings.ts`)
 - Validation runs on submit: an invalid field gets a red border and a message
   under it ("Enter the Bot Token."), focus moves to the first one, and nothing is
   sent. Typing clears the field's message. Empty optional fields are left out.
-- `submitJson(context, { endpoint, body, method?, timeoutMs?, success?, retry?, onError? })`
+- `submitJson(context, { endpoint, body, method?, timeoutMs?, success?, onAccepted?, retry?, onError? })`
   posts JSON (`redirect: "error"`, `cache: "no-store"`, 15 s timeout, aborted with
   the page) and toasts the outcome: 2xx "The device accepted the configuration"; 404 "Endpoint not available";
   other 4xx "Configuration rejected"; 5xx "Submission failed" (status in mono); no reply
   "No confirmation from the device" with "Retry" when `retry` is given (no disclaimer line).
+  `onAccepted(reply)` runs on a 2xx reply, before the toast, with its JSON body
+  (`null` for an empty `204`).
   Resolves `"accepted" | "rejected" | "failed" | "aborted"`; nothing is toasted
   after the page is gone. `settingsForm` uses it and allows one request at a time.
 - `fieldControl(field, lang)`: one field on its own, for pages that lay out

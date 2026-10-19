@@ -22,7 +22,7 @@ status = 404
 
 [[http]]
 path = "/api/wifi/status"
-body_contains = ['"station_configuration":false', '"station":{"state":"connected"}']
+body_contains = ['"station_configuration":false', '"station":{"state":"connected","address":"10.42.0.2"}']
 
 [[http]]
 method = "POST"

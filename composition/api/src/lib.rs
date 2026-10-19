@@ -3,7 +3,7 @@
 #![no_std]
 
 pub use barracuda_board::{BoardInfo, Hardware};
-pub use barracuda_platform::PlatformInfo;
+pub use barracuda_platform::{PlatformInfo, FIRMWARE_VERSION};
 
 /// Fixed identity of the independently selected Platform and Board.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

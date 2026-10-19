@@ -105,10 +105,11 @@ import {
   - 文本、URL 和密钥字段接受 `action: Node`，即输入框所在行中位于其后（以及“显示”/“隐藏”之后）的一个按钮，例如“验证”或“测试连接”。
 - 校验在提交时运行：无效字段会显示红色边框，并在下方显示一条消息
   （“请填写 Bot Token。”），焦点移到第一个无效字段，并且不发送任何内容。输入会清除该字段的消息。空的可选字段会被省略。
-- `submitJson(context, { endpoint, body, method?, timeoutMs?, success?, retry?, onError? })`
+- `submitJson(context, { endpoint, body, method?, timeoutMs?, success?, onAccepted?, retry?, onError? })`
   以 JSON 发送 POST（`redirect: "error"`、`cache: "no-store"`、15 秒超时，随页面一起中止），并以提示显示结果：2xx 为“设备已接受配置”；404 为“接口不可用”；
   其他 4xx 为“配置被拒绝”；5xx 为“提交失败”（状态码以等宽字体显示）；没有回复时为
   “未收到设备确认”，提供了 `retry` 时还带“重试”（没有免责说明行）。
+  `onAccepted(reply)` 在 2xx 回复时、显示提示之前运行，参数是回复的 JSON 内容（空的 `204` 为 `null`）。
   它 resolve 为 `"accepted" | "rejected" | "failed" | "aborted"`；页面离开后不再显示任何提示。`settingsForm` 使用它，并且同一时间只允许一个请求。
 - `fieldControl(field, lang)`：单独的一个字段，供自行布局控件的页面使用。
 - `fitColumns(count, min, gap)`（`grid.ts`）：一个 `grid-template-columns` 值，包含

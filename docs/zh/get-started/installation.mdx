@@ -1,18 +1,53 @@
 ---
 title: "安装"
-description: "安装开发板所需的工具链，然后克隆 Barracuda。"
+description: "在浏览器里把 Barracuda 刷进开发板，或者安装工具链自己构建。"
 ---
+
+ESP32 开发板可以直接在浏览器里安装，几分钟就好，什么都不用装。要构建自己的固件，或者运行 STM32 或主机开发板，就安装工具链。
+
+## 在浏览器里安装
+
+用桌面版 Chrome 或 Edge 打开[安装页](https://barracuda-os.vercel.app/zh/install/)，准备好开发板和一根能传数据的 USB 线。
+
+<Steps>
+  <Step title="选择开发板">
+    在列表里选中它，或者点击 **用 USB 识别芯片**，只显示和你的芯片一致的开发板。STM32 和主机开发板会改为显示下面「自己构建」一节里的命令。
+  </Step>
+  <Step title="下载固件">
+    选好版本，点击 **下载固件**。把下载的 `barracuda-<version>-<board>.tar.gz` 直接拖回页面，不用解压。安装页会检查这个文件是不是这块开发板、这个版本的，以及文件是否完整。
+  </Step>
+  <Step title="连接设备">
+    点击 **连接设备**，选择开发板的串口。安装页会检查芯片和闪存大小，以及开发板上是否已有 Barracuda。
+  </Step>
+  <Step title="写入固件">
+    保持 USB 连接，直到设备重启。
+  </Step>
+  <Step title="连接 Wi-Fi">
+    用手机扫码加入开发板的热点 `Barracuda-XXXX`，再在弹出的页面里选择家里的网络。
+  </Step>
+  <Step title="打开设备门户">
+    安装页会显示[设备门户](/zh/use/device-portal)在你网络中的地址。打开它，继续注册模型。
+  </Step>
+</Steps>
+
+开发板上已有 Barracuda 且分区相同时，**更新**会保留 Wi-Fi、模型与通道设置，**全新安装**会先清空整片闪存。开发板上是其他固件时，只能全新安装。
+
+<Note>
+  其他浏览器和手机无法访问 USB 串口，所以请用桌面版 Chrome 或 Edge 打开安装页。开发板连不上时，按住它的 BOOT 键再插上 USB。
+</Note>
+
+## 自己构建
 
 Barracuda 使用 Cargo 构建。插件会被编译进固件，所以你需要在自己的电脑上，用目标平台对应的 Rust 工具链进行构建。
 
-## 克隆仓库
+### 克隆仓库
 
 ```bash terminal
 git clone https://github.com/robcholz/barracuda
 cd barracuda
 ```
 
-## 安装工具链
+### 安装工具链
 
 先安装 [rustup](https://rustup.rs)。仓库在 `rust-toolchain.toml` 中固定了 Rust 1.98.1，主机开发板只需要这些。
 
@@ -46,7 +81,7 @@ cd barracuda
 
 你不必事先知道某个开发板需要哪种工具链。当你选择的开发板缺少工具链时，`cargo board select` 会打印出安装它的确切命令。
 
-## 选择开发板
+### 选择开发板
 
 ```bash terminal
 cargo board select

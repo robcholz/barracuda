@@ -3,12 +3,23 @@ import type { Copy } from "@/content/en";
 import { page } from "./links";
 
 /** Title, description and the other language's address for one page. */
-export function metadata(copy: Copy, which: "home" | "boards"): Metadata {
-  const path = which === "home" ? "/" : "/boards/";
+export function metadata(
+  copy: Copy,
+  which: "home" | "boards" | "install",
+): Metadata {
+  const path = ({ home: "/", boards: "/boards/", install: "/install/" } as const)[
+    which
+  ];
+  const { meta } = copy;
   return {
-    title: which === "home" ? copy.meta.title : copy.meta.boardsTitle,
-    description:
-      which === "home" ? copy.meta.description : copy.meta.boardsDescription,
+    title: { home: meta.title, boards: meta.boardsTitle, install: meta.installTitle }[
+      which
+    ],
+    description: {
+      home: meta.description,
+      boards: meta.boardsDescription,
+      install: meta.installDescription,
+    }[which],
     icons: { icon: "/favicon.svg" },
     alternates: {
       canonical: page(copy.lang, path),

@@ -419,6 +419,49 @@ pub struct ApplicationConfig {
     support_binaries: Vec<String>,
     #[serde(default)]
     launcher: Option<CommandDriver>,
+    #[serde(default)]
+    release: Option<ReleaseDriver>,
+}
+
+/// How a release turns the built application into the file it ships.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "driver", rename_all = "kebab-case")]
+pub enum ReleaseDriver {
+    /// The ELF itself, which flash tools place by its own load addresses.
+    Elf,
+    /// A Platform command that writes `{output}`, a raw image flashed at
+    /// `offset`.
+    Command(ReleaseCommand),
+}
+
+/// A command-backed release image and where it is flashed.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ReleaseCommand {
+    program: PathBuf,
+    #[serde(default)]
+    arguments: Vec<String>,
+    offset: u64,
+}
+
+impl ReleaseCommand {
+    /// Returns the workspace-relative executable path or command name.
+    #[must_use]
+    pub fn program(&self) -> &Path {
+        &self.program
+    }
+
+    /// Returns the argument templates passed without a shell.
+    #[must_use]
+    pub fn arguments(&self) -> &[String] {
+        &self.arguments
+    }
+
+    /// Returns the flash offset or address the written image starts at.
+    #[must_use]
+    pub const fn offset(&self) -> u64 {
+        self.offset
+    }
 }
 
 impl ApplicationConfig {
@@ -432,6 +475,13 @@ impl ApplicationConfig {
     #[must_use]
     pub const fn launcher(&self) -> Option<&CommandDriver> {
         self.launcher.as_ref()
+    }
+
+    /// Returns how a release packages the built application, if this
+    /// Platform publishes firmware.
+    #[must_use]
+    pub const fn release(&self) -> Option<&ReleaseDriver> {
+        self.release.as_ref()
     }
 }
 

@@ -24,6 +24,14 @@ pub use wifi::{
     UnavailableWifiDevice, VisibleNetwork, WifiCapabilities, WifiDevice,
 };
 
+/// The firmware release this build belongs to: `BARRACUDA_VERSION` at build
+/// time, which the release workflow sets from its tag (`0.1.0` for `v0.1.0`),
+/// or `dev` for any other build.
+pub const FIRMWARE_VERSION: &str = match option_env!("BARRACUDA_VERSION") {
+    Some(version) => version,
+    None => "dev",
+};
+
 /// Fixed identity of one compiled execution Platform.
 ///
 /// Concrete Platform manifests provide these semantic values. The selected

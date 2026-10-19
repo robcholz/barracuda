@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use barracuda_platform_config::CommandDriver;
+use barracuda_platform_config::{CommandDriver, ReleaseCommand};
 
 pub(crate) struct DriverContext<'a> {
     pub(crate) workspace: &'a Path,
@@ -14,6 +14,14 @@ pub(crate) struct DriverContext<'a> {
     pub(crate) image: Option<&'a Path>,
     pub(crate) offset: Option<u64>,
     pub(crate) size: Option<usize>,
+    pub(crate) release: Option<ReleaseContext<'a>>,
+}
+
+/// The inputs a Platform's release command reads and the file it writes.
+pub(crate) struct ReleaseContext<'a> {
+    pub(crate) application: &'a Path,
+    pub(crate) output: &'a Path,
+    pub(crate) flash_size: Option<&'a str>,
 }
 
 pub(crate) struct PreparedCommand {
@@ -22,11 +30,37 @@ pub(crate) struct PreparedCommand {
 }
 
 pub(crate) fn prepare(driver: &CommandDriver, context: DriverContext<'_>) -> PreparedCommand {
-    let program = resolve_program(driver.program(), context.platform);
-    let arguments = driver
-        .arguments()
+    prepare_program(driver.program(), driver.arguments(), &context)
+}
+
+/// Prepares a release command, which must find every value it names.
+pub(crate) fn prepare_release(
+    command: &ReleaseCommand,
+    context: DriverContext<'_>,
+) -> Result<PreparedCommand, String> {
+    let prepared = prepare_program(command.program(), command.arguments(), &context);
+    if let Some(argument) = prepared
+        .arguments
         .iter()
-        .map(|argument| OsString::from(expand(argument, &context)))
+        .map(|argument| argument.to_string_lossy())
+        .find(|argument| argument.contains("{flash-size}"))
+    {
+        return Err(format!(
+            "release argument `{argument}` needs the Board's flash size; declare `hardware.flash-size` in its board.yml"
+        ));
+    }
+    Ok(prepared)
+}
+
+fn prepare_program(
+    program: &Path,
+    arguments: &[String],
+    context: &DriverContext<'_>,
+) -> PreparedCommand {
+    let program = resolve_program(program, context.platform);
+    let arguments = arguments
+        .iter()
+        .map(|argument| OsString::from(expand(argument, context)))
         .collect();
     PreparedCommand { program, arguments }
 }
@@ -97,6 +131,14 @@ fn expand(template: &str, context: &DriverContext<'_>) -> String {
     if let Some(size) = context.size {
         expanded = expanded.replace("{size}", &size.to_string());
     }
+    if let Some(release) = &context.release {
+        expanded = expanded
+            .replace("{application}", &release.application.display().to_string())
+            .replace("{output}", &release.output.display().to_string());
+        if let Some(flash_size) = release.flash_size {
+            expanded = expanded.replace("{flash-size}", flash_size);
+        }
+    }
     expanded
 }
 
@@ -125,6 +167,7 @@ mod tests {
                 image: Some(Path::new("/workspace/system.img")),
                 offset: Some(0x4000),
                 size: Some(8192),
+                release: None,
             },
         );
 

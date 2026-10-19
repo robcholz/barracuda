@@ -1,15 +1,22 @@
 use alloc::{boxed::Box, rc::Rc, string::String, string::ToString, vec::Vec};
-use core::{cell::Cell, future::Future, net::IpAddr, pin::Pin};
+use core::{
+    cell::Cell,
+    future::Future,
+    net::{IpAddr, Ipv4Addr},
+    pin::Pin,
+};
 
 use barracuda_platform::{
     AccessPointConfiguration, AccessPointState, StationConfiguration, StationState, VisibleNetwork,
     WifiCapabilities, WifiDevice,
 };
 use barracuda_plugin::manager::PluginStorage;
+use embassy_net::Stack;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex, signal::Signal};
 use serde::{Deserialize, Serialize};
 
-use crate::{SETUP_AP_ADDRESS, SETUP_AP_PASSWORD, SETUP_AP_SSID};
+use crate::console::SetupLine;
+use crate::{SETUP_AP_ADDRESS, SETUP_AP_PASSWORD};
 
 const CONFIGURATION_STORAGE_KEY: &str = "station";
 
@@ -315,6 +322,7 @@ fn valid_configuration(ssid: &str, password: &str) -> bool {
 }
 
 trait WifiService {
+    fn setup_ssid(&self) -> &str;
     fn capabilities(&self) -> WifiCapabilities;
     fn status(&self) -> WifiStatus;
     fn initialize(&self) -> WifiControlFuture<'_, ()>;
@@ -337,6 +345,7 @@ trait WifiService {
 struct ScopedWifiService<Storage: PluginStorage> {
     radio: RadioControl,
     storage: Storage,
+    setup_ssid: String,
     operation: Mutex<NoopRawMutex, ()>,
     initialized: Cell<bool>,
     access_point_generation: Cell<u64>,
@@ -348,15 +357,43 @@ impl<Storage: PluginStorage> ScopedWifiService<Storage> {
         radio: RadioControl,
         storage: Storage,
         access_point_shutdown: Rc<Signal<NoopRawMutex, u64>>,
+        setup_ssid: String,
     ) -> Self {
         Self {
             radio,
             storage,
+            setup_ssid,
             operation: Mutex::new(()),
             initialized: Cell::new(false),
             access_point_generation: Cell::new(0),
             access_point_shutdown,
         }
+    }
+
+    /// Joins `ssid`, writing the connecting and failed console lines.
+    async fn connect_station(&self, ssid: &str, password: &str) -> Result<(), WifiControlError> {
+        SetupLine::Connecting { ssid }.emit();
+        let result = self.radio.connect_station(ssid, password).await;
+        if let Err(error) = &result {
+            SetupLine::Failed {
+                ssid,
+                reason: error.kind(),
+            }
+            .emit();
+        }
+        result
+    }
+
+    /// Opens the setup access point, writing the hotspot console line.
+    async fn start_setup_access_point(&self) -> Result<(), WifiControlError> {
+        self.radio
+            .start_access_point(&self.setup_ssid, SETUP_AP_PASSWORD)
+            .await?;
+        SetupLine::Hotspot {
+            ssid: &self.setup_ssid,
+        }
+        .emit();
+        Ok(())
     }
 
     fn next_access_point_generation(&self) -> u64 {
@@ -395,7 +432,6 @@ impl<Storage: PluginStorage> ScopedWifiService<Storage> {
         match self.load_configuration().await {
             Ok(Some(configuration)) => {
                 match self
-                    .radio
                     .connect_station(&configuration.ssid, &configuration.password)
                     .await
                 {
@@ -418,12 +454,13 @@ impl<Storage: PluginStorage> ScopedWifiService<Storage> {
             }
         }
 
-        self.radio
-            .start_access_point(SETUP_AP_SSID, SETUP_AP_PASSWORD)
-            .await?;
+        self.start_setup_access_point().await?;
         self.next_access_point_generation();
         self.initialized.set(true);
-        log::info!("started Wi-Fi provisioning access point {SETUP_AP_SSID}");
+        log::info!(
+            "started Wi-Fi provisioning access point {}",
+            self.setup_ssid
+        );
         Ok(())
     }
 
@@ -432,11 +469,7 @@ impl<Storage: PluginStorage> ScopedWifiService<Storage> {
     }
 
     async fn keep_setup_access_point_available(&self) {
-        match self
-            .radio
-            .start_access_point(SETUP_AP_SSID, SETUP_AP_PASSWORD)
-            .await
-        {
+        match self.start_setup_access_point().await {
             Ok(()) => {
                 self.next_access_point_generation();
             }
@@ -446,6 +479,10 @@ impl<Storage: PluginStorage> ScopedWifiService<Storage> {
 }
 
 impl<Storage: PluginStorage> WifiService for ScopedWifiService<Storage> {
+    fn setup_ssid(&self) -> &str {
+        &self.setup_ssid
+    }
+
     fn capabilities(&self) -> WifiCapabilities {
         self.radio.capabilities()
     }
@@ -490,6 +527,7 @@ impl<Storage: PluginStorage> WifiService for ScopedWifiService<Storage> {
             let _operation = self.operation.lock().await;
             self.ensure_initialized().await?;
             self.radio.start_access_point(ssid, password).await?;
+            SetupLine::Hotspot { ssid }.emit();
             self.next_access_point_generation();
             Ok(())
         })
@@ -518,11 +556,16 @@ impl<Storage: PluginStorage> WifiService for ScopedWifiService<Storage> {
                 return Ok(());
             }
             if !valid_configuration(ssid, password) {
+                SetupLine::Failed {
+                    ssid,
+                    reason: WifiControlErrorKind::InvalidConfiguration,
+                }
+                .emit();
                 return Err(WifiControlError::invalid_configuration());
             }
             let _operation = self.operation.lock().await;
             self.ensure_initialized().await?;
-            if let Err(error) = self.radio.connect_station(ssid, password).await {
+            if let Err(error) = self.connect_station(ssid, password).await {
                 self.keep_setup_access_point_available().await;
                 return Err(error);
             }
@@ -551,10 +594,7 @@ impl<Storage: PluginStorage> WifiService for ScopedWifiService<Storage> {
                 .await
                 .map_err(WifiControlError::storage)?;
             let disconnect = self.radio.disconnect_station().await;
-            let access_point = self
-                .radio
-                .start_access_point(SETUP_AP_SSID, SETUP_AP_PASSWORD)
-                .await;
+            let access_point = self.start_setup_access_point().await;
             if access_point.is_ok() {
                 self.next_access_point_generation();
             }
@@ -579,6 +619,7 @@ impl<Storage: PluginStorage> WifiService for ScopedWifiService<Storage> {
 /// Typed Plugin capability owning Wi-Fi policy, persistence, and AP/STA control.
 pub struct WifiControl {
     service: Rc<dyn WifiService>,
+    station_stack: Stack<'static>,
 }
 
 impl WifiControl {
@@ -586,14 +627,32 @@ impl WifiControl {
         radio: RadioControl,
         storage: Storage,
         access_point_shutdown: Rc<Signal<NoopRawMutex, u64>>,
+        setup_ssid: String,
+        station_stack: Stack<'static>,
     ) -> Self {
         Self {
             service: Rc::new(ScopedWifiService::new(
                 radio,
                 storage,
                 access_point_shutdown,
+                setup_ssid,
             )),
+            station_stack,
         }
+    }
+
+    /// Returns the name of this device's open setup access point.
+    #[must_use]
+    pub fn setup_ssid(&self) -> &str {
+        self.service.setup_ssid()
+    }
+
+    /// Returns the station's IPv4 address while its network has given it one.
+    #[must_use]
+    pub fn station_address(&self) -> Option<Ipv4Addr> {
+        self.station_stack
+            .config_v4()
+            .map(|config| config.address.address())
     }
 
     /// Returns the selected Platform's supported operations.

@@ -7,8 +7,10 @@ use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use barracuda_board_config::{parse, read_selected_board};
-use barracuda_platform_config::{resolve_board_platform, FlashDriver, LayoutDriver};
+use barracuda_board_config::{parse, read_selected_board, BoardDefinition};
+use barracuda_platform_config::{
+    resolve_board_platform, FlashDriver, LayoutDriver, PlatformDefinition,
+};
 use barracuda_plugin::manifest::{parse as parse_plugin_manifest, ManifestError};
 use barracuda_vfs::{MountOptions, Vfs};
 use barracuda_vfs_fat::FatFs;
@@ -23,8 +25,10 @@ use serde::Deserialize;
 
 mod command;
 mod flash;
+mod package;
 
 use flash::{FlashRequest, PlatformFlash};
+pub use package::{package_selected, Package, PackagePart, PACKAGE_OUTPUT};
 
 /// Filesystem format selected by the native `resources` partition model.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -346,44 +350,80 @@ pub fn deploy_selected(workspace: &Path) -> Result<FlashedImage, String> {
 /// Returns an error when no Board is selected, the selected bundle is invalid,
 /// or its native layout does not contain a read-only resource region.
 pub fn selected_resources_region(workspace: &Path) -> Result<ResourcesRegion, String> {
-    let board_name = read_selected_board(workspace)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| String::from("no Board selected; run `cargo board select` first"))?;
-    let bundle = workspace.join("boards/configs").join(&board_name);
-    let board_path = bundle.join("board.yml");
-    let board_yaml = read_text(&board_path, "Board definition")?;
-    let board = parse(&board_yaml).map_err(|error| error.to_string())?;
-    if board.name() != board_name {
-        return Err(format!(
-            "Board directory `{board_name}` declares Board `{}`",
-            board.name()
-        ));
+    resources_region(workspace, &Selection::read(workspace)?)
+}
+
+/// The selected Board, its native layout, and the Platform that runs it.
+struct Selection {
+    board_name: String,
+    board: BoardDefinition,
+    layout_path: PathBuf,
+    layout: String,
+    platform: PlatformDefinition,
+}
+
+impl Selection {
+    fn read(workspace: &Path) -> Result<Self, String> {
+        let board_name = read_selected_board(workspace)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| String::from("no Board selected; run `cargo board select` first"))?;
+        let bundle = workspace.join("boards/configs").join(&board_name);
+        let board_path = bundle.join("board.yml");
+        let board_yaml = read_text(&board_path, "Board definition")?;
+        let board = parse(&board_yaml).map_err(|error| error.to_string())?;
+        if board.name() != board_name {
+            return Err(format!(
+                "Board directory `{board_name}` declares Board `{}`",
+                board.name()
+            ));
+        }
+        let layout_path = bundle.join(board.native_layout().artifact());
+        let layout = read_text(&layout_path, "native layout")?;
+        let platform = resolve_board_platform(
+            workspace,
+            board.hardware().chip(),
+            board.toolchain().map(|toolchain| toolchain.target()),
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(Self {
+            board_name,
+            board,
+            layout_path,
+            layout,
+            platform,
+        })
     }
-    let layout_path = bundle.join(board.native_layout().artifact());
-    let layout = read_text(&layout_path, "native layout")?;
-    let chip = board.hardware().chip();
-    let platform = resolve_board_platform(
-        workspace,
-        chip,
-        board.toolchain().map(|toolchain| toolchain.target()),
-    )
-    .map_err(|error| error.to_string())?;
+
+    fn chip(&self) -> &str {
+        self.board.hardware().chip()
+    }
+}
+
+fn resources_region(workspace: &Path, selection: &Selection) -> Result<ResourcesRegion, String> {
+    let Selection {
+        board_name,
+        layout_path,
+        layout,
+        platform,
+        ..
+    } = selection;
+    let chip = selection.chip();
     let (offset, size, capacity, filesystem) = match platform.system_image().layout() {
         LayoutDriver::FileRegions => {
-            let (offset, size, capacity, filesystem) = file_layout_resources_region(&layout)?;
+            let (offset, size, capacity, filesystem) = file_layout_resources_region(layout)?;
             (offset, size, Some(capacity), filesystem)
         }
         LayoutDriver::EspIdfPartitions => {
-            let (offset, size, filesystem) = esp_resources_region(&layout)?;
+            let (offset, size, filesystem) = esp_resources_region(layout)?;
             (offset, size, None, filesystem)
         }
         LayoutDriver::LinkerMemory => {
-            let (offset, size, filesystem) = stm32_resources_region(&layout)?;
+            let (offset, size, filesystem) = stm32_resources_region(layout)?;
             (offset, size, None, filesystem)
         }
         LayoutDriver::Command(driver) => {
             let (offset, size, capacity, filesystem) =
-                command_system_region(workspace, platform.directory(), &layout_path, chip, driver)?;
+                command_system_region(workspace, platform.directory(), layout_path, chip, driver)?;
             (offset, size, capacity, filesystem)
         }
     };
@@ -403,13 +443,13 @@ pub fn selected_resources_region(workspace: &Path) -> Result<ResourcesRegion, St
         },
         FlashDriver::Command(driver) => PlatformFlash::Command {
             platform_directory: platform.directory().to_path_buf(),
-            layout: layout_path,
+            layout: layout_path.clone(),
             chip: chip.to_owned(),
             driver: driver.clone(),
         },
     };
     Ok(ResourcesRegion {
-        board: board_name,
+        board: board_name.clone(),
         offset,
         size,
         filesystem,
@@ -444,6 +484,7 @@ fn command_system_region(
             image: None,
             offset: None,
             size: None,
+            release: None,
         },
     );
     let stdout = command::output(&command)?;

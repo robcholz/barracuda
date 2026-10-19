@@ -138,6 +138,8 @@ export interface SubmitOptions {
   /** Default 15 s; the request is also aborted with the module. */
   timeoutMs?: number;
   success?: SettingsFormOptions["success"];
+  /** Runs on a 2xx reply with its JSON body (`null` when it has none), before the toast. */
+  onAccepted?: (reply: unknown) => void;
   /** Called by the 「重试」 action of the no-reply toast. */
   retry?: () => void;
   /**
@@ -174,6 +176,14 @@ export async function submitJson(
     });
     if (context.signal.aborted) return "aborted";
     if (response.ok) {
+      if (options.onAccepted) {
+        const reply: unknown =
+          response.status === 204
+            ? null
+            : await response.json().catch(() => null);
+        if (context.signal.aborted) return "aborted";
+        options.onAccepted(reply);
+      }
       const success = options.success ?? {};
       context.toast({
         kind: "success",

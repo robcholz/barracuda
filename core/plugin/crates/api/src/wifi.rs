@@ -53,6 +53,10 @@ impl WifiDevice for PlatformWifi {
         self.device.access_point_stack()
     }
 
+    fn station_mac_address(&self) -> Option<[u8; 6]> {
+        self.device.station_mac_address()
+    }
+
     fn station_state(&self) -> StationState {
         self.device.station_state()
     }
@@ -114,6 +118,7 @@ impl core::error::Error for PlatformWifiError {}
 trait DynWifiDevice {
     fn capabilities(&self) -> WifiCapabilities;
     fn access_point_stack(&self) -> Stack<'static>;
+    fn station_mac_address(&self) -> Option<[u8; 6]>;
     fn station_state(&self) -> StationState;
     fn access_point_state(&self) -> AccessPointState;
     fn scan(&mut self) -> DeviceFuture<'_, Vec<VisibleNetwork>>;
@@ -136,6 +141,10 @@ impl<D: WifiDevice> DynWifiDevice for D {
 
     fn access_point_stack(&self) -> Stack<'static> {
         WifiDevice::access_point_stack(self)
+    }
+
+    fn station_mac_address(&self) -> Option<[u8; 6]> {
+        WifiDevice::station_mac_address(self)
     }
 
     fn station_state(&self) -> StationState {
