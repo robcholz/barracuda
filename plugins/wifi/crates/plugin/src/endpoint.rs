@@ -1,4 +1,5 @@
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, string::String, string::ToString, vec::Vec};
+use core::net::Ipv4Addr;
 
 use alloc::rc::Rc;
 use barracuda_platform::{AccessPointState, StationState, VisibleNetwork, WifiCapabilities};
@@ -117,7 +118,10 @@ impl HttpEndpoint for StatusEndpoint {
             if request.method() != HttpMethod::Get {
                 return WifiEndpoint::static_response(405, br#"{"error":"method_not_allowed"}"#);
             }
-            WifiEndpoint::json_response(200, &StatusResponse::from(self.control.status()))
+            WifiEndpoint::json_response(
+                200,
+                &StatusResponse::new(self.control.status(), self.control.station_address()),
+            )
         })
     }
 }
@@ -165,11 +169,12 @@ struct StatusResponse {
     access_point: AccessPointResponse,
 }
 
-impl From<crate::WifiStatus> for StatusResponse {
-    fn from(status: crate::WifiStatus) -> Self {
+impl StatusResponse {
+    /// `address` is the station's, reported only while it is connected.
+    fn new(status: crate::WifiStatus, address: Option<Ipv4Addr>) -> Self {
         Self {
             capabilities: status.capabilities().into(),
-            station: status.station().clone().into(),
+            station: StationResponse::new(status.station().clone(), address),
             access_point: status.access_point().clone().into(),
         }
     }
@@ -200,15 +205,20 @@ enum StationResponse {
     Connected {
         #[serde(skip_serializing_if = "Option::is_none")]
         ssid: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        address: Option<String>,
     },
 }
 
-impl From<StationState> for StationResponse {
-    fn from(state: StationState) -> Self {
+impl StationResponse {
+    fn new(state: StationState, address: Option<Ipv4Addr>) -> Self {
         match state {
             StationState::Disconnected => Self::Disconnected,
             StationState::Connecting => Self::Connecting,
-            StationState::Connected { ssid } => Self::Connected { ssid },
+            StationState::Connected { ssid } => Self::Connected {
+                ssid,
+                address: address.map(|address| address.to_string()),
+            },
         }
     }
 }

@@ -99,6 +99,15 @@ impl WifiDevice for EspWifiDevice {
         self.access_point_stack
     }
 
+    fn station_mac_address(&self) -> Option<[u8; 6]> {
+        // esp-radio gives the station interface the chip's base MAC.
+        match self.station_stack.hardware_address() {
+            embassy_net::HardwareAddress::Ethernet(address) => Some(address.0),
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
+    }
+
     fn station_state(&self) -> StationState {
         self.station_state.clone()
     }

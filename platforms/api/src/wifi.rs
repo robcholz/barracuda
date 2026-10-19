@@ -152,6 +152,14 @@ pub trait WifiDevice: 'static {
     /// consumer assigns one with `Stack::set_config_v4`.
     fn access_point_stack(&self) -> Stack<'static>;
 
+    /// Returns the station interface's MAC address, when the Platform has one.
+    ///
+    /// On an ESP chip it is the chip's base MAC, the address `esptool` reads
+    /// while flashing.
+    fn station_mac_address(&self) -> Option<[u8; 6]> {
+        None
+    }
+
     /// Returns the current station state.
     fn station_state(&self) -> StationState;
 
