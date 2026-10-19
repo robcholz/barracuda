@@ -202,6 +202,14 @@ jobs:
       - name: Clippy portable workspace
         run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES -- -D clippy::disallowed_types
 
+      # Live Editor's WebAssembly crate is its own workspace; the website's
+      # Vercel build compiles it (docs/tools/live-editor.mdx, Deploy).
+      - name: Test Live Editor module
+        run: |
+          cargo fmt --manifest-path apps/live-editor/wasm/Cargo.toml --check
+          cargo test --manifest-path apps/live-editor/wasm/Cargo.toml --locked
+          cargo clippy --manifest-path apps/live-editor/wasm/Cargo.toml --all-targets --locked -- -D clippy::disallowed_types
+
   # Boot the real local-linux System on a TUN, drive it through the CLI
   # Channel, and serve every model call from an llm-tape tape (scripted or
   # recorded). Offline apart from DNS and needs no secrets. Scenarios share

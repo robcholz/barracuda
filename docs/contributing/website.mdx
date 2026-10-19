@@ -47,6 +47,14 @@ Vercel builds the site from this repository:
 - **Root Directory**: `website`
 - **Framework Preset**: Next.js (detected)
 - **Production branch**: `master`
+- **Include files outside the Root Directory in the Build Step**: on, the default
 
 Every push to `master` deploys the site, and every pull request gets a preview
 link.
+
+The site also serves [Live Editor](/apps/live-editor) at `/editor/`.
+`vercel.json` runs `apps/live-editor/web/build-site.sh public/editor` before
+`next build`, which installs Rust and PocketJS on the build machine and builds
+Live Editor into `public/editor/`; that directory is not committed. A local
+`bun run build` leaves Live Editor out. See
+[Live Editor internals](/tools/live-editor#deploy) for what the script does.

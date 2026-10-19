@@ -92,23 +92,13 @@ MicroTS 编译器不在本仓库中。把 `POCKETJS_ROOT` 指向一个 PocketJS 
 
 ## 部署
 
-Live Editor 作为静态网站部署到 Vercel。构建需要已选择开发板的工作区、Rust 的 WebAssembly 目标和一个 PocketJS 检出，所以由 `.github/workflows/live-editor.yml` 在 GitHub Actions 上构建，Vercel 只负责提供构建结果：当推送到 `master` 并改动了 Live Editor 或它打包的内容时，或手动运行时，工作流会选择 `local-linux`，检出固定提交的 PocketJS，构建并测试，把 `dist/` 写成 Vercel 的 Build Output（`.vercel/output`），再用 `vercel deploy --prebuilt --prod` 部署。
+官网构建 Live Editor，并在 [`/editor/`](https://barracuda-os.vercel.app/editor/) 提供它，所以它随官网一起从官网的 Vercel 项目部署（[官网](/zh/contributing/website)）。`website/vercel.json` 把项目的构建命令设为先运行 `apps/live-editor/web/build-site.sh public/editor`，再运行 `next build`；`next build` 会把 `public/editor/` 复制进站点。
 
-只需设置一次：
+`build-site.sh` 在一台普通机器上就能构建。它会安装缺少的东西：Rust 1.98.1 及其 `wasm32-unknown-unknown` 目标、Bun 1.4.0，以及[内置的 PocketJS](/zh/plugins/app-manager/pocketjs) 中写明的提交的 PocketJS。然后它运行 `build.ts`，把 `dist/`（不含 source map）复制到给定的目录。WebAssembly crate 是独立的 Cargo 工作区，所以构建不需要选择开发板。Vercel 在两次部署之间把 PocketJS 和 Cargo 的构建保存在 `.next/cache/live-editor` 中。
 
-<Steps>
-  <Step title="创建 Vercel 项目">
-    在一个检出里运行 `npx vercel link` 并创建项目。不要连接 Git，否则 Vercel 会自己构建每次推送并失败；Root Directory 留空。
-  </Step>
-  <Step title="让工作流能够访问">
-    在 Vercel 的 Account Settings › Tokens 中创建令牌，并添加仓库密钥 `VERCEL_TOKEN`、`VERCEL_ORG_ID` 和 `VERCEL_PROJECT_ID`；链接后这两个 ID 在 `.vercel/project.json` 中。
-  </Step>
-  <Step title="部署">
-    在 Actions 页运行 Live Editor 工作流，或推送到 `master`。
-  </Step>
-</Steps>
+项目需要打开 **Include files outside the Root Directory in the Build Step**（Vercel 默认打开）：构建会读取整个仓库。
 
-网站需要 HTTPS（WebCrypto 要求），对托管没有其他要求：路由在 URL 的 hash 中，所有文件都通过相对路径加载。在大家开始使用之前定下域名：应用、对话和签名密钥都跟随来源保存，而设备只接受签名该应用的那把密钥发来的更新。
+Live Editor 对托管没有其他要求：路由在 URL 的 hash 中，所有文件都通过相对路径加载。应用、对话和设置都跟随站点的来源保存，所以换到另一个域名后一切从头开始。
 
 ## 存储
 

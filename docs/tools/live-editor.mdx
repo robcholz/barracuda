@@ -143,37 +143,27 @@ folder as a zip (`src/install/zip.ts`).
 
 ## Deploy
 
-Live Editor deploys to Vercel as a static site. The build needs the selected
-workspace, Rust's WebAssembly target and a PocketJS checkout, so
-`.github/workflows/live-editor.yml` builds it on GitHub Actions and Vercel only
-serves the result: on a push to `master` that touches Live Editor or what it
-bundles, or when run by hand, the workflow selects `local-linux`, checks out
-PocketJS at its pinned commit, builds and tests, writes `dist/` as Vercel's
-Build Output (`.vercel/output`), and deploys it with `vercel deploy --prebuilt --prod`.
+The website builds Live Editor and serves it at
+[`/editor/`](https://barracuda-os.vercel.app/editor/), so it deploys with the
+site from the website's Vercel project ([Website](/contributing/website#deploy)).
+`website/vercel.json` sets the project's build command to run
+`apps/live-editor/web/build-site.sh public/editor` before `next build`, and
+`next build` copies `public/editor/` into the site.
 
-To set it up once:
+`build-site.sh` builds on a plain machine. It installs what it does not find:
+Rust 1.98.1 with the `wasm32-unknown-unknown` target, Bun 1.4.0, and PocketJS
+at the commit [Vendored PocketJS](/plugins/app-manager/pocketjs) names. It then
+runs `build.ts` and copies `dist/`, without source maps, into the directory it
+is given. The WebAssembly crate is its own Cargo workspace, so the build needs
+no selected Board. Vercel keeps PocketJS and the Cargo build between
+deployments in `.next/cache/live-editor`.
 
-<Steps>
-  <Step title="Create the Vercel project">
-    Run `npx vercel link` in a checkout and create a project. Leave its Git
-    connection off, or Vercel builds every push itself and fails; leave its Root
-    Directory empty.
-  </Step>
-  <Step title="Give the workflow access">
-    Create a token under Vercel's Account Settings › Tokens, and add the
-    repository secrets `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`;
-    the two IDs are in `.vercel/project.json` after linking.
-  </Step>
-  <Step title="Deploy">
-    Run the Live Editor workflow from the Actions tab, or push to `master`.
-  </Step>
-</Steps>
+The project needs **Include files outside the Root Directory in the Build Step**
+on, which is Vercel's default: the build reads the whole repository.
 
-The site needs HTTPS, for WebCrypto, and nothing else from its host: routes are
-in the URL's hash and every file is loaded by a relative path. Settle on its
-domain before people use it: apps, conversations and the signing key stay with
-the origin, and a device takes updates to an app only from the key that signed
-it.
+Live Editor needs nothing else from its host: its routes are in the URL's hash,
+and every file loads by a relative path. Its apps, conversations, and settings
+stay with the site's origin, so moving it to another domain starts people over.
 
 ## Storage
 
