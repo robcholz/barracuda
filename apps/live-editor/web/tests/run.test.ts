@@ -18,7 +18,7 @@ const repository = resolve(import.meta.dir, "../../../..");
 const wasm = resolve(import.meta.dir, "../dist/live-editor.wasm");
 const COUNTER = join(
   repository,
-  "plugins/app-manager/crates/appkit/tests/fixtures/counter",
+  "plugins/app-manager/crates/appkit/tests/fixtures/counter.bapp",
 );
 const built = existsSync(wasm);
 const lua = new LuaFactory();

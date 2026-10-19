@@ -30,7 +30,7 @@ MicroTS 编译器不在本仓库中。把 `POCKETJS_ROOT` 指向一个 PocketJS 
 
 ## 构建应用
 
-构建 worker（`src/workers/build.ts`）构建容器的方式与 `build-app.ts` 在磁盘上相同，所以 Live Editor 生成的应用包就是工具链会生成的那个：
+构建 worker（`src/workers/build.ts`）构建容器的方式与 `build-app.ts` 在磁盘上相同，所以 Live Editor 生成的应用就是工具链会生成的那个：
 
 | 步骤 | 在浏览器里 | 在磁盘上 |
 | --- | --- | --- |
@@ -39,7 +39,6 @@ MicroTS 编译器不在本仓库中。把 `POCKETJS_ROOT` 指向一个 PocketJS 
 | 填写清单的 `view` | `src/container.ts` | `build-app.ts` |
 | 检查清单 | 应用管理器的 `app-manifest.json` 模式及其其他规则（`src/manifest.ts`） | 设备，安装时 |
 | 检查入口程序 | Lua 的 `load`，检查语法 | 设备的 VM，运行时 |
-| 打包并签名 `.bapp` | `src/package.ts`，使用 WebCrypto | `pack-app.ts` |
 
 问题会带着文件、行和列返回，Code 视图会标出它。浏览器里不烘焙字体图集，所以视图使用设备的系统字体。
 
@@ -89,7 +88,7 @@ MicroTS 编译器不在本仓库中。把 `POCKETJS_ROOT` 指向一个 PocketJS 
 
 ## 安装到设备
 
-`src/install/handoff.ts` 遵循[应用门户插件](/zh/plugins/app-portal)中的 Live Editor 协议：它打开 `http://<address>/portal/#apps`，只对来自该窗口、该来源的 `barracuda/ready` 用 `barracuda/offer` 应答，并跟随 `barracuda/status` 直到结束。应用包由已应用的源文件构建，而不是提议，并用一把只生成一次、保存在 IndexedDB 中的 ECDSA P-256 密钥签名（`src/install/key.ts`）。
+`src/install/handoff.ts` 遵循[文件插件](/zh/plugins/files)中的 Live Editor 协议：它打开 `http://<address>/portal/#files`，只对来自该窗口、该来源的 `barracuda/ready` 用携带容器文件的 `barracuda/app` 应答，并跟随 `barracuda/status` 直到结束；页面把文件写入 `/workspace/media/apps/<id>.bapp/`。应用由已应用的源文件构建，而不是提议。门户无法访问时下载的是同一个文件夹的 zip（`src/install/zip.ts`）。
 
 ## 部署
 
@@ -113,7 +112,7 @@ Live Editor 作为静态网站部署到 Vercel。构建需要已选择开发板�
 
 ## 存储
 
-`src/state/db.ts` 把一切保存在 IndexedDB 中：应用（`src/state/project.ts`：源文件、版本、对话、提议和预览的存储）、设置、签名密钥，以及每个应用的智能体记录；记录因为含有截图而较大，所以单独保存。
+`src/state/db.ts` 把一切保存在 IndexedDB 中：应用（`src/state/project.ts`：源文件、版本、对话、提议和预览的存储）、设置，以及每个应用的智能体记录；记录因为含有截图而较大，所以单独保存。
 
 ## 测试
 
@@ -122,4 +121,4 @@ cargo test --manifest-path apps/live-editor/wasm/Cargo.toml
 bun test ./apps/live-editor/web
 ```
 
-Rust 测试链接计数器示例并与已提交的 `counter.bvir` 比较，检查 `view:set` 的转换和消息，并绘制、点按计数器。Web 测试覆盖与 `pack-app.ts` 一致的打包、容器和清单规则、差异、版本和提议、使用替身窗口的门户交接，以及智能体的工具和历史。构建 `dist/` 之后，它们还会在内存中编译系统视图，与已提交的 `view.bvir` 和 `styles.bin` 比较，并在预览中运行计数器应用：点按、保存的状态、`view:set` 错误，以及对忙碌程序和错过宽限期的停止。
+Rust 测试链接计数器示例并与已提交的 `counter.bvir` 比较，检查 `view:set` 的转换和消息，并绘制、点按计数器。Web 测试覆盖与 `build-app.ts` 一致的容器和清单规则、差异、版本和提议、使用替身窗口的门户交接、zip，以及智能体的工具和历史。构建 `dist/` 之后，它们还会在内存中编译系统视图和计数器示例，与已提交的 `view.bvir` 和 `styles.bin` 比较，并在预览中运行计数器应用：点按、保存的状态、`view:set` 错误，以及对忙碌程序和错过宽限期的停止。

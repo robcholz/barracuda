@@ -39,7 +39,7 @@ PocketJS module none of them use does not find it in the browser.
 ## Build an app
 
 The build worker (`src/workers/build.ts`) builds a container the way
-`build-app.ts` builds one on disk, so a package from Live Editor is the one the
+`build-app.ts` builds one on disk, so an app from Live Editor is the one the
 toolchain would make:
 
 | Step | In the browser | On disk |
@@ -49,7 +49,6 @@ toolchain would make:
 | Fill in the manifest's `view` | `src/container.ts` | `build-app.ts` |
 | Check the manifest | the app manager's `app-manifest.json` schema and its other rules (`src/manifest.ts`) | the device, on install |
 | Check the entry program | Lua's `load`, for syntax | the device's VM, on run |
-| Pack, and sign, a `.bapp` | `src/package.ts`, with WebCrypto | `pack-app.ts` |
 
 A problem comes back with its file, line and column, which Code underlines.
 Font atlases are not baked in the browser, so a view draws with the device's
@@ -134,11 +133,13 @@ text. When the turn ends, its proposal is applied, or waits in Changes while
 ## Install on a device
 
 `src/install/handoff.ts` follows the
-[app portal's Live Editor protocol](/plugins/app-portal#live-editor): it opens
-`http://<address>/portal/#apps`, answers `barracuda/ready` from that window, at
-that origin only, with `barracuda/offer`, and follows `barracuda/status` to the
-end. The package is built from the applied sources, not a proposal, and signed
-with an ECDSA P-256 key made once and kept in IndexedDB (`src/install/key.ts`).
+[Files Plugin's Live Editor protocol](/plugins/files#live-editor): it opens
+`http://<address>/portal/#files`, answers `barracuda/ready` from that window, at
+that origin only, with `barracuda/app` carrying the container's files, and
+follows `barracuda/status` to the end; the page writes them to
+`/workspace/media/apps/<id>.bapp/`. The app is built from the applied sources,
+not a proposal. The download when the portal cannot be reached is the same
+folder as a zip (`src/install/zip.ts`).
 
 ## Deploy
 
@@ -178,7 +179,7 @@ it.
 
 `src/state/db.ts` keeps everything in IndexedDB: the apps (`src/state/project.ts`:
 sources, versions, chats, the proposal and the preview's storage), the
-settings, the signing key, and each app's agent transcripts, kept apart because
+settings, and each app's agent transcripts, kept apart because
 screenshots make them large.
 
 ## Tests
@@ -190,10 +191,10 @@ bun test ./apps/live-editor/web
 
 The Rust tests link the counter fixture and compare it with the committed
 `counter.bvir`, check `view:set`'s conversions and messages, and draw and tap
-the counter. The web tests cover packing against `pack-app.ts`, the container
-and manifest rules, the diff, versions and proposals, the portal handoff with a
-stand-in window, and the agent's tools and history. Once `dist/` is built, they
-also compile the system view in memory, compare it with the committed
-`view.bvir` and `styles.bin`, and run the counter app in the preview: taps,
+the counter. The web tests cover the container and manifest rules against
+`build-app.ts`, the diff, versions and proposals, the portal handoff with a
+stand-in window, the zip, and the agent's tools and history. Once `dist/` is built, they
+also compile the system view and the counter example in memory, compare them
+with the committed `view.bvir` and `styles.bin`, and run the counter app in the preview: taps,
 saved state, `view:set` errors, and the stops for a busy program and a missed
 grace period.

@@ -6,7 +6,6 @@ import { join, resolve } from "node:path";
 import { buildContainer } from "../src/container";
 import { linker, LinkError, loadLinker } from "../src/wasm";
 import { compileView, type PocketCompiler } from "../src/microts";
-import { pack, packageFiles } from "../src/package";
 
 const repository = resolve(import.meta.dir, "../../../..");
 const dist = resolve(import.meta.dir, "../dist");
@@ -104,7 +103,7 @@ test.if(built)(
 );
 
 test.if(built)(
-  "an example app builds and packs in the browser, and a broken one is explained",
+  "an example app builds in the browser as the toolchain built it, and a broken one is explained",
   async () => {
     const compiler = await browserCompiler();
     const link = await loadLinker(readFileSync(join(dist, "live-editor.wasm")));
@@ -116,8 +115,14 @@ test.if(built)(
       join(repository, "plugins/app-manager/resources/examples/counter"),
     );
     const { files } = await buildContainer(counter, toolchain);
-    const packed = await pack(packageFiles(files));
-    expect(new TextDecoder().decode(packed.slice(0, 4))).toBe("BAPP");
+    // The committed example was built with its own fonts; its view program is the same.
+    const built = join(
+      repository,
+      "plugins/app-manager/crates/appkit/tests/fixtures/counter.bapp",
+    );
+    expect(files.get("view.bvir")).toEqual(
+      new Uint8Array(readFileSync(join(built, "view.bvir"))),
+    );
 
     counter.set(
       "app.tsx",

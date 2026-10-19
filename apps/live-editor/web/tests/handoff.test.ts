@@ -16,7 +16,7 @@ test("the address the person types becomes the portal's origin", () => {
   expect(portalOrigin("https://10.0.0.2")).toBe("https://10.0.0.2");
   expect(portalOrigin("10.0.0.2/portal")).toBeNull();
   expect(portalOrigin("")).toBeNull();
-  expect(portalUrl("http://10.0.0.2")).toBe("http://10.0.0.2/portal/#apps");
+  expect(portalUrl("http://10.0.0.2")).toBe("http://10.0.0.2/portal/#files");
 });
 
 /** A host whose window and clock the test drives. */
@@ -62,15 +62,18 @@ const offer = {
   id: "counter",
   name: "Counter",
   version: "0.1.0",
-  bytes: new Uint8Array([66, 65, 80, 80]),
+  files: new Map([
+    ["app.json", new TextEncoder().encode('{"id":"counter"}')],
+    ["main.lua", new TextEncoder().encode("print(1)")],
+  ]),
 };
 
-test("the package goes to the portal window once it is ready, and its steps come back", () => {
+test("the app's files go to the portal window once it is ready, and its steps come back", () => {
   const fake = fakeHost();
   const phases: string[] = [];
   const handoff = new Handoff(fake.host, () => phases.push(handoff.phase));
   handoff.start("http://10.0.0.2", offer);
-  expect(fake.opened()).toBe("http://10.0.0.2/portal/#apps");
+  expect(fake.opened()).toBe("http://10.0.0.2/portal/#files");
   // Strangers, and the right window at another origin, are not the device.
   fake.say({ type: "barracuda/ready", v: 1 }, {});
   fake.say(
@@ -82,29 +85,22 @@ test("the package goes to the portal window once it is ready, and its steps come
   fake.say({ type: "barracuda/ready", v: 1 });
   expect(fake.posted[0].origin).toBe("http://10.0.0.2");
   expect(fake.posted[0].message).toMatchObject({
-    type: "barracuda/offer",
+    type: "barracuda/app",
     v: 1,
     id: "counter",
     name: "Counter",
     version: "0.1.0",
   });
-  expect(new Uint8Array(fake.posted[0].message.bapp as ArrayBuffer)).toEqual(
-    offer.bytes,
-  );
-  for (const state of ["review", "sending", "waiting", "installed"])
+  const files = fake.posted[0].message.files as Record<string, ArrayBuffer>;
+  expect(Object.keys(files)).toEqual(["app.json", "main.lua"]);
+  expect(new TextDecoder().decode(files["main.lua"])).toBe("print(1)");
+  for (const state of ["review", "writing", "installed"])
     fake.say({ type: "barracuda/status", v: 1, id: "counter", state });
-  expect(phases).toEqual([
-    "opening",
-    "ready",
-    "ready",
-    "sending",
-    "waiting",
-    "done",
-  ]);
+  expect(phases).toEqual(["opening", "ready", "ready", "writing", "done"]);
   expect(fake.listening()).toBe(false);
 });
 
-test("a refusal from the device keeps the window listening; a silent portal fails", () => {
+test("a failed write keeps the window listening; a refusal, a silent portal and a blocked window fail", () => {
   const fake = fakeHost();
   const handoff = new Handoff(fake.host, () => {});
   handoff.start("http://10.0.0.2", offer);
@@ -114,16 +110,13 @@ test("a refusal from the device keeps the window listening; a silent portal fail
     v: 1,
     id: "counter",
     state: "failed",
-    message: "需要摄像头",
+    message: "存储卡已移除",
   });
-  expect(handoff.failure).toEqual({ kind: "device", message: "需要摄像头" });
-  fake.say({
-    type: "barracuda/status",
-    v: 1,
-    id: "counter",
-    state: "declined",
-  });
-  expect(handoff.phase).toBe("declined");
+  expect(handoff.failure).toEqual({ kind: "device", message: "存储卡已移除" });
+  expect(fake.listening()).toBe(true);
+  fake.say({ type: "barracuda/status", v: 1, id: "counter", state: "refused" });
+  expect(handoff.failure).toEqual({ kind: "refused" });
+  expect(fake.listening()).toBe(false);
 
   const silent = fakeHost();
   const waiting = new Handoff(silent.host, () => {});

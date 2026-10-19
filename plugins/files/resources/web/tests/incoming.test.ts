@@ -39,7 +39,7 @@ function fakeFiles() {
         });
       case "raw":
         return files.has(path)
-          ? new Response(files.get(path))
+          ? new Response(files.get(path) as BodyInit | undefined)
           : json({ error: "not_found" }, 404);
       case "upload":
         if (!dirs.has(parent(path))) return json({ error: "not_found" }, 404);

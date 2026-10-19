@@ -1,6 +1,6 @@
 /**
  * Install on device: the app goes to the device through its portal, in a window next to this
- * one, and the person at the device installs it.
+ * one, which writes it where the device runs apps from.
  */
 
 import type { App } from "../app/app";
@@ -11,8 +11,7 @@ import {
   type Failure,
   type Phase,
 } from "../install/handoff";
-import { shortSigner, signingKey } from "../install/key";
-import { pack, packageFiles } from "../package";
+import { zip } from "../install/zip";
 import { manifestOf } from "../state/project";
 import { button, fill, h, icon, size } from "./dom";
 import {
@@ -30,9 +29,7 @@ const STEPS: Record<Phase, ("done" | "current" | "next")[]> = {
   failed: ["current", "next", "next"],
   closed: ["current", "next", "next"],
   ready: ["done", "current", "next"],
-  sending: ["done", "current", "next"],
-  waiting: ["done", "done", "current"],
-  declined: ["done", "done", "current"],
+  writing: ["done", "done", "current"],
   done: ["done", "done", "done"],
 };
 
@@ -53,17 +50,20 @@ function failureText(
       };
     case "refused":
       return {
-        title: `${name} was not sent`,
-        text: "The portal window closed without sending it. Open the portal again to send it.",
+        title: `${name} was not installed`,
+        text: "It was not installed from the portal window. Open the portal again to install it.",
       };
     case "device":
-      return { title: "The device refused the package", text: failure.message };
+      return {
+        title: "The device could not write the app",
+        text: failure.message,
+      };
   }
 }
 
-interface Package {
-  bytes: Uint8Array;
-  signer: string;
+/** The built app: the files of its `<id>.bapp/` directory. */
+interface Built {
+  files: Map<string, Uint8Array>;
   version: string;
 }
 
@@ -78,7 +78,7 @@ export class InstallPage implements Page {
   private readonly handoff: Handoff;
   private address: string;
   private addressError = "";
-  private pkg: Package | null = null;
+  private pkg: Built | null = null;
   private pkgError: string | null = null;
   private preparing = true;
   private key = "";
@@ -109,27 +109,19 @@ export class InstallPage implements Page {
     this.update();
   }
 
-  /** Builds the app as it is (not the proposal under review) and packs it, signed. */
+  /** Builds the app as it is, not the proposal under review. */
   private async prepare() {
     const project = this.app.project();
     if (!project) return;
     this.preparing = true;
     const reply = await this.app.buildFiles(project.files);
-    if (!reply.ok) {
+    if (!reply.ok)
       this.pkgError = `It does not build: ${reply.problem.message}`;
-    } else {
-      try {
-        const key = await signingKey();
-        const files = new Map(Object.entries(reply.files));
-        this.pkg = {
-          bytes: await pack(packageFiles(files), key),
-          signer: await shortSigner(key),
-          version: String(reply.manifest.version ?? ""),
-        };
-      } catch (error) {
-        this.pkgError = error instanceof Error ? error.message : String(error);
-      }
-    }
+    else
+      this.pkg = {
+        files: new Map(Object.entries(reply.files)),
+        version: String(reply.manifest.version ?? ""),
+      };
     this.preparing = false;
     this.changed();
   }
@@ -151,25 +143,24 @@ export class InstallPage implements Page {
       id: project.id,
       name: project.name,
       version: this.pkg.version,
-      bytes: this.pkg.bytes,
+      files: this.pkg.files,
     });
   }
 
   private download() {
     const project = this.app.project();
     if (!project || !this.pkg) return;
+    const folder = `${project.id}.bapp`;
     const url = URL.createObjectURL(
-      new Blob([this.pkg.bytes.slice().buffer], {
-        type: "application/octet-stream",
-      }),
+      new Blob([zip(folder, this.pkg.files)], { type: "application/zip" }),
     );
-    const link = h("a", { href: url, download: `${project.id}.bapp` });
+    const link = h("a", { href: url, download: `${folder}.zip` });
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     this.app.notify({
       tone: "success",
-      title: `${project.id}.bapp downloaded`,
-      text: "Upload it in the device portal under Files, into media/apps, then install it under Apps.",
+      title: `${folder}.zip downloaded`,
+      text: `Unzip it, then in the device portal under Files make the folder media/apps/${folder} and upload its files there.`,
     });
   }
 
@@ -192,9 +183,7 @@ export class InstallPage implements Page {
     ]);
     if (key === this.key) return;
     this.key = key;
-    const linked = ["ready", "sending", "waiting", "declined", "done"].includes(
-      phase,
-    );
+    const linked = ["ready", "writing", "done"].includes(phase);
     fill(
       this.bar,
       topbar(
@@ -214,7 +203,7 @@ export class InstallPage implements Page {
         h("span", { class: "bc-crumb le-desk" }, "/"),
         h("span", { class: "bc-crumb--current le-desk" }, "Install on device"),
         h("span", { class: "le-grow" }),
-        ["ready", "sending", "waiting"].includes(phase) &&
+        ["ready", "writing"].includes(phase) &&
           h("span", { class: "bc-badge bc-badge--signal" }, "Portal open"),
         phase === "closed" &&
           h(
@@ -237,7 +226,7 @@ export class InstallPage implements Page {
           h(
             "p",
             { class: "bc-lead" },
-            `${project.name} goes to the device through its portal, in a window next to this one. The person at the device installs it.`,
+            `${project.name} goes to the device through its portal, in a window next to this one. You install it from there.`,
           ),
         ),
         h(
@@ -274,13 +263,19 @@ export class InstallPage implements Page {
         h("div", { class: "bc-row__body" }, ...(body as never[])),
       );
     const steps = [
-      `Open the device portal`,
-      `Send ${project.name} from the portal window`,
-      "The person at the device installs it",
+      "Open the device portal",
+      `Install ${project.name} from the portal window`,
+      "The device writes it with its apps",
     ];
     const manifest = manifestOf(project.files);
-    const file = `${project.id}.bapp`;
-    const busy = ["opening", "ready", "sending", "waiting"].includes(phase);
+    const folder = `${project.id}.bapp`;
+    const busy = ["opening", "ready", "writing"].includes(phase);
+    const total = this.pkg
+      ? [...this.pkg.files.values()].reduce(
+          (sum, bytes) => sum + bytes.length,
+          0,
+        )
+      : 0;
     fill(
       this.form,
       row(
@@ -342,14 +337,14 @@ export class InstallPage implements Page {
           ),
       ),
       row(
-        "Package",
-        "Built and signed in this browser",
+        "App",
+        "Built in this browser",
         this.preparing
           ? h(
               "span",
               { class: "bc-status bc-muted", role: "status" },
               icon("loader-circle", "bc-spinner"),
-              "Building the package",
+              `Building ${project.name}`,
             )
           : this.pkgError
             ? h(
@@ -362,7 +357,7 @@ export class InstallPage implements Page {
                   h(
                     "div",
                     { class: "bc-alert__title" },
-                    `${project.name} cannot be packed`,
+                    `${project.name} cannot be installed`,
                   ),
                   h("div", { class: "bc-small" }, this.pkgError),
                 ),
@@ -371,13 +366,19 @@ export class InstallPage implements Page {
               h(
                 "dl",
                 { class: "bc-kv" },
-                h("dt", null, "File"),
+                h("dt", null, "Folder"),
                 h(
                   "dd",
                   null,
-                  h("span", { class: "bc-mono" }, file),
+                  h("span", { class: "bc-mono" }, `media/apps/${folder}`),
+                ),
+                h("dt", null, "Files"),
+                h(
+                  "dd",
+                  null,
+                  h("span", { class: "bc-mono" }, String(this.pkg.files.size)),
                   " · ",
-                  h("span", { class: "bc-mono" }, size(this.pkg.bytes.length)),
+                  h("span", { class: "bc-mono" }, size(total)),
                 ),
                 h("dt", null, "Version"),
                 h(
@@ -389,31 +390,11 @@ export class InstallPage implements Page {
                     manifest.version ?? this.pkg.version,
                   ),
                 ),
-                h("dt", null, "Signer"),
-                h(
-                  "dd",
-                  null,
-                  h("span", { class: "bc-mono" }, this.pkg.signer),
-                  " · ",
-                  h(
-                    "span",
-                    { class: "bc-term", tabindex: "0" },
-                    "your key",
-                    h(
-                      "span",
-                      {
-                        class: "bc-tooltip bc-tooltip--start",
-                        role: "tooltip",
-                      },
-                      `The device takes updates to ${project.name} only from this key`,
-                    ),
-                  ),
-                ),
               ),
       ),
       row(
         "Install",
-        "You send it; the person at the device decides",
+        "You choose Install in the portal window",
         h(
           "ol",
           { class: "bc-steps" },
@@ -434,7 +415,7 @@ export class InstallPage implements Page {
                 {
                   class:
                     (index === 1 && phase === "ready") ||
-                    (index === 2 && phase === "waiting")
+                    (index === 2 && phase === "writing")
                       ? "bc-shimmer"
                       : "",
                 },
@@ -447,9 +428,9 @@ export class InstallPage implements Page {
           h(
             "span",
             { class: "bc-hint" },
-            "The portal window shows what it received. Choose Send to device there.",
+            "The portal window shows what it received. Choose 安装到设备 (Install on device) there.",
           ),
-        phase === "sending" &&
+        phase === "writing" &&
           h(
             "div",
             { class: "bc-card bc-card--progress", role: "status" },
@@ -460,16 +441,10 @@ export class InstallPage implements Page {
               h(
                 "span",
                 { class: "bc-option-title le-grow" },
-                "Sending ",
-                h("span", { class: "bc-mono" }, file),
+                "Writing ",
+                h("span", { class: "bc-mono" }, `media/apps/${folder}`),
               ),
             ),
-          ),
-        phase === "waiting" &&
-          h(
-            "span",
-            { class: "bc-hint" },
-            "Tap Install on the device's screen. A device without a screen asks in its portal, under Apps, from a phone on its setup hotspot.",
           ),
         phase === "done" &&
           h(
@@ -491,26 +466,6 @@ export class InstallPage implements Page {
               ),
             ),
           ),
-        phase === "declined" &&
-          h(
-            "div",
-            { class: "bc-card", role: "status" },
-            h(
-              "div",
-              { class: "bc-card__body le-result" },
-              h(
-                "span",
-                { class: "bc-option-title" },
-                icon("circle-x", "bc-muted"),
-                "Declined on the device",
-              ),
-              h(
-                "span",
-                { class: "bc-small bc-muted" },
-                "Send it again when the person at the device is ready.",
-              ),
-            ),
-          ),
         failure &&
           h(
             "div",
@@ -529,7 +484,7 @@ export class InstallPage implements Page {
         { class: "bc-form__footer" },
         this.pkg &&
           (phase === "failed" || phase === "idle" || phase === "closed") &&
-          button(`Download ${file}`, () => this.download(), {
+          button(`Download ${folder}.zip`, () => this.download(), {
             kind: "outline",
           }),
         busy &&
@@ -540,13 +495,9 @@ export class InstallPage implements Page {
             { class: "bc-button", href: `#/app/${project.id}` },
             `Back to ${project.name}`,
           ),
-        ["idle", "failed", "closed", "declined"].includes(phase) &&
+        ["idle", "failed", "closed"].includes(phase) &&
           button(
-            phase === "idle"
-              ? "Open device portal"
-              : phase === "declined"
-                ? "Send again"
-                : "Open the portal again",
+            phase === "idle" ? "Open device portal" : "Open the portal again",
             () => this.open(),
             {
               disabled: !this.pkg,

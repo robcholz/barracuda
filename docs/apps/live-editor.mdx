@@ -105,38 +105,35 @@ A program that runs for 5 s without returning to `app.events()` is stopped.
 
 ## Install on a device
 
-The device must be on your computer's network, with the portal's Apps page
-(the `app-portal` Plugin).
+The device must be on your computer's network, with the portal's **文件**
+(**Files**) page (the `files` Plugin).
 
 <Steps>
   <Step title="Open the device portal">
     Type the address the portal opens at, such as `192.168.1.42:8787`, and
-    choose **Open device portal**. The portal opens in a window next to Live
-    Editor, which hands it the app's package.
+    choose **Open device portal**. The portal's Files page opens in a window
+    next to Live Editor, which hands it the app's files.
   </Step>
-  <Step title="Send it from the portal window">
-    The portal shows what it received, and from which page. Choose **发送到设备**
-    (**Send to device**) there.
+  <Step title="Install it from the portal window">
+    The portal shows what it received, from which page, and the version it
+    replaces. Choose **安装到设备** (**Install on device**) there.
   </Step>
-  <Step title="Install it on the device">
-    The person at the device installs it on the screen, or, on a device without
-    one, from a phone on its setup hotspot. Live Editor shows when it is
-    installed or declined.
+  <Step title="Open it on the device">
+    The portal writes the app to `media/apps/<id>.bapp/`, where the device runs
+    apps from, and Live Editor shows that it is installed. Open it from the
+    device's launcher. Installing a newer version replaces it.
   </Step>
 </Steps>
 
-Live Editor signs the package with a key it makes once in this browser. A
-device that installed the app takes updates to it only from the same key, so
-use the same browser for every version. When the portal cannot be reached,
-**Download** saves the `.bapp`: upload it in the portal under **文件**
-(**Files**) into `media/apps/`, then install it under **应用** (**Apps**).
+When the portal cannot be reached, **Download** saves the app's folder as a
+zip: unzip it, and in the portal under **文件** (**Files**) make the folder
+`media/apps/<id>.bapp` and upload its files there.
 
 ## Where your work is kept
 
-Apps, their versions, conversations and stored data, the settings and the
-signing key stay in this browser's storage for the page. Nothing leaves the
-browser except the requests to the model service and the packages you send to
-a device.
+Apps, their versions, conversations and stored data, and the settings stay
+in this browser's storage for the page. Nothing leaves the browser except the
+requests to the model service and the apps you send to a device.
 
 <CardGroup cols={2}>
   <Card title="App format" icon="box" href="/plugins/app-manager/app-format">

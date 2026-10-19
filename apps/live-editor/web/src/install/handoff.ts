@@ -1,23 +1,15 @@
 /**
- * Sends a package to a device through its portal (docs/plugins/app-portal.mdx, Live Editor): an
- * HTTPS page may not call `http://` addresses on the local network, so Live Editor opens the
- * device's `/portal/#apps` in a window and hands the package over with `postMessage`. The person
- * sends it from that window, and the person at the device installs it.
+ * Sends an app to a device through its portal (docs/plugins/files.mdx, Live Editor): an HTTPS
+ * page may not call `http://` addresses on the local network, so Live Editor opens the device's
+ * `/portal/#files` in a window and hands it the app's files with `postMessage`. The person
+ * installs it from that window, which writes `/workspace/media/apps/<id>.bapp/`.
  */
 
 export const PROTOCOL = 1;
 
 /** Where a handoff is, as the Install page's steps show it. */
 export type Phase =
-  | "idle"
-  | "opening"
-  | "failed"
-  | "closed"
-  | "ready"
-  | "sending"
-  | "waiting"
-  | "declined"
-  | "done";
+  "idle" | "opening" | "failed" | "closed" | "ready" | "writing" | "done";
 
 export type Failure =
   | { kind: "blocked" }
@@ -25,11 +17,12 @@ export type Failure =
   | { kind: "refused" }
   | { kind: "device"; message: string };
 
+/** An app as the portal takes it: its manifest's fields and its container's files. */
 export interface Offer {
   id: string;
   name: string;
   version: string;
-  bytes: Uint8Array;
+  files: ReadonlyMap<string, Uint8Array>;
 }
 
 /** A device portal's origin from what the person typed: a host, with a port when it has one. */
@@ -48,9 +41,9 @@ export function portalOrigin(address: string): string | null {
   }
 }
 
-/** The portal's Apps page at `origin`. */
+/** The portal's Files page at `origin`, which takes the app. */
 export function portalUrl(origin: string): string {
-  return `${origin}/portal/#apps`;
+  return `${origin}/portal/#files`;
 }
 
 /** What the handoff needs from the page: opening a window and hearing messages. Tests stand in for it. */
@@ -96,10 +89,9 @@ export class Handoff {
   private set(phase: Phase, failure: Failure | null = null) {
     this.phase = phase;
     this.failure = failure;
-    // A refusal from the device leaves the portal window open to send again, so it keeps listening.
+    // A failed write leaves the portal window open to try again, so it keeps listening.
     const over =
       phase === "closed" ||
-      phase === "declined" ||
       phase === "done" ||
       (phase === "failed" && failure?.kind !== "device");
     if (over) this.release(false);
@@ -118,12 +110,7 @@ export class Handoff {
       if (this.phase === "opening") this.set("failed", { kind: "silent" });
     }, READY_MS);
     this.watcher = this.host.setInterval(() => {
-      if (
-        this.win?.closed &&
-        this.phase !== "done" &&
-        this.phase !== "declined"
-      )
-        this.set("closed");
+      if (this.win?.closed && this.phase !== "done") this.set("closed");
     }, 500);
     this.set("opening");
   }
@@ -156,12 +143,14 @@ export class Handoff {
     } | null;
     if (!data || data.v !== PROTOCOL) return;
     if (data.type === "barracuda/ready" && this.offer) {
-      const { id, name, version, bytes } = this.offer;
-      const copy = bytes.slice().buffer;
+      const { id, name, version } = this.offer;
+      const files: Record<string, ArrayBuffer> = {};
+      for (const [file, bytes] of this.offer.files)
+        files[file] = bytes.slice().buffer;
       this.win.postMessage(
-        { type: "barracuda/offer", v: PROTOCOL, id, name, version, bapp: copy },
+        { type: "barracuda/app", v: PROTOCOL, id, name, version, files },
         this.origin,
-        [copy],
+        Object.values(files),
       );
       this.host.clearTimeout(this.timer);
       this.set("ready");
@@ -171,14 +160,10 @@ export class Handoff {
     switch (data.state) {
       case "review":
         return this.set("ready");
-      case "sending":
-        return this.set("sending");
-      case "waiting":
-        return this.set("waiting");
+      case "writing":
+        return this.set("writing");
       case "installed":
         return this.set("done");
-      case "declined":
-        return this.set("declined");
       case "refused":
         return this.set("failed", { kind: "refused" });
       case "failed":
@@ -187,7 +172,7 @@ export class Handoff {
           message:
             typeof data.message === "string"
               ? data.message
-              : "The device refused the package",
+              : "The device could not write the app",
         });
     }
   }
