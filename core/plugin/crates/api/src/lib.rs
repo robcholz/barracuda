@@ -10,7 +10,7 @@ mod wifi;
 use barracuda_board_hal::{BoardResources, NoExposedIo, NoPeripherals};
 pub use barracuda_platform::{Entropy, EntropyUnavailable};
 pub use barracuda_target_api::{
-    BoardInfo, FIRMWARE_VERSION, Hardware, PlatformInfo, TargetIdentity,
+    BoardInfo, Hardware, PlatformInfo, TargetIdentity, FIRMWARE_VERSION,
 };
 pub use embassy_net::Stack;
 pub use entropy::SharedEntropy;

@@ -79,6 +79,7 @@ pub(crate) fn flash(request: FlashRequest<'_>) -> Result<String, String> {
                     image: Some(request.image),
                     offset: Some(request.offset),
                     size: Some(request.size),
+                    release: None,
                 },
             );
             let destination = command.program.display().to_string();

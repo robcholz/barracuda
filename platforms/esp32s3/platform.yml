@@ -58,3 +58,11 @@ application:
   launcher:
     program: espflash
     arguments: [flash, --monitor, "{application}"]
+  # The bootloader, partition table and app merged from 0x0. Its padding
+  # erases otadata, so a device that had switched to ota_1 boots ota_0 again,
+  # and it ends before kv_database, which keeps the device's settings.
+  release:
+    driver: command
+    program: espflash
+    arguments: [save-image, --chip, "{chip}", --merge, --skip-padding, --flash-size, "{flash-size}", --partition-table, "{layout}", --target-app-partition, ota_0, "{application}", "{output}"]
+    offset: 0
