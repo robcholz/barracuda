@@ -5,5 +5,5 @@ description = "Aggregates pluggable web entries and resource providers for the p
 [tasks.build]
 cwd = "."
 command = ["bun", "resources/web/build.ts"]
-inputs = ["resources/web/src", "resources/web/ui", "resources/web/build.ts", "../../package.json", "../../bun.lock"]
+inputs = ["resources/web/src", "resources/web/ui", "resources/web/build.ts", "../../package.json", "../../bun.lock", "../../design-system", "../agent/resources/web", "../agent-websearch/resources/web", "../files/resources/web", "../imessage-bluebubble/resources/web", "../imessage-gateway/resources/web", "../imessage-inkbox/resources/web", "../imessage-qq/resources/web", "../imessage-telegram/resources/web", "../imessage-web/resources/web", "../imessage-wechat/resources/web", "../wifi/resources/web"]
 outputs = ["filesystem/resources/index.html", "filesystem/resources/app.js", "filesystem/resources/app.css"]

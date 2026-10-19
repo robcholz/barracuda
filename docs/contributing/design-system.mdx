@@ -1,0 +1,74 @@
+---
+title: "Design system"
+description: "Change the one design system the website, the installer, Live Editor and the device portal all draw with."
+---
+
+The website, its installer, Live Editor and the device portal share one design
+system in `design-system/`. Change a token, a component or an icon there and
+all four follow; none of them keeps a copy.
+
+```bash terminal
+bun test ./design-system
+```
+
+## What it holds
+
+| File | Holds | Used by |
+| --- | --- | --- |
+| `tokens.css` | Colour, type, space, radius and size tokens, light and dark | all four, and the token block in the docs' `style.css` |
+| `components.css` | The components, as plain CSS classes (`bc-*`) over the tokens | all four |
+| `icons.ts` | The Lucide icons, as `ICON_*` constants of SVG markup | all four |
+| `marks.ts` | Barracuda's mark: `MARK_ART`, `MARK_BARE` and `MARK_TILE` | all four |
+| `dom.ts` | `h`, `append`, `fill`, `svg`, `icon` and `mark`: building elements without a framework | Live Editor, the portal's shell, UI kit and pages |
+| `prune.ts` | Cuts the tokens and components to what a page uses | the portal's build |
+
+## How each app takes it
+
+| App | How |
+| --- | --- |
+| Website and installer (`website/`) | `src/components/Document.tsx` imports both stylesheets; `Icon` and `BrandMark` draw from `icons.ts` and `marks.ts` |
+| Live Editor (`apps/live-editor/web/`) | `src/app.css` imports both stylesheets, and `build.ts` bundles them into one `app.css`; `src/ui/icons.ts` names the icons it draws |
+| Device portal (`plugins/captive-portal/`) | `src/app.css` imports both stylesheets, and `resources/web/build.ts` prunes them; the UI kit re-exports `dom.ts`, `icons.ts` and `marks.ts` to Plugin pages |
+
+## The portal's cut
+
+The portal ships its stylesheet from device flash, and its shell (`index.html`,
+`app.js` and `app.css`) must stay under 96 KiB. Its build scans the shell, the
+UI kit and every Plugin's `resources/web/` for the `bc-*` classes they use and
+keeps only those rules, the tokens they read, and the keyframes they name. A
+class name ending in a dash, as in `` `bc-badge--${tone}` ``, keeps every class
+it starts.
+
+A page that adds its own stylesheet while it is open exports it from a
+`style.ts`; the shell then leaves out each declaration that stylesheet sets.
+So a new component costs the portal nothing until a page uses it.
+
+## Change it
+
+<Steps>
+  <Step title="Edit design-system/">
+    Keep to the rules at the top of `components.css`: radii by surface,
+    every pressable state, quiet selection, one focus line. Add an icon as a
+    Lucide `ICON_*` constant.
+  </Step>
+  <Step title="Regenerate what is generated">
+    After a token change, regenerate the docs' token block:
+
+    ```bash terminal
+    bun tools/web/docs-tokens.ts
+    ```
+
+    After a change the portal or a Plugin page uses, rebuild the resources
+    they commit:
+
+    ```bash terminal
+    cargo plugin run build
+    ```
+  </Step>
+  <Step title="Check">
+    ```bash terminal
+    bun run format && bun run lint && bun run check
+    bun test ./design-system ./tools/web ./plugins/captive-portal
+    ```
+  </Step>
+</Steps>

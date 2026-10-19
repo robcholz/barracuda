@@ -1,88 +1,27 @@
-/** Builds DOM: the few helpers every Live Editor page uses. */
+/** Builds DOM: the design system's builder (design-system/dom.ts) and the few helpers every Live Editor page uses. */
 
+import {
+  h,
+  icon as drawIcon,
+  type Children,
+} from "../../../../../design-system/dom";
 import { ICONS, type IconName } from "./icons";
 import { t } from "../i18n";
 
-export type Child = Node | string | number | null | undefined | false;
-/** Children may nest arrays, as `map` produces them. */
-export type Children = Child | Children[];
-export type Props = Record<
-  string,
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | ((event: Event) => void)
-  | Partial<CSSStyleDeclaration>
->;
-
-/**
- * Builds an element. `class` sets the class list; `on<event>` functions become listeners; `true`
- * sets an empty attribute; `false`, `null` and `undefined` are skipped; other values become
- * attributes. Strings and numbers among the children are inserted as text, never as markup.
- */
-export function h<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props?: Props | null,
-  ...children: Children[]
-): HTMLElementTagNameMap[K];
-export function h(
-  tag: string,
-  props?: Props | null,
-  ...children: Children[]
-): HTMLElement;
-export function h(
-  tag: string,
-  props?: Props | null,
-  ...children: Children[]
-): HTMLElement {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props ?? {})) {
-    if (value === false || value === null || value === undefined) continue;
-    if (typeof value === "function" && key.startsWith("on"))
-      node.addEventListener(key.slice(2).toLowerCase(), value);
-    else if (key === "class") node.className = String(value);
-    else if (key === "style" && typeof value === "object")
-      Object.assign(node.style, value);
-    else if (key === "value" && "value" in node)
-      (node as HTMLInputElement).value = String(value);
-    else node.setAttribute(key, value === true ? "" : String(value));
-  }
-  append(node, ...children);
-  return node;
-}
-
-/** Appends children as {@link h} does. */
-export function append(node: Node, ...children: Children[]) {
-  for (const child of (children as Child[]).flat(Infinity as 1) as Child[]) {
-    if (child === null || child === undefined || child === false) continue;
-    node.appendChild(
-      typeof child === "string" || typeof child === "number"
-        ? document.createTextNode(String(child))
-        : child,
-    );
-  }
-}
-
-/** Replaces a node's children. */
-export function fill(node: Element, ...children: Children[]) {
-  node.replaceChildren();
-  append(node, ...children);
-}
-
-/** Parses trusted, build-time SVG markup (an icon or the mark); never pass user data. */
-export function svg(markup: string): SVGSVGElement {
-  const template = document.createElement("template");
-  template.innerHTML = markup;
-  return template.content.firstElementChild as SVGSVGElement;
-}
+export {
+  append,
+  fill,
+  h,
+  mark,
+  svg,
+  type Child,
+  type Children,
+  type Props,
+} from "../../../../../design-system/dom";
 
 /** A Lucide icon as `.bc-icon`; `className` adds classes, such as `bc-muted` or `bc-spinner`. */
 export function icon(name: IconName, className = ""): SVGSVGElement {
-  return svg(
-    `<svg class="bc-icon${className ? ` ${className}` : ""}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`,
-  );
+  return drawIcon(ICONS[name], className);
 }
 
 /** A tooltip for an icon-only control: the control's own label, shown on hover and focus. */

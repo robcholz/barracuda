@@ -1,6 +1,7 @@
-/* The portal's one stylesheet: the design system verbatim (ds/), then only what the shell's layout needs. */
-@import "./ds/tokens.css";
-@import "./ds/bundle.css";
+/* The portal's one stylesheet: the design system, cut by build.ts to what the portal's pages use,
+   then only what the shell's layout needs. */
+@import "../../../../../design-system/tokens.css";
+@import "../../../../../design-system/components.css";
 
 html,
 body {
@@ -231,7 +232,7 @@ body {
   .portal-topbar--phone {
     display: flex;
   }
-  /* the chat's log and dock sit on the 16px phone gutter (a settings page is full-bleed: bundle.css) */
+  /* the chat's log and dock sit on the 16px phone gutter (a settings page is full-bleed: components.css) */
   .bc-chat-log {
     padding: var(--space-4);
   }

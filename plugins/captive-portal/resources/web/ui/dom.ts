@@ -1,4 +1,5 @@
 import type { Lang, PortalText } from "../src/contract";
+import { h, icon as drawIcon } from "../../../../../design-system/dom";
 
 /** A string in both portal languages, or one string used for both (product names, machine values). */
 export type Text = string | PortalText;
@@ -8,72 +9,14 @@ export function pick(text: Text, lang: Lang): string {
   return typeof text === "string" ? text : text[lang];
 }
 
-export type Child = Node | string | number | null | undefined | false;
-/** Children may nest arrays, as `map` produces them. */
-export type Children = Child | Children[];
-export type Props = Record<
-  string,
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | ((event: Event) => void)
-  | Partial<CSSStyleDeclaration>
->;
-
-/**
- * Builds an element. `class` sets the class list; `on<event>` functions become listeners;
- * `true` sets an empty attribute; `false`, `null` and `undefined` are skipped; other values become
- * attributes. Strings and numbers among the children are inserted as text, never as markup.
- */
-export function h<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props?: Props | null,
-  ...children: Children[]
-): HTMLElementTagNameMap[K];
-export function h(
-  tag: string,
-  props?: Props | null,
-  ...children: Children[]
-): HTMLElement;
-export function h(
-  tag: string,
-  props?: Props | null,
-  ...children: Children[]
-): HTMLElement {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props ?? {})) {
-    if (value === false || value === null || value === undefined) continue;
-    if (typeof value === "function" && key.startsWith("on"))
-      node.addEventListener(key.slice(2).toLowerCase(), value);
-    else if (key === "class") node.className = String(value);
-    else if (key === "style" && typeof value === "object")
-      Object.assign(node.style, value);
-    else node.setAttribute(key, value === true ? "" : String(value));
-  }
-  append(node, ...children);
-  return node;
-}
-
-/** Appends children as {@link h} does. */
-export function append(node: Node, ...children: Children[]) {
-  for (const child of (children as Child[]).flat(Infinity as 1) as Child[]) {
-    if (child === null || child === undefined || child === false) continue;
-    node.appendChild(
-      typeof child === "string" || typeof child === "number"
-        ? document.createTextNode(String(child))
-        : child,
-    );
-  }
-}
-
-/** Parses trusted, build-time SVG markup (an icon or mark constant); never pass user data. */
-function svgFrom(markup: string): SVGSVGElement {
-  const template = document.createElement("template");
-  template.innerHTML = markup;
-  return template.content.firstElementChild as SVGSVGElement;
-}
+export {
+  append,
+  h,
+  mark,
+  type Child,
+  type Children,
+  type Props,
+} from "../../../../../design-system/dom";
 
 /**
  * A Lucide icon (`ICON_*` from `./icons`) as `.bc-icon`, 16px unless `size` says otherwise. `className`
@@ -84,23 +27,9 @@ export function icon(
   size?: number,
   className?: string,
 ): SVGSVGElement {
-  const svg = svgFrom(
-    `<svg class="bc-icon" viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`,
-  );
-  if (className) svg.classList.add(...className.split(" "));
-  if (size) svg.style.cssText = `width:${size}px;height:${size}px`;
-  return svg;
-}
-
-/** A mark (`MARK_*` from `./marks`): brand marks fill `currentColor`, 16px unless `size` says otherwise. */
-export function mark(markup: string, size = 16): SVGSVGElement {
-  const svg = svgFrom(markup);
-  svg.setAttribute("width", String(size));
-  svg.setAttribute("height", String(size));
-  svg.style.width = `${size}px`;
-  svg.style.height = `${size}px`;
-  svg.style.flex = "none";
-  return svg;
+  const node = drawIcon(paths, className);
+  if (size) node.style.cssText = `width:${size}px;height:${size}px`;
+  return node;
 }
 
 const loaded = new Map<string, Promise<string>>();

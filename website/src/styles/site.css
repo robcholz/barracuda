@@ -1,4 +1,4 @@
-/* The Barracuda website, on the design system (ds/tokens.css, ds/bundle.css). */
+/* The Barracuda website, on the design system (design-system/tokens.css, components.css). */
 body{margin:0;background:#F5F5F7}
 .w{font-family:var(--font-sans);font-size:14px;line-height:20px}
 .w *,.w *::before,.w *::after{box-sizing:border-box}

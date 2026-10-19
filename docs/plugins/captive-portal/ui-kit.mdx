@@ -66,9 +66,9 @@ Text and DOM (`dom.ts`)
   boolean attributes; string children are text, never markup.
 - `icon(ICON_*, size?, className?)`: a Lucide icon (`ICON_EYE`, `ICON_REFRESH`, `ICON_PLUS`,
   `ICON_WIFI`, `ICON_COPY`, `ICON_EXTERNAL_LINK`, `ICON_MAIL`, `ICON_KEY_ROUND`, … from
-  `icons.ts`), 16px by default, 18px on phone rows; `className` adds classes such as a
+  `icons.ts`, which re-exports the [design system](/contributing/design-system)'s set), 16px by default, 18px on phone rows; `className` adds classes such as a
   text colour (`bc-muted`, `bc-warning`).
-- `mark(MARK_*, size?)`: a design mark from `marks.ts` — `MARK_BARE`, `MARK_TILE`
+- `mark(MARK_*, size?)`: the design system's mark from `marks.ts` — `MARK_BARE`, `MARK_TILE`
   (chat avatar), or a brand mark a page keeps in its own sources.
 - `assetIcon(url, size?)`: an icon file; `.svg` is drawn as a `currentColor` mask,
   anything else as an image. Use `new URL("./icon.svg", import.meta.url).href` for

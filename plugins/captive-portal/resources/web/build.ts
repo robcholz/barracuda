@@ -1,8 +1,50 @@
+import { Glob } from "bun";
 import { fileURLToPath } from "node:url";
+import { prune, scan } from "../../../../design-system/prune";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
+const plugins = fileURLToPath(new URL("../../../", import.meta.url));
 const output = fileURLToPath(
   new URL("../../filesystem/resources/", import.meta.url),
+);
+
+/**
+ * What the portal draws: the shell, its UI kit and its own stylesheet (for the tokens its layout
+ * reads), and every built-in page, since pages draw with the shell's stylesheet. Tests and build
+ * scripts draw nothing.
+ */
+async function sources(): Promise<string[]> {
+  const texts = [await Bun.file(`${root}src/app.css`).text()];
+  for await (const path of new Glob("*/resources/web/**/*.{ts,js,html}").scan(
+    plugins,
+  ))
+    if (!/\/tests\/|\/(build|preview)\.ts$/.test(path))
+      texts.push(await Bun.file(plugins + path).text());
+  return texts;
+}
+
+/** The stylesheets pages add while they are open (`style.ts` exports), which the shell leaves to them. */
+async function pageStyles(): Promise<string[]> {
+  const sheets: string[] = [];
+  for await (const path of new Glob("*/resources/web/**/style.ts").scan(
+    plugins,
+  )) {
+    if (path.startsWith("captive-portal/")) continue;
+    const module: Record<string, unknown> = await import(plugins + path);
+    for (const value of Object.values(module))
+      if (typeof value === "string") sheets.push(value);
+  }
+  return sheets;
+}
+
+const designSystem = fileURLToPath(
+  new URL("../../../../design-system/", import.meta.url),
+);
+const names = ["tokens.css", "components.css"];
+const cut = prune(
+  await Promise.all(names.map((name) => Bun.file(designSystem + name).text())),
+  scan(await sources()),
+  await pageStyles(),
 );
 const result = await Bun.build({
   entrypoints: [`${root}src/app.ts`, `${root}src/app.css`],
@@ -11,6 +53,18 @@ const result = await Bun.build({
   format: "esm",
   minify: true,
   naming: "[name].[ext]",
+  plugins: [
+    {
+      name: "design-system",
+      setup(build) {
+        build.onLoad({ filter: /design-system\/[\w-]+\.css$/ }, (args) => {
+          const index = names.indexOf(args.path.slice(designSystem.length));
+          if (index < 0) throw new Error(`${args.path} is not in ${names}`);
+          return { contents: cut[index], loader: "css" };
+        });
+      },
+    },
+  ],
 });
 if (!result.success)
   throw new AggregateError(result.logs, "Portal build failed");

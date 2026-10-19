@@ -1,4 +1,7 @@
-/* Barracuda — generated from tokens.json */
+/* Barracuda's tokens: colour, type, space, radius and size. The one copy: the website, Live Editor
+   and the device portal read it, and the docs' style.css carries a generated block of it
+   (bun tools/web/docs-tokens.ts). Every theme block restates the semantic tokens, so a nested
+   data-theme (a light QR plate on a dark page) resolves them against its own scale. */
 :root,
 [data-theme="light"] {
   --background-100: #fafafb;
@@ -63,21 +66,50 @@
   --lime-800: #bae634;
   --lime-900: #5a7301;
   --lime-1000: #253100;
+  --background: var(--background-100);
+  --sidebar: var(--background-200);
+  --foreground: var(--gray-1000);
+  --muted: var(--gray-100);
+  --muted-hover: var(--gray-200);
+  --muted-active: var(--gray-300);
   --muted-foreground: var(--gray-500);
+  --nav-foreground: var(--gray-700);
   --disabled-foreground: var(--gray-400);
+  --border: var(--gray-200);
+  --border-hover: var(--gray-300);
   --border-active: var(--gray-400);
   --input: #8a8a92;
   --input-hover: var(--gray-500);
+  --ghost-hover: var(--gray-alpha-200);
+  --ghost-active: var(--gray-alpha-300);
+  --ring: var(--gray-1000);
+  --primary: var(--lime-700);
+  --primary-hover: var(--lime-800);
+  --primary-active: color-mix(in srgb, var(--lime-800) 88%, #09090b);
   --primary-foreground: #09090b;
+  --signal: var(--lime-700);
+  --signal-hover: var(--lime-800);
   --signal-foreground: #09090b;
+  --signal-text: var(--lime-900);
+  --success: var(--lime-900);
+  --warning: var(--amber-900);
+  --success-surface: var(--lime-100);
+  --success-border: var(--lime-400);
+  --warning-surface: var(--amber-100);
+  --warning-border: var(--amber-400);
+  --destructive: var(--red-900);
+  --destructive-surface: var(--red-100);
+  --destructive-border: var(--red-400);
+  --destructive-foreground: var(--red-1000);
+  --destructive-fill: var(--red-900);
   --destructive-fill-hover: color-mix(in srgb, var(--red-900) 88%, #09090b);
   --destructive-fill-foreground: var(--background-100);
+  --link: var(--blue-900);
   --figure-plate: #fafafb;
   --figure-hi: #232327;
   --figure-edge: #a4a4ac;
   --figure-mid: #c3c3c9;
   --figure-lo: #e0e0e4;
-  --shadow-xs: 0px 1px 2px #00000029;
 }
 [data-theme="dark"] {
   --background-100: #09090b;
@@ -142,47 +174,50 @@
   --lime-800: #b9e625;
   --lime-900: #93b903;
   --lime-1000: #ecfcce;
-  --muted-foreground: var(--gray-600);
-  --disabled-foreground: var(--gray-500);
-  --border-active: var(--gray-400);
-  --input: #63636b;
-  --input-hover: var(--gray-600);
-  --destructive-fill-hover: color-mix(in srgb, var(--red-900) 85%, #fafafa);
-  --destructive-fill-foreground: #09090b;
-  --figure-plate: #09090b;
-  --figure-hi: #fafafa;
-  --figure-edge: #878787;
-  --figure-mid: #454545;
-  --figure-lo: #2e2e2e;
-}
-:root,
-[data-theme] {
   --background: var(--background-100);
   --sidebar: var(--background-200);
   --foreground: var(--gray-1000);
   --muted: var(--gray-100);
   --muted-hover: var(--gray-200);
   --muted-active: var(--gray-300);
+  --muted-foreground: var(--gray-600);
   --nav-foreground: var(--gray-700);
+  --disabled-foreground: var(--gray-500);
   --border: var(--gray-200);
   --border-hover: var(--gray-300);
+  --border-active: var(--gray-400);
+  --input: #63636b;
+  --input-hover: var(--gray-600);
   --ghost-hover: var(--gray-alpha-200);
   --ghost-active: var(--gray-alpha-300);
   --ring: var(--gray-1000);
   --primary: var(--lime-700);
   --primary-hover: var(--lime-800);
   --primary-active: color-mix(in srgb, var(--lime-800) 88%, #09090b);
+  --primary-foreground: #09090b;
   --signal: var(--lime-700);
   --signal-hover: var(--lime-800);
+  --signal-foreground: #09090b;
   --signal-text: var(--lime-900);
   --success: var(--lime-900);
   --warning: var(--amber-900);
+  --success-surface: var(--lime-100);
+  --success-border: var(--lime-400);
+  --warning-surface: var(--amber-100);
+  --warning-border: var(--amber-400);
   --destructive: var(--red-900);
   --destructive-surface: var(--red-100);
   --destructive-border: var(--red-400);
   --destructive-foreground: var(--red-1000);
   --destructive-fill: var(--red-900);
+  --destructive-fill-hover: color-mix(in srgb, var(--red-900) 85%, #fafafa);
+  --destructive-fill-foreground: #09090b;
   --link: var(--blue-900);
+  --figure-plate: #09090b;
+  --figure-hi: #fafafa;
+  --figure-edge: #878787;
+  --figure-mid: #454545;
+  --figure-lo: #2e2e2e;
 }
 :root {
   --space-1: 4px;
@@ -202,6 +237,7 @@
   --sidebar-width: 240px;
   --topbar-height: 56px;
   --content-max: 1040px;
+  --shadow-xs: 0px 1px 2px #00000029;
   --font-sans:
     -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
     "Noto Sans SC", "Microsoft YaHei", "Segoe UI", sans-serif;
