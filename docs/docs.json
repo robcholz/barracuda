@@ -245,6 +245,7 @@
                 "pages": [
                   "architecture/repository",
                   "contributing/docs",
+                  "contributing/website",
                   "get-started/tooling",
                   "architecture/codestyle",
                   "architecture/agent-oriented-api-design",
@@ -731,6 +732,7 @@
                 "pages": [
                   "zh/architecture/repository",
                   "zh/contributing/docs",
+                  "zh/contributing/website",
                   "zh/get-started/tooling",
                   "zh/architecture/codestyle",
                   "zh/architecture/agent-oriented-api-design",
