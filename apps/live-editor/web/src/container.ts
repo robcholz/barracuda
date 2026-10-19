@@ -5,6 +5,8 @@
  * system fonts.
  */
 
+import { manifestProblem } from "./manifest";
+
 /** An app's sources by file name: `app.json`, its entry program, and for a view `app.tsx`, `app.d.ts` and `pocket.json`. */
 export type AppSources = ReadonlyMap<string, string>;
 
@@ -27,10 +29,17 @@ export class BuildError extends Error {
   constructor(
     message: string,
     readonly file?: string,
+    readonly line?: number,
+    readonly column?: number,
   ) {
     super(message);
   }
 }
+
+/** The manifest's, the entry program's and the view files' size limits on the device. */
+const MAX_MANIFEST_BYTES = 4 * 1024;
+const MAX_ENTRY_BYTES = 64 * 1024;
+const MAX_VIEW_BYTES = 512 * 1024;
 
 interface Manifest {
   entry?: string;
@@ -94,6 +103,24 @@ export async function buildContainer(
     if (size) manifest.view.size = size;
     if (shape) manifest.view.shape = shape;
   }
-  files.set("app.json", utf8(`${JSON.stringify(manifest, null, 2)}\n`));
+  const problem = manifestProblem(manifest);
+  if (problem) throw new BuildError(`app.json: ${problem}`, "app.json");
+  const text = utf8(`${JSON.stringify(manifest, null, 2)}\n`);
+  if (text.length > MAX_MANIFEST_BYTES)
+    throw new BuildError("app.json: the manifest is at most 4 KiB", "app.json");
+  if ((files.get(entry)?.length ?? 0) > MAX_ENTRY_BYTES)
+    throw new BuildError(
+      `${entry}: the entry program is at most 64 KiB`,
+      entry,
+    );
+  const view =
+    (files.get("view.bvir")?.length ?? 0) +
+    (files.get("styles.bin")?.length ?? 0);
+  if (view > MAX_VIEW_BYTES)
+    throw new BuildError(
+      "app.tsx: the view files are at most 512 KiB together",
+      "app.tsx",
+    );
+  files.set("app.json", text);
   return { manifest, files };
 }

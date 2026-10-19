@@ -1,6 +1,10 @@
-// Builds Live Editor's compiler into dist/:
+// Builds Live Editor into dist/, a static site:
 //
+//   index.html, main.js, app.css   the page, and workers/ for the build and run workers
 //   live-editor.wasm    the view linker and the preview (apps/live-editor/wasm)
+//   lua.wasm            Lua 5.4 for the preview's runs (wasmoon)
+//   fonts/              the device's system fonts (plugins/system-fonts)
+//   templates.json      the app manager's example apps, for New app
 //   microts.js          PocketJS's MicroTS compiler, bundled for the browser
 //   microts-files.json  the files it reads (TypeScript's library declarations, PocketJS's sources)
 //
@@ -44,8 +48,14 @@ fs.copyFileSync(
 );
 console.log("live-editor.wasm");
 
+await buildApp();
+
 const pocket = process.env.POCKETJS_ROOT && resolve(process.env.POCKETJS_ROOT);
 if (!pocket) {
+  if (fs.existsSync(join(dist, "microts.js"))) {
+    console.log("microts.js: kept (set POCKETJS_ROOT to rebuild it)");
+    process.exit(0);
+  }
   console.error(
     "Set POCKETJS_ROOT to a PocketJS checkout to bundle the MicroTS compiler.",
   );
@@ -165,3 +175,69 @@ fs.rmSync(entry, { force: true });
 if (!result.success)
   throw new AggregateError(result.logs, "the MicroTS bundle failed");
 console.log(`microts.js: ${(result.outputs[0].size / 1e6).toFixed(1)} MB`);
+
+/** The page, its workers, and the files they load. */
+async function buildApp() {
+  const src = join(web, "src");
+  const app = await Bun.build({
+    entrypoints: [
+      join(src, "main.ts"),
+      join(src, "workers/build.ts"),
+      join(src, "workers/run.ts"),
+    ],
+    root: src,
+    outdir: dist,
+    target: "browser",
+    format: "esm",
+    splitting: false,
+    minify: true,
+    sourcemap: "linked",
+    plugins: [
+      {
+        // wasmoon's Emscripten glue imports `module` only when it runs on Node.
+        name: "node-only",
+        setup(build) {
+          build.onResolve({ filter: /^(node:)?module$/ }, () => ({
+            path: "module",
+            namespace: "node-only",
+          }));
+          build.onLoad({ filter: /.*/, namespace: "node-only" }, () => ({
+            contents:
+              "export const createRequire = () => { throw new Error('unavailable in the browser'); };",
+            loader: "js",
+          }));
+        },
+      },
+    ],
+  });
+  if (!app.success) throw new AggregateError(app.logs, "the app bundle failed");
+  for (const name of ["index.html", "app.css", "favicon.svg"])
+    fs.copyFileSync(join(src, name), join(dist, name));
+  fs.cpSync(join(src, "ds"), join(dist, "ds"), { recursive: true });
+  fs.copyFileSync(
+    join(repository, "node_modules/wasmoon/dist/glue.wasm"),
+    join(dist, "lua.wasm"),
+  );
+  const fonts = join(
+    repository,
+    "plugins/system-fonts/filesystem/resources/fonts",
+  );
+  const names = readdirSync(fonts)
+    .filter((name) => /^font-\d+\.bin$/.test(name))
+    .sort();
+  mkdirSync(join(dist, "fonts"), { recursive: true });
+  for (const name of names)
+    fs.copyFileSync(join(fonts, name), join(dist, "fonts", name));
+  writeFileSync(join(dist, "fonts/index.json"), JSON.stringify(names));
+  const examples = join(repository, "plugins/app-manager/resources/examples");
+  const templates: Record<string, Record<string, string>> = {};
+  for (const id of readdirSync(examples).sort()) {
+    templates[id] = {};
+    for (const file of readdirSync(join(examples, id)).sort())
+      templates[id][file] = fs.readFileSync(join(examples, id, file), "utf8");
+  }
+  writeFileSync(join(dist, "templates.json"), JSON.stringify(templates));
+  console.log(
+    `app: main.js, workers, ${names.length} fonts, ${Object.keys(templates).length} templates`,
+  );
+}

@@ -11,6 +11,7 @@
     "dev": "bun plugins/captive-portal/resources/web/build.ts && bun plugins/captive-portal/resources/web/preview.ts"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-javascript": "^6.2.5",

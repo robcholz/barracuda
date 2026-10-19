@@ -81,6 +81,8 @@ export function compileView(
       throw new BuildError(
         `${first.file}:${first.line}:${first.column}: ${first.message}`,
         first.file,
+        first.line,
+        first.column,
       );
     throw new BuildError(
       error instanceof Error ? error.message : String(error),
