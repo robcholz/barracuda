@@ -1,9 +1,7 @@
 # Products with a screen: the base set and the system UI, with what needs the
-# network too: Wi-Fi in the system UI, installing from the portal, and the
-# Sessions and Settings apps.
+# network too: Wi-Fi in the system UI, and the Sessions and Settings apps.
 extends: [headless, ui]
 enable:
-  - app-portal
   - builtin-app-sessions
   - builtin-app-settings
   - system-wifi

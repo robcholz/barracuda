@@ -2,8 +2,8 @@
 //!
 //! An app is a Lua program with an optional compiled MicroTS view, stored as a
 //! container directory in the format `docs/plugins/app-manager/app-format.mdx` defines: a builtin
-//! app's in the Plugin that ships it ([`BUILTIN_APP`]), others under
-//! [`INSTALLED_APPS`] and [`WORKSPACE_APPS`]. Opening an app runs its program
+//! app's in the Plugin that ships it ([`BUILTIN_APP`]), installable apps'
+//! as `<id>.bapp` directories under [`WORKSPACE_APPS`]. Opening an app runs its program
 //! on the VM with the `app` Lua package and, on a device with a display,
 //! opens its view through the UI kit. The system UI drives the lifecycle
 //! through [`AppManager`]; `docs/plugins/app-manager.mdx` describes the states. This crate
@@ -13,7 +13,6 @@
 
 extern crate alloc;
 
-mod bapp;
 mod builtin;
 mod bundle;
 mod device;
@@ -24,16 +23,15 @@ mod storage;
 mod view;
 mod workflow;
 
-pub use bapp::{MAX_PACKAGE_BYTES, MAX_PACKAGE_FILES, PACKAGE_EXTENSION, PUBLIC_KEY_BYTES, Seal};
 /// How an app run ended, as [`AppExit::outcome`] reports it.
 pub use barracuda_vm_plugin::VmRunOutcome;
 pub use builtin::{
     BuiltinApp, BuiltinBackend, BuiltinPackage, MAX_BUILTIN_ARGS, MAX_BUILTIN_CALLS,
 };
 pub use bundle::{
-    APP_PACKAGE, AppInfo, AppKind, AppList, AppLocation, BUILTIN_APP, DEFAULT_ENTRY,
-    FORMAT_VERSION, INSTALLED_APPS, InvalidApp, MANIFEST_FILE, MAX_PERMISSIONS, MAX_SOURCE_BYTES,
-    MAX_VIEW_BYTES, WORKSPACE_APPS, valid_id,
+    APP_EXTENSION, APP_PACKAGE, AppInfo, AppKind, AppList, AppLocation, BUILTIN_APP, DEFAULT_ENTRY,
+    FORMAT_VERSION, InvalidApp, MANIFEST_FILE, MAX_PERMISSIONS, MAX_SOURCE_BYTES, MAX_VIEW_BYTES,
+    WORKSPACE_APPS,
 };
 pub use device::{API_LEVEL, Device, ViewShape, requirement};
 pub use manager::{

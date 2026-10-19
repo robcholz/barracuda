@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Minimal no_std WebSocket client (RFC 6455) over embedded-io-async halves"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [lib]
 name = "ws_client"

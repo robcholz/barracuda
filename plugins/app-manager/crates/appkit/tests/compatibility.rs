@@ -57,10 +57,10 @@ async fn put(fs: &ScopedVfs, path: &str, bytes: &[u8]) {
     fs.write(path, bytes).await.unwrap();
 }
 
-/// A Workspace container with `fields` added to its manifest; one with a
+/// An installable app with `fields` added to its manifest; one with a
 /// `view` gets placeholder view files.
 async fn offer(fs: &ScopedVfs, id: &str, fields: &str) {
-    let dir = format!("/workspace/media/apps/{id}");
+    let dir = format!("/workspace/media/apps/{id}.bapp");
     put(
         fs,
         &format!("{dir}/app.json"),
@@ -186,7 +186,7 @@ async fn scenario(spawner: Spawner) {
 
     let list = manager.list().await;
     let offered: Vec<_> = list
-        .installable
+        .apps
         .iter()
         .map(|app| (app.id.as_str(), app.incompatible.as_deref()))
         .collect();
@@ -217,34 +217,27 @@ async fn scenario(spawner: Spawner) {
         .collect();
     assert_eq!(invalid.len(), 6, "{invalid:#?}");
     for ((dir, problem), (expected_dir, expected)) in invalid.iter().zip([
-        ("core", "\"time\" is a package every app has"),
-        ("loose", "\"pins\" talks to a Board's hardware"),
-        ("mislabeled", "\"light\" is a stable package"),
-        ("pinned", "\"pins\" is not a stable package"),
-        ("twice", "\"light\" is listed twice"),
-        ("versioned", "\"light@soon\" is not a package name"),
+        ("core.bapp", "\"time\" is a package every app has"),
+        ("loose.bapp", "\"pins\" talks to a Board's hardware"),
+        ("mislabeled.bapp", "\"light\" is a stable package"),
+        ("pinned.bapp", "\"pins\" is not a stable package"),
+        ("twice.bapp", "\"light\" is listed twice"),
+        ("versioned.bapp", "\"light@soon\" is not a package name"),
     ]) {
         assert_eq!(*dir, expected_dir);
         assert!(problem.contains(expected), "{dir}: {problem}");
     }
 
-    // Incompatible apps are neither requested nor installed.
+    // Incompatible apps do not open.
     for id in ["later", "dim", "elsewhere", "square", "photo", "serial"] {
         assert_eq!(
-            manager.request_install(id).await.err(),
-            Some(AppError::Incompatible),
-            "{id}"
-        );
-        assert_eq!(
-            manager.install(id).await.err(),
+            manager.open(id).await.err(),
             Some(AppError::Incompatible),
             "{id}"
         );
     }
-    assert_eq!(manager.install_request(), None);
 
     // A run may require the ambient packages and what its manifest asked for.
-    manager.install("lamp").await.unwrap();
     manager.open("lamp").await.unwrap();
     for _ in 0..500 {
         if manager.running().is_empty() {

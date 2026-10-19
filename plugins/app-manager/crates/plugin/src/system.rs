@@ -12,9 +12,7 @@ use crate::notices::{DEFAULT_LABELS, Notifications};
 use crate::preferences::Preferences;
 use crate::words;
 use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
-use barracuda_appkit::{
-    AppError, AppInfo, AppKind, AppManager, AppState, RunningApp, VmRunOutcome,
-};
+use barracuda_appkit::{AppInfo, AppKind, AppManager, AppState, RunningApp, VmRunOutcome};
 use barracuda_power_plugin::Power;
 use barracuda_sound_plugin::Volume;
 use barracuda_time_plugin::UtcClock;
@@ -60,7 +58,7 @@ pub enum Screen {
     /// The home screen: the Agent, and the one thing that most needs
     /// attention.
     Home,
-    /// Every app, launchable or offered for installation.
+    /// Every app.
     Apps,
     /// The app switcher.
     Running,
@@ -72,8 +70,6 @@ pub enum Screen {
     Launching,
     /// The app on the display ended unexpectedly.
     Exited,
-    /// Asks whether to install an offered app, listing its permissions.
-    Install,
     /// An app's details, and uninstalling it.
     Info,
     /// The menu a long press on an app opens.
@@ -91,7 +87,7 @@ impl Screen {
             Screen::Control => 4,
             Screen::Launching => 5,
             Screen::Exited => 6,
-            Screen::Install => 7,
+            // 7 was the install screen.
             Screen::Info => 8,
             Screen::Menu => 9,
         }
@@ -101,13 +97,6 @@ impl Screen {
     const fn is_panel(self) -> bool {
         matches!(self, Screen::Notices | Screen::Control)
     }
-}
-
-/// One app in the launcher.
-struct Entry {
-    info: AppInfo,
-    /// Offered in the Workspace, not installed.
-    offered: bool,
 }
 
 /// The services the system UI drives.
@@ -142,11 +131,12 @@ pub struct SystemUi {
     below: Option<Screen>,
     /// Which of its views the control center shows.
     control: i32,
-    entries: Vec<Entry>,
+    /// The launcher's apps.
+    entries: Vec<AppInfo>,
     /// The launcher page on the display.
     page: usize,
     running: Vec<RunningApp>,
-    /// The app a launching, exited, install, info, or menu screen is about.
+    /// The app a launching, exited, info, or menu screen is about.
     subject: Option<AppInfo>,
     /// Why the subject exited, on the exited screen.
     exit_reason: &'static str,
@@ -228,10 +218,7 @@ impl SystemUi {
     /// The launcher's app names, in the order `openApp` indexes them.
     #[must_use]
     pub fn launcher(&self) -> Vec<&str> {
-        self.entries
-            .iter()
-            .map(|entry| entry.info.name.as_str())
-            .collect()
+        self.entries.iter().map(|info| info.name.as_str()).collect()
     }
 
     /// The display's size in view pixels, and whether it is round.
@@ -264,25 +251,14 @@ impl SystemUi {
 
     /// Re-reads the app list.
     async fn reload(&mut self) {
-        let list = self.services.apps.list().await;
-        self.entries = list
-            .apps
-            .into_iter()
-            .map(|info| Entry {
-                info,
-                offered: false,
-            })
-            .chain(list.installable.into_iter().map(|info| Entry {
-                info,
-                offered: true,
-            }))
-            .collect();
-        // Builtin apps first, then installed ones, then offers.
+        self.entries = self.services.apps.list().await.apps;
+        // Builtin apps first, then installable ones, then those that cannot
+        // run here.
         self.entries
-            .sort_by_key(|entry| match (entry.info.kind, entry.offered) {
+            .sort_by_key(|info| match (info.kind, &info.incompatible) {
                 (AppKind::System, _) => 0,
-                (_, false) => 1,
-                (_, true) => 2,
+                (_, None) => 1,
+                (_, Some(_)) => 2,
             });
         self.page = self.page.min(self.pages() - 1);
     }
@@ -369,10 +345,7 @@ impl SystemUi {
                         self.go(Screen::Apps).await;
                     }
                 }
-                (
-                    Some(Screen::Menu | Screen::Info | Screen::Install | Screen::Exited),
-                    Direction::Right,
-                ) => {
+                (Some(Screen::Menu | Screen::Info | Screen::Exited), Direction::Right) => {
                     self.cancel().await;
                 }
                 _ => {}
@@ -381,11 +354,8 @@ impl SystemUi {
                 let call = self.session.resolve_press(x, y);
                 match (screen, call) {
                     (Some(Screen::Apps), Some(call)) if call.handler == "openApp" => {
-                        let entry = index(&call)
-                            .and_then(|index| self.entries.get(index))
-                            .filter(|entry| !entry.offered)
-                            .map(|entry| entry.info.clone());
-                        if let Some(info) = entry {
+                        let entry = index(&call).and_then(|index| self.entries.get(index));
+                        if let Some(info) = entry.cloned() {
                             self.subject = Some(info);
                             self.show(Some(Screen::Menu));
                         }
@@ -407,27 +377,14 @@ impl SystemUi {
         let selected = index(&call);
         match call.handler.as_str() {
             "openApp" => {
-                let Some(entry) = selected.and_then(|index| self.entries.get(index)) else {
+                let Some(info) = selected.and_then(|index| self.entries.get(index)) else {
                     return;
                 };
-                let (info, offered) = (entry.info.clone(), entry.offered);
-                self.subject = Some(info.clone());
-                if offered {
-                    // Asking checks and pins what the person is shown, so
-                    // the install takes exactly that.
-                    let apps = &self.services.apps;
-                    let subject = match apps.request_install(&info.id).await {
-                        Ok(requested) => requested,
-                        Err(AppError::Incompatible) => {
-                            apps.install_offer(&info.id).await.unwrap_or(info)
-                        }
-                        Err(error) => AppInfo {
-                            incompatible: Some(String::from(words::open_error(error))),
-                            ..info
-                        },
-                    };
-                    self.subject = Some(subject);
-                    self.show(Some(Screen::Install));
+                let info = info.clone();
+                if info.incompatible.is_some() {
+                    // The info screen says why it cannot run here.
+                    self.subject = Some(info);
+                    self.show(Some(Screen::Info));
                 } else {
                     self.launch(info).await;
                 }
@@ -553,11 +510,7 @@ impl SystemUi {
         let Some(id) = self.services.apps.opening(what) else {
             return;
         };
-        let info = self
-            .entries
-            .iter()
-            .find(|entry| entry.info.id == id && !entry.offered)
-            .map(|entry| entry.info.clone());
+        let info = self.entries.iter().find(|info| info.id == id).cloned();
         if let Some(info) = info {
             self.below = None;
             self.launch(info).await;
@@ -569,19 +522,6 @@ impl SystemUi {
             return;
         };
         match self.screen {
-            // An app that cannot run here is never installed.
-            Some(Screen::Install) if subject.incompatible.is_some() => {}
-            Some(Screen::Install) => {
-                if let Err(error) = self.services.apps.install(&subject.id).await {
-                    log::warn!("system ui: cannot install {}: {error}", subject.id);
-                    self.services.notices.post(
-                        &format!("无法安装“{}”", subject.name),
-                        words::open_error(error),
-                        Some("apps"),
-                    );
-                }
-                self.go(Screen::Apps).await;
-            }
             Some(Screen::Exited) => self.launch(subject).await,
             Some(Screen::Info | Screen::Menu) if subject.kind == AppKind::Installable => {
                 if let Err(error) = self.services.apps.uninstall(&subject.id).await {
@@ -595,12 +535,6 @@ impl SystemUi {
 
     async fn cancel(&mut self) {
         match self.screen {
-            Some(Screen::Install) => {
-                if let Some(subject) = &self.subject {
-                    self.services.apps.decline_install(&subject.id);
-                }
-                self.go(Screen::Apps).await;
-            }
             Some(Screen::Info | Screen::Menu) => self.go(Screen::Apps).await,
             _ => self.go(Screen::Home).await,
         }
@@ -627,16 +561,13 @@ impl SystemUi {
                     words::open_error(error),
                     info.icon.as_deref(),
                 );
-                if error == AppError::NotInstalled {
-                    self.reload().await;
-                }
                 self.go(Screen::Apps).await;
             }
         }
     }
 
-    /// Catches up with the app lifecycle: exits, install requests, and apps
-    /// opened or closed by someone else, such as a Workflow.
+    /// Catches up with the app lifecycle: exits, and apps opened or closed
+    /// by someone else, such as a Workflow.
     pub async fn reconcile(&mut self) {
         let apps = self.services.apps.clone();
         self.running = apps.running();
@@ -660,18 +591,6 @@ impl SystemUi {
                     );
                 }
             }
-        }
-        if let Some(request) = apps.install_request()
-            && !(self.screen == Some(Screen::Install)
-                && self
-                    .subject
-                    .as_ref()
-                    .is_some_and(|subject| subject.id == request.id))
-        {
-            self.reload().await;
-            self.subject = Some(request);
-            self.below = None;
-            self.show(Some(Screen::Install));
         }
         let foreground = apps.foreground().map(|app| app.app.id);
         if foreground != self.foreground {
@@ -737,7 +656,6 @@ impl SystemUi {
     fn info(&self, id: &str) -> Option<AppInfo> {
         self.entries
             .iter()
-            .map(|entry| &entry.info)
             .chain(self.running.iter().map(|app| &app.app))
             .find(|info| info.id == id)
             .cloned()
@@ -853,34 +771,16 @@ impl SystemUi {
                 "重新打开",
                 "回到主页",
             ),
-            Screen::Install => match subject.and_then(|info| info.incompatible.as_ref()) {
-                Some(reason) => (
-                    format!("无法安装“{subject_name}”"),
-                    reason.clone(),
-                    self.permissions(subject),
-                    "安装",
-                    "返回",
-                ),
-                None => (
-                    format!("安装“{subject_name}”？"),
-                    match subject.and_then(|info| info.signer.as_deref()) {
-                        Some(signer) => {
-                            format!("来自工作区 · 已签名 {}", signer.get(..8).unwrap_or(signer))
-                        }
-                        None => String::from("来自工作区 · 未签名"),
-                    },
-                    self.permissions(subject),
-                    "安装",
-                    "取消",
-                ),
-            },
             Screen::Info => (
                 String::from(subject_name),
-                format!(
-                    "版本 {} · {}",
-                    subject.map_or("", |info| info.version.as_str()),
-                    if system { "系统应用" } else { "已安装" }
-                ),
+                match subject.and_then(|info| info.incompatible.as_ref()) {
+                    Some(reason) => format!("无法在此设备运行：{reason}"),
+                    None => format!(
+                        "版本 {} · {}",
+                        subject.map_or("", |info| info.version.as_str()),
+                        if system { "系统应用" } else { "已安装" }
+                    ),
+                },
                 if system {
                     Vec::new()
                 } else {
@@ -985,19 +885,18 @@ impl SystemUi {
                         .iter()
                         .zip(positions)
                         .enumerate()
-                        .map(|(index, (entry, (x, y)))| {
-                            let (icon, letter) = app_icon(&entry.info);
+                        .map(|(index, (info, (x, y)))| {
+                            let (icon, letter) = app_icon(info);
                             item([
                                 // The index into the whole launcher, which
                                 // `openApp` answers with.
                                 ViewValue::I32((first + index) as i32),
-                                ViewValue::Str(entry.info.name.clone()),
+                                ViewValue::Str(info.name.clone()),
                                 icon,
                                 ViewValue::Str(letter),
-                                ViewValue::Bool(
-                                    !entry.offered && running_ids.contains(&entry.info.id.as_str()),
-                                ),
-                                ViewValue::Bool(entry.offered),
+                                ViewValue::Bool(running_ids.contains(&info.id.as_str())),
+                                // Dimmed: an app that cannot run here.
+                                ViewValue::Bool(info.incompatible.is_some()),
                                 ViewValue::I32(x),
                                 ViewValue::I32(y),
                             ])
@@ -1138,13 +1037,6 @@ impl SystemUi {
             ("primary", ViewValue::Str(String::from(primary))),
             ("secondary", ViewValue::Str(String::from(secondary))),
             ("removable", ViewValue::Bool(!system)),
-            (
-                "blocked",
-                ViewValue::Bool(
-                    screen == Screen::Install
-                        && subject.is_some_and(|info| info.incompatible.is_some()),
-                ),
-            ),
         ];
         let channel = self.session.channel();
         for (name, value) in values {

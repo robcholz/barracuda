@@ -8,19 +8,19 @@ Barracuda 的设备 UI 由三层构成：**System<strong>、</strong>系统应�
 
 | | System | 系统应用 | 可安装应用 |
 | --- | --- | --- | --- |
-| 是什么 | `app-manager` 插件中的原生 Rust 代码 | 内置应用：由另一个插件附带的应用容器 | 用户自己安装的应用容器 |
-| 存放位置 | `app-manager` 插件的 `/resources/view` | 所属 `builtin-app-<name>` 插件的 `/resources/app` | `app-manager` 插件的 `/media/apps/<id>` |
+| 是什么 | `app-manager` 插件中的原生 Rust 代码 | 内置应用：由另一个插件附带的应用容器 | 放进 Workspace 的应用容器 |
+| 存放位置 | `app-manager` 插件的 `/resources/view` | 所属 `builtin-app-<name>` 插件的 `/resources/app` | `/workspace/media/apps/<id>.bapp/` |
 | 运行方式 | `app-manager` 任务 | 带 MicroTS 视图的 Lua 运行，受应用生命周期管理 | 同上 |
 | Lua 包 | 无 | 所有已注册的 Lua 包，包括它自己的 | 环境 Lua 包及其清单中列出的 Lua 包；永远不能使用内置应用的 Lua 包 |
 | 可否移除 | 否 | 否；只能查看应用信息；开发板可以不启用它的插件 | 是；可查看应用信息和卸载 |
 | 出错时 | 设备不可用 | System 显示它已退出 | 同上 |
-| 示例 | 主屏幕和 Agent 状态、启动器、切换器、通知中心和控制中心、启动中、已退出、安装、应用菜单和应用信息 | Sessions、Workflows、Files、Settings | 空气质量、灯带、摄像头和计数器示例 |
+| 示例 | 主屏幕和 Agent 状态、启动器、切换器、通知中心和控制中心、启动中、已退出、应用菜单和应用信息 | Sessions、Workflows、Files、Settings | 空气质量、灯带、摄像头和计数器示例 |
 
 ## 相关插件
 
 | 插件 | 包含 |
 | --- | --- |
-| `app-manager` | 应用套件（应用、安装、生命周期、`app` Lua 包）、UI 套件（视图、显示屏、触摸、手势、系统字体和图标），以及连接两者并运行 System UI 的入口 |
+| `app-manager` | 应用套件（应用、生命周期、`app` Lua 包）、UI 套件（视图、显示屏、触摸、手势、系统字体和图标），以及连接两者并运行 System UI 的入口 |
 | `builtin-app-<name>` | 一个系统应用：它的容器，以及它自己的 Lua 包的后端 |
 | `system-fonts` | 显示屏上所有视图绘制时使用的系统字体 |
 | `system-wifi` | System UI 中的 Wi-Fi：连接、离线卡片，以及门户磁贴打开的设置热点，通过 `app-manager` 的 `SystemNetwork` 实现 |
@@ -38,11 +38,11 @@ Barracuda 的设备 UI 由三层构成：**System<strong>、</strong>系统应�
 
 如果它是设备自带的全屏体验，需要可安装应用不经请求就拿不到的设备状态，并且出错时不会拖垮整台设备，就把它做成**系统应用**：Settings、会话、Workflow、文件。
 
-其他一切都是**可安装应用**：它由门户、Agent 或其他插件在 Workspace 中提供，由用户自己安装。
+其他一切都是**可安装应用**：Workspace 中的一个目录，由门户、Agent 或其他插件写入。
 
 ## System
 
-`app-manager` 插件的 System UI 就是 System。它是唯一能替用户切换和卸载应用的调用方，是系统手势的唯一所有者；它与设备设置热点上 `app-portal` 插件的门户页面一起，构成用户安装应用的唯一途径。它的视图位于系统层，在应用层之上：当某个应用在前台且没有系统界面遮挡时，显示该应用的视图；任何系统界面都会遮住应用并停止它的输入（`AppManager::set_interactive`），直到该界面关闭。
+`app-manager` 插件的 System UI 就是 System。它是唯一能替用户切换和卸载应用的调用方，也是系统手势的唯一所有者。它的视图位于系统层，在应用层之上：当某个应用在前台且没有系统界面遮挡时，显示该应用的视图；任何系统界面都会遮住应用并停止它的输入（`AppManager::set_interactive`），直到该界面关闭。
 
 UI 套件把触摸转换为点按（作用于显示屏上的视图），以及长按和滑动（只交给 System，`UiService::next_gesture`）。应用永远看不到系统手势，所以任何应用都无法挡住用户的退出路径。
 
@@ -54,15 +54,15 @@ UI 套件把触摸转换为点按（作用于显示屏上的视图），以及�
 
 ## 系统应用
 
-系统应用是内置应用：一个 `builtin-app-<name>` 插件依赖 `app-manager`，并用 `AppManager::add_builtin` 添加自己的容器。只有镜像中的插件才能这样做，所以任何安装的东西都无法成为系统应用。系统应用与其他应用遵循相同的生命周期（active、inactive、background、suspended、terminating），并且无需声明就可以 `require` 任何已注册的 Lua 包。已安装的应用不能占用系统应用的 ID，系统应用也不能被卸载。
+系统应用是内置应用：一个 `builtin-app-<name>` 插件依赖 `app-manager`，并用 `AppManager::add_builtin` 添加自己的容器。只有镜像中的插件才能这样做，所以任何安装的东西都无法成为系统应用。系统应用与其他应用遵循相同的生命周期（active、inactive、background、suspended、terminating），并且无需声明就可以 `require` 任何已注册的 Lua 包。可安装应用不能占用系统应用的 ID，系统应用也不能被卸载。
 
 内置应用通过自己的 Lua 包访问设备，比如 `settings`，其后端位于它的插件中，只读取该插件所依赖的 capability。清单中请求内置应用 Lua 包的可安装应用是无效的。内置应用可以声明 System UI 在什么情况下打开它，例如控制中心 Wi-Fi 磁贴对应的 `wifi`，这样 System UI 就永远不需要写出某个应用的名字。系统应用使用系统字体绘制，不附带自己的字体图集。
 
 ## 可安装应用
 
-可安装应用最初是 Workspace 中 `/workspace/media/apps/<id>` 下提供的一个容器；在那里它不能被启动。它基于应用 API 编写（[应用 API](/zh/plugins/app-manager/app-api)）：它的清单列出 `app` Lua 包的版本、它依赖或使用的稳定 Lua 包及所需的最低版本、它请求的其他 Lua 包，以及当它直接操作硬件时适用的开发板。System 会根据设备检查它；无法在本机运行的应用会显示原因，并且不能安装。否则，安装界面会用每个 Lua 包所属插件声明的措辞，列出它请求的内容；用户安装后，`app-manager` 插件会把容器复制到自己私有的 `/media/apps/<id>` 中，此后它的每次运行都只能 `require` 环境 Lua 包和它列出的 Lua 包。
+可安装应用是 Workspace 中的一个容器目录：`/workspace/media/apps/<id>.bapp/`。把目录放到这里就算安装了，应用也直接从这里运行：不复制、不确认、不签名。能写 Workspace 的都能安装应用，比如门户的文件管理器、Agent 或其他插件；正在写入的应用放在以 `.` 开头的目录里，写完后再改名。
 
-Workflow 或 Agent 可以用 `app.install` 请求安装；但只有用户本人才能完成安装：在设备的安装界面上完成，或者用连上设备设置热点的手机在门户的 Apps 页面上完成，后者也是没有显示屏的开发板安装应用的方式。无论哪种方式，安装的内容都和用户看到的完全一致：请求安装时，所提供内容的摘要就已被固定。提供的内容可以是一个签名的 `.bapp` 包；从它安装的应用只接受同一签名者的更新。卸载会删除容器和应用的数据；Workspace 中提供的内容会一直保留，直到作者将其移除。
+它基于应用 API 编写（[应用 API](/zh/plugins/app-manager/app-api)）：它的清单列出 `app` Lua 包的版本、它依赖或使用的稳定 Lua 包及所需的最低版本、它请求的其他 Lua 包，以及当它直接操作硬件时适用的开发板。System 会根据设备检查它；无法在本机运行的应用在启动器中变暗显示，它的应用信息界面会说明原因。应用的每次运行都只能 `require` 环境 Lua 包和它清单中列出的 Lua 包；应用信息界面会用每个 Lua 包所属插件声明的措辞列出它们。卸载会删除这个目录和应用的数据。
 
 ## 字体
 

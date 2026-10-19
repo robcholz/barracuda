@@ -5,7 +5,8 @@ import type { i32 } from "@pocketjs/framework/solid/std";
 
 /** An icon's glyph layers in the system icon font; "" where it has none. */
 export interface Icon { base: string; accent: string; dim: string }
-export interface AppItem { id: i32; name: string; icon: Icon; letter: string; running: boolean; offered: boolean; x: i32; y: i32 }
+/** `dimmed`: an app this device cannot run. */
+export interface AppItem { id: i32; name: string; icon: Icon; letter: string; running: boolean; dimmed: boolean; x: i32; y: i32 }
 export interface RunItem { id: i32; name: string; icon: Icon; letter: string; detail: string; active: boolean }
 export interface Notice { id: i32; title: string; body: string; icon: Icon; letter: string; confirm: boolean; allow: string; deny: string }
 export interface Tile { id: i32; label: string; detail: string; glyph: string; on: boolean }
@@ -15,7 +16,7 @@ export interface Dot { id: i32; on: boolean }
 
 /**
  * 0 home, 1 apps, 2 running, 3 notices, 4 control, 5 launching, 6 exited,
- * 7 install, 8 app info, 9 app menu.
+ * 8 app info, 9 app menu.
  */
 export declare const screen: Accessor<i32>;
 
@@ -54,7 +55,7 @@ export declare const brightness: Accessor<i32>;
 export declare const brightnessFill: Accessor<i32>;
 export declare const portal: Accessor<string>;
 
-// The app a launching, exited, install, info, or menu screen is about.
+// The app a launching, exited, info, or menu screen is about.
 export declare const title: Accessor<string>;
 export declare const detail: Accessor<string>;
 export declare const icon: Accessor<Icon>;
@@ -63,8 +64,6 @@ export declare const lines: Accessor<Line[]>;
 export declare const primary: Accessor<string>;
 export declare const secondary: Accessor<string>;
 export declare const removable: Accessor<boolean>;
-/** The app cannot run on this device: the install button is shown disabled. */
-export declare const blocked: Accessor<boolean>;
 
 export declare function openApp(id: i32): void;
 export declare function switchTo(id: i32): void;

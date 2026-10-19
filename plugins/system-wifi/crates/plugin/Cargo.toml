@@ -3,7 +3,7 @@ name = "barracuda-system-wifi-plugin"
 version = "0.1.0"
 edition = "2024"
 description = "Barracuda Plugin that shows Wi-Fi in the system UI"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-app-manager-plugin.workspace = true

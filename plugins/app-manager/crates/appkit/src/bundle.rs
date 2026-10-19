@@ -1,14 +1,14 @@
-//! App containers: one directory per app, or in the Workspace one `.bapp`
-//! package, in the format `docs/plugins/app-manager/app-format.mdx` defines and
+//! App containers: one directory per app, in the format
+//! `docs/plugins/app-manager/app-format.mdx` defines and
 //! `resources/app-manifest.json` checks.
 //!
 //! Where a container lives decides what kind of app it is: builtin apps'
-//! containers, each in the Plugin that ships it, are system apps, and
-//! installed ones are installable apps. Workspace containers are not
-//! launchable; they are what an install copies into [`INSTALLED_APPS`].
+//! containers, each in the Plugin that ships it, are system apps, and the
+//! `<id>.bapp` directories under [`WORKSPACE_APPS`] are installable apps.
+//! An app is installed by putting its directory there and uninstalled by
+//! removing it.
 
 use crate::AppError;
-use crate::bapp::{PACKAGE_EXTENSION, Package, PackageError, Seal};
 use crate::device::{self, Device, Packages, ViewShape};
 use alloc::{
     collections::{BTreeMap, BTreeSet},
@@ -22,16 +22,15 @@ use barracuda_vm_plugin::PackageInterface;
 use core::cell::RefCell;
 use json_validator::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
 
 /// Where a builtin app's container is, in the filesystem of the Plugin that
 /// ships it.
 pub const BUILTIN_APP: &str = "/resources/app";
-/// Installable apps the person installed, inside this Plugin's private media.
-pub const INSTALLED_APPS: &str = "/media/apps";
-/// Containers that Agents, the portal, and other Plugins offer for
-/// installation, in the shared Workspace.
+/// Installable apps, one `<id>.bapp` directory each, in the shared Workspace,
+/// where the portal, Agents, and other Plugins write them.
 pub const WORKSPACE_APPS: &str = "/workspace/media/apps";
+/// What an installable app's directory name ends in, after its ID.
+pub const APP_EXTENSION: &str = ".bapp";
 /// The most Lua packages each of a manifest's `requires`, `uses`, and
 /// `permissions` may list.
 pub const MAX_PERMISSIONS: usize = 16;
@@ -59,9 +58,7 @@ const MANIFEST_SCHEMA: JsonSchema = json_validator::json_schema!("resources/app-
 pub enum AppLocation {
     /// Shipped by a builtin app Plugin, at [`BUILTIN_APP`] in its filesystem.
     Builtin,
-    /// Installed under [`INSTALLED_APPS`].
-    Installed,
-    /// Offered for installation in the Workspace under [`WORKSPACE_APPS`].
+    /// A `<id>.bapp` directory in the Workspace under [`WORKSPACE_APPS`].
     Workspace,
 }
 
@@ -70,24 +67,24 @@ pub enum AppLocation {
 #[serde(rename_all = "snake_case")]
 pub enum AppKind {
     /// Shipped in the image: may require every Lua package, cannot be
-    /// uninstalled, and no installed app may take its ID.
+    /// uninstalled, and no installable app may take its ID.
     System,
-    /// Installed by the person: requires only `app` and the packages its
-    /// manifest asked for when it was installed, and can be uninstalled.
+    /// In the Workspace: requires only the ambient packages and the ones its
+    /// manifest names, and can be uninstalled.
     Installable,
 }
 
 impl AppLocation {
-    /// The launchable locations, in the order an app ID is looked up: a system
-    /// app's ID is never taken by an installed app.
-    const LAUNCHABLE: [AppLocation; 2] = [AppLocation::Builtin, AppLocation::Installed];
+    /// The locations, in the order an app ID is looked up: a system app's ID
+    /// is never taken by an installable app.
+    const ALL: [AppLocation; 2] = [AppLocation::Builtin, AppLocation::Workspace];
 
     /// The kind of app a container here is.
     #[must_use]
     pub const fn kind(self) -> AppKind {
         match self {
             AppLocation::Builtin => AppKind::System,
-            AppLocation::Installed | AppLocation::Workspace => AppKind::Installable,
+            AppLocation::Workspace => AppKind::Installable,
         }
     }
 
@@ -97,7 +94,6 @@ impl AppLocation {
     pub const fn root(self) -> &'static str {
         match self {
             AppLocation::Builtin => BUILTIN_APP,
-            AppLocation::Installed => INSTALLED_APPS,
             AppLocation::Workspace => WORKSPACE_APPS,
         }
     }
@@ -106,7 +102,8 @@ impl AppLocation {
 /// One app container that passed the app format.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize)]
 pub struct AppInfo {
-    /// Stable ID, equal to the container directory name.
+    /// Stable ID: a builtin app's registered ID, an installable app's
+    /// directory name before [`APP_EXTENSION`].
     pub id: String,
     /// Display name.
     pub name: String,
@@ -140,18 +137,10 @@ pub struct AppInfo {
     /// The name of the system icon the app is shown with, if it picked one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// Why the app cannot run on this device, in the words the install
-    /// screen shows; only for installable apps.
+    /// Why the app cannot run on this device, in the person's words; only
+    /// for installable apps.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub incompatible: Option<String>,
-    /// SHA-256 of the offered files, in hex: what an install asked for is
-    /// pinned to. Only on an install request.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
-    /// The short name of the key that signed an offered package, when it
-    /// is signed. Only on an install request.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signer: Option<String>,
 }
 
 /// A container that cannot be launched, and why.
@@ -165,14 +154,12 @@ pub struct InvalidApp {
     pub problem: String,
 }
 
-/// Every container, split into launchable, offered, and broken ones.
+/// Every container, split into apps and broken ones.
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize)]
 pub struct AppList {
-    /// Launchable system and installed apps, sorted by ID.
+    /// System and installable apps, sorted by ID; an installable app that
+    /// cannot run on this device says why in `incompatible`.
     pub apps: Vec<AppInfo>,
-    /// Workspace containers that can be installed: new apps and installed
-    /// apps at another version, sorted by ID.
-    pub installable: Vec<AppInfo>,
     /// Containers that fail the app format, so their authors can fix them.
     pub invalid: Vec<InvalidApp>,
 }
@@ -217,93 +204,29 @@ struct ViewFiles {
     shape: Option<ViewShape>,
 }
 
-/// Where a container's files are.
-pub(crate) enum Source {
-    /// Files in directory `dir`.
-    Dir { filesystem: ScopedVfs, dir: String },
-    /// Files in a package.
-    Package {
-        filesystem: ScopedVfs,
-        package: Package,
-    },
+/// Where a container's files are: directory `dir` in `filesystem`.
+pub(crate) struct Source {
+    filesystem: ScopedVfs,
+    dir: String,
 }
 
 impl Source {
     /// Reads file `name`, refusing one larger than `limit` bytes.
-    pub(crate) async fn read(&self, name: &str, limit: u64) -> Result<Vec<u8>, Problem> {
-        match self {
-            Self::Dir { filesystem, dir } => read_limited(filesystem, dir, name, limit).await,
-            Self::Package {
-                filesystem,
-                package,
-            } => Ok(package.read(filesystem, name, limit).await?),
-        }
+    async fn read(&self, name: &str, limit: u64) -> Result<Vec<u8>, Problem> {
+        read_limited(&self.filesystem, &self.dir, name, limit).await
     }
 
     async fn require(&self, name: &str) -> Result<(), Problem> {
-        match self {
-            Self::Dir { filesystem, dir } => require_file(filesystem, dir, name).await,
-            Self::Package { package, .. } if package.has(name) => Ok(()),
-            Self::Package { .. } => Err(invalid(format!("{name} is missing"))),
-        }
-    }
-}
-
-impl From<PackageError> for Problem {
-    fn from(error: PackageError) -> Self {
-        match error {
-            PackageError::Storage => Problem::Storage,
-            PackageError::Invalid(message) => Problem::Invalid(message),
-        }
+        require_file(&self.filesystem, &self.dir, name).await
     }
 }
 
 /// A container checked against the app format.
 pub(crate) struct Container {
     pub(crate) info: AppInfo,
-    pub(crate) source: Source,
+    source: Source,
     entry: String,
     view: Option<ViewFiles>,
-}
-
-impl Container {
-    /// What the container's files hash to, and who signed them: a
-    /// package's signature, checked; a directory's files, each preceded by
-    /// its name and length, are unsigned.
-    pub(crate) async fn seal(&self) -> Result<Seal, AppError> {
-        if let Source::Package {
-            filesystem,
-            package,
-        } = &self.source
-        {
-            return Ok(package.seal(filesystem).await.map_err(Problem::from)?);
-        }
-        let mut files = self.files();
-        files.sort_unstable();
-        let mut hasher = Sha256::new();
-        for name in files {
-            let bytes = self.source.read(name, MAX_VIEW_BYTES).await?;
-            hasher.update(name.as_bytes());
-            hasher.update([0]);
-            hasher.update((bytes.len() as u64).to_le_bytes());
-            hasher.update(&bytes);
-        }
-        Ok(Seal {
-            digest: hasher.finalize().into(),
-            signer: None,
-        })
-    }
-
-    /// Every file the container consists of: the manifest and what it names.
-    pub(crate) fn files(&self) -> Vec<&str> {
-        let mut files = alloc::vec![MANIFEST_FILE, self.entry.as_str()];
-        if let Some(view) = &self.view {
-            files.push(&view.program);
-            files.push(&view.styles);
-            files.extend(view.fonts.iter().map(String::as_str));
-        }
-        files
-    }
 }
 
 pub(crate) struct Bundle {
@@ -331,8 +254,7 @@ fn invalid(message: impl Into<String>) -> Problem {
 }
 
 /// App IDs are short lowercase names, safe in paths and Lua string literals.
-#[must_use]
-pub fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     (1..=MAX_ID_LEN).contains(&id.len())
         && id
             .bytes()
@@ -383,11 +305,12 @@ async fn read_container(
     name: &str,
 ) -> Result<Container, Problem> {
     if !valid_id(name) {
-        return Err(invalid(
-            "the directory name is not an app ID: use 1-32 of a-z, 0-9, and -",
-        ));
+        return Err(invalid(format!(
+            "the directory name is not an app ID followed by {APP_EXTENSION}: use 1-32 of a-z, 0-9, and -"
+        )));
     }
-    let source = shelf.source(location, name).await?;
+    let (filesystem, dir) = shelf.place(location, name).ok_or(Problem::Storage)?;
+    let source = Source { filesystem, dir };
     let bytes = source.read(MANIFEST_FILE, MAX_MANIFEST_BYTES).await?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|_| invalid(format!("{MANIFEST_FILE} is not JSON")))?;
@@ -443,8 +366,6 @@ async fn read_container(
             view_shape: manifest.view.as_ref().and_then(|view| view.shape),
             icon: manifest.icon,
             incompatible: None,
-            digest: None,
-            signer: None,
         },
         source,
         entry,
@@ -460,8 +381,8 @@ async fn read_container(
 /// Checks the packages a manifest asks for against what the registered
 /// packages promise: stable ones in `requires` and `uses`, with an optional
 /// `@version`, everything else in `permissions`, each once, and `boards` for
-/// packages that reach a Board's hardware. A package this device lacks is
-/// checked by the device where it is installed.
+/// packages that reach a Board's hardware. A package this device lacks only
+/// makes the app incompatible here.
 fn check_packages(
     manifest: &Manifest,
     location: AppLocation,
@@ -581,8 +502,8 @@ impl Builtins {
     }
 }
 
-/// Where containers are, this Plugin's filesystem and the builtin apps', and
-/// the device installable apps are checked against.
+/// Where containers are, the Workspace in this Plugin's filesystem and the
+/// builtin apps', and the device installable apps are checked against.
 pub(crate) struct Shelf<'a> {
     pub(crate) filesystem: &'a ScopedVfs,
     pub(crate) builtins: &'a Builtins,
@@ -592,139 +513,113 @@ pub(crate) struct Shelf<'a> {
 }
 
 impl Shelf<'_> {
-    /// The filesystem and directory of container `name` at `location`.
-    fn place(&self, location: AppLocation, name: &str) -> Option<(ScopedVfs, String)> {
+    /// The filesystem and directory of app `id` at `location`.
+    fn place(&self, location: AppLocation, id: &str) -> Option<(ScopedVfs, String)> {
         match location {
             AppLocation::Builtin => self
                 .builtins
                 .apps
                 .borrow()
-                .get(name)
+                .get(id)
                 .map(|filesystem| (filesystem.clone(), String::from(BUILTIN_APP))),
-            AppLocation::Installed | AppLocation::Workspace => Some((
+            AppLocation::Workspace => Some((
                 self.filesystem.clone(),
-                format!("{}/{name}", location.root()),
+                format!("{WORKSPACE_APPS}/{id}{APP_EXTENSION}"),
             )),
-        }
-    }
-
-    /// Where container `name`'s files are at `location`: its directory, or
-    /// in the Workspace its package when no directory has the name.
-    async fn source(&self, location: AppLocation, name: &str) -> Result<Source, Problem> {
-        let (filesystem, dir) = self.place(location, name).ok_or(Problem::Storage)?;
-        if location != AppLocation::Workspace {
-            return Ok(Source::Dir { filesystem, dir });
-        }
-        let package = format!("{dir}{PACKAGE_EXTENSION}");
-        let is_dir = filesystem
-            .metadata(&dir)
-            .await
-            .is_ok_and(|metadata| metadata.is_dir());
-        let is_package = filesystem.exists(&package).await.unwrap_or(false);
-        match (is_dir, is_package) {
-            (true, true) => Err(invalid("offered both as a directory and as a package")),
-            (false, true) => Ok(Source::Package {
-                package: Package::open(&filesystem, &package).await?,
-                filesystem,
-            }),
-            _ => Ok(Source::Dir { filesystem, dir }),
         }
     }
 }
 
-/// Container directory names at `location`, or builtin apps' IDs; a missing
-/// root holds none.
-async fn container_names(shelf: &Shelf<'_>, location: AppLocation) -> Vec<String> {
-    if location == AppLocation::Builtin {
-        return shelf.builtins.ids();
-    }
-    let filesystem = shelf.filesystem;
-    let entries = match filesystem.read_dir(location.root()).await {
+/// What is in the Workspace's apps directory: the IDs of its `<id>.bapp`
+/// directories, and the other directories, which hold no app; a missing
+/// directory holds none. Files and names starting with `.` are skipped.
+async fn workspace_entries(filesystem: &ScopedVfs) -> (Vec<String>, Vec<String>) {
+    let entries = match filesystem.read_dir(WORKSPACE_APPS).await {
         Ok(entries) => entries,
-        Err(FsError::NotFound | FsError::NotMounted) => return Vec::new(),
+        Err(FsError::NotFound | FsError::NotMounted) => return (Vec::new(), Vec::new()),
         Err(error) => {
-            log::warn!("app: cannot list {}: {error:?}", location.root());
-            return Vec::new();
+            log::warn!("app: cannot list {WORKSPACE_APPS}: {error:?}");
+            return (Vec::new(), Vec::new());
         }
     };
-    let packages = location == AppLocation::Workspace;
-    let mut names: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter(|entry| !entry.file_name().starts_with('.'))
-        .filter_map(|entry| {
-            let name = entry.file_name();
-            if entry.metadata().is_dir() {
-                Some(String::from(name))
-            } else if packages {
-                name.strip_suffix(PACKAGE_EXTENSION).map(String::from)
-            } else {
-                None
-            }
-        })
-        .collect();
-    names.sort_unstable();
-    names.dedup();
-    names
+    let (mut ids, mut others) = (Vec::new(), Vec::new());
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name();
+        if name.starts_with('.') || !entry.metadata().is_dir() {
+            continue;
+        }
+        match name.strip_suffix(APP_EXTENSION) {
+            Some(id) => ids.push(String::from(id)),
+            None => others.push(String::from(name)),
+        }
+    }
+    ids.sort_unstable();
+    others.sort_unstable();
+    (ids, others)
 }
 
 /// Every container in every location.
 pub(crate) async fn list(shelf: &Shelf<'_>) -> AppList {
     let mut apps = BTreeMap::new();
-    let mut installable = Vec::new();
     let mut invalid = Vec::new();
-    for location in [
-        AppLocation::Builtin,
-        AppLocation::Installed,
-        AppLocation::Workspace,
-    ] {
-        for name in container_names(shelf, location).await {
-            let installed: Option<&AppInfo> = apps.get(&name);
-            if installed.is_some_and(|app| app.kind == AppKind::System) {
-                // A system app's ID is never installed over, so a container
-                // reusing it elsewhere is reported rather than offered.
-                if location != AppLocation::Builtin {
-                    invalid.push(InvalidApp {
-                        location,
-                        dir: name,
-                        problem: String::from("the ID belongs to a system app"),
-                    });
-                }
-                continue;
+    let builtins = shelf.builtins.ids();
+    for id in builtins.iter().cloned() {
+        match read_container(shelf, AppLocation::Builtin, &id).await {
+            Ok(container) => {
+                apps.insert(id, container.info);
             }
-            match read_container(shelf, location, &name).await {
-                Ok(container) if location == AppLocation::Workspace => {
-                    if installed.is_none_or(|app| app.version != container.info.version) {
-                        installable.push(container.info);
-                    }
-                }
-                Ok(container) => {
-                    apps.insert(name, container.info);
-                }
-                Err(Problem::Invalid(problem)) => invalid.push(InvalidApp {
-                    location,
-                    dir: name,
-                    problem,
-                }),
-                Err(Problem::Storage) => {
-                    log::warn!("app: cannot read {}/{name}", location.root());
-                }
-            }
+            Err(Problem::Invalid(problem)) => invalid.push(InvalidApp {
+                location: AppLocation::Builtin,
+                dir: id,
+                problem,
+            }),
+            Err(Problem::Storage) => log::warn!("app: cannot read builtin app {id}"),
         }
+    }
+    let (ids, others) = workspace_entries(shelf.filesystem).await;
+    for id in ids {
+        let dir = format!("{id}{APP_EXTENSION}");
+        if builtins.contains(&id) {
+            // A system app's ID is never taken, so a directory reusing it is
+            // reported rather than shown.
+            invalid.push(InvalidApp {
+                location: AppLocation::Workspace,
+                dir,
+                problem: String::from("the ID belongs to a system app"),
+            });
+            continue;
+        }
+        match read_container(shelf, AppLocation::Workspace, &id).await {
+            Ok(container) => {
+                apps.insert(id, container.info);
+            }
+            Err(Problem::Invalid(problem)) => invalid.push(InvalidApp {
+                location: AppLocation::Workspace,
+                dir,
+                problem,
+            }),
+            Err(Problem::Storage) => log::warn!("app: cannot read {WORKSPACE_APPS}/{dir}"),
+        }
+    }
+    for dir in others {
+        invalid.push(InvalidApp {
+            location: AppLocation::Workspace,
+            problem: format!("an app's directory is named after its ID, as {dir}{APP_EXTENSION}"),
+            dir,
+        });
     }
     AppList {
         apps: apps.into_values().collect(),
-        installable,
         invalid,
     }
 }
 
-/// The container of launchable app `id`: its system app, or else its
-/// installed app.
+/// The container of app `id`: its system app, or else its installable app.
 async fn find(shelf: &Shelf<'_>, id: &str) -> Result<Container, AppError> {
     if !valid_id(id) {
         return Err(AppError::NotFound);
     }
-    for location in AppLocation::LAUNCHABLE {
+    for location in AppLocation::ALL {
         let Some((filesystem, dir)) = shelf.place(location, id) else {
             continue;
         };
@@ -736,25 +631,9 @@ async fn find(shelf: &Shelf<'_>, id: &str) -> Result<Container, AppError> {
     Err(AppError::NotFound)
 }
 
-/// The launchable app `id`.
+/// App `id`.
 pub(crate) async fn info(shelf: &Shelf<'_>, id: &str) -> Result<AppInfo, AppError> {
     Ok(find(shelf, id).await?.info)
-}
-
-/// The Workspace container offered as app `id`.
-pub(crate) async fn offered(shelf: &Shelf<'_>, id: &str) -> Result<Container, AppError> {
-    if !valid_id(id) {
-        return Err(AppError::NotFound);
-    }
-    let manifest = format!("{WORKSPACE_APPS}/{id}/{MANIFEST_FILE}");
-    let package = format!("{WORKSPACE_APPS}/{id}{PACKAGE_EXTENSION}");
-    let filesystem = shelf.filesystem;
-    if !filesystem.exists(&manifest).await.unwrap_or(false)
-        && !filesystem.exists(&package).await.unwrap_or(false)
-    {
-        return Err(AppError::NotFound);
-    }
-    Ok(read_container(shelf, AppLocation::Workspace, id).await?)
 }
 
 /// Reads everything needed to launch app `id`.

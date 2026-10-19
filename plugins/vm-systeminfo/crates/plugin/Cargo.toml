@@ -3,7 +3,7 @@ name = "barracuda-vm-systeminfo-plugin"
 version = "0.1.0"
 edition = "2024"
 description = "Lua adapter for Barracuda's fixed Platform and Board identity"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-plugin.workspace = true

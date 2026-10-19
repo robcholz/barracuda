@@ -1,0 +1,6 @@
+interface:
+  display_name: "Barracuda Create Board"
+  short_description: "Add a Board bundle with its docs and website entry"
+  default_prompt: "Use $create-board to add a Barracuda Board bundle with its board.yml, native layout, peripherals, docs pages, and website entry."
+policy:
+  allow_implicit_invocation: true

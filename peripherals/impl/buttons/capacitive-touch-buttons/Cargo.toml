@@ -3,7 +3,7 @@ name = "barracuda-capacitive-touch-buttons"
 version = "0.1.0"
 edition = "2024"
 description = "Barracuda attached-button implementation for capacitive touch channels"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-board-hal.workspace = true

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 description = "Minimal no_std Lua wrapper with native Rust async bindings"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [features]
 default = []

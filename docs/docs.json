@@ -16,7 +16,8 @@
   },
   "logo": {
     "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "dark": "/logo/dark.svg",
+    "href": "https://barracuda-os.vercel.app"
   },
   "favicon": "/favicon.svg",
   "appearance": {
@@ -246,6 +247,7 @@
                 "pages": [
                   "architecture/repository",
                   "contributing/docs",
+                  "contributing/website",
                   "get-started/tooling",
                   "architecture/codestyle",
                   "architecture/agent-oriented-api-design",
@@ -316,7 +318,6 @@
                       "plugins/captive-portal/ui-kit"
                     ]
                   },
-                  "plugins/app-portal",
                   "plugins/power",
                   "plugins/sound",
                   "plugins/time",
@@ -734,6 +735,7 @@
                 "pages": [
                   "zh/architecture/repository",
                   "zh/contributing/docs",
+                  "zh/contributing/website",
                   "zh/get-started/tooling",
                   "zh/architecture/codestyle",
                   "zh/architecture/agent-oriented-api-design",
@@ -804,7 +806,6 @@
                       "zh/plugins/captive-portal/ui-kit"
                     ]
                   },
-                  "zh/plugins/app-portal",
                   "zh/plugins/power",
                   "zh/plugins/sound",
                   "zh/plugins/time",

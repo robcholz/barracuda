@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Canonical parser for Barracuda Plugin manifests"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 regex = "1"
