@@ -20,6 +20,7 @@ import {
   type PortalContext,
   type PortalModule,
 } from "../../../captive-portal/resources/web/ui";
+import { Incoming } from "./incoming";
 import { STYLE } from "./style";
 
 /** One `GET /api/files/list/<path>` entry (plugins/files/crates/plugin/src/api.rs `Entry`). */
@@ -318,6 +319,8 @@ class Browser {
   private readonly treeSlot = h("nav", { class: "bc-tree" });
   private readonly paneSlot = h("div", { class: "bc-pane" });
   private readonly cardSlot = h("span");
+  /** Where an app Live Editor sends shows, above the browser. */
+  readonly incomingSlot = h("div", { hidden: true });
   private readonly picker = h("input", { type: "file", hidden: true });
 
   constructor(private readonly context: PortalContext) {
@@ -394,9 +397,32 @@ class Browser {
         },
         lang,
       ),
+      this.incomingSlot,
       frame,
       this.picker,
     );
+  }
+
+  /** Opens `path`, a folder beneath a writable place, reading each folder on the way. */
+  async reveal(path: string) {
+    let at = this.places.find(
+      (place) =>
+        place.path &&
+        (path === place.path || path.startsWith(`${place.path}/`)),
+    );
+    if (!at?.path || !(await this.read(at))) return;
+    for (const name of path
+      .slice(at.path.length + 1)
+      .split("/")
+      .filter(Boolean)) {
+      const next: Item | undefined = at.children?.find(
+        (child) => child.name === name,
+      );
+      if (!next) break;
+      at = next;
+      if (at.dir && !(await this.read(at))) break;
+    }
+    await this.open(at);
   }
 
   async start() {
@@ -1227,6 +1253,12 @@ export const mount: PortalModule["mount"] = (root, context) => {
   const browser = new Browser(context);
   root.replaceChildren(browser.element());
   void browser.start();
+  // Opened by Live Editor: take the app it sends.
+  new Incoming(
+    context,
+    browser.incomingSlot,
+    (path) => void browser.reveal(path),
+  ).start();
   return () => {
     root.replaceChildren();
     style.remove();

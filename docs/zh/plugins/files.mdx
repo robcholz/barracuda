@@ -49,6 +49,15 @@ Files 插件是门户的文件浏览器。它在“设备”分组中、Wi-Fi �
 
 页面按插件对插件目录树分组，`/plugins/<tree>/<id>` 显示为“插件”/`<id>`/`<tree>`，并且不提供任何修改控件。不显示修改时间：VFS 元数据中没有这一项。只有在 `/workspace/removable` 下挂载了存储卡时，才会显示存储卡。目录树和窗格的样式规则随页面一起提供，在页面打开时加入：外壳的样式表受 Flash 预算限制，不包含这些规则。
 
+## Live Editor
+
+[Live Editor](/zh/apps/live-editor) 运行在 HTTPS 网站上，浏览器不允许这样的网页调用局域网中的 `http://` 地址。因此它在一个窗口中打开设备的 `/portal/#files`，两个窗口用 `postMessage` 通信；页面再用上面的路由安装应用（`resources/web/incoming.ts`）。
+
+1. 被另一个窗口打开时，页面向它发送 `{"type": "barracuda/ready", "v": 1}`。
+2. Live Editor 回复 `{"type": "barracuda/app", "v": 1, "id", "name", "version", "files"}`，`files` 把每个文件名映射到它的字节（`ArrayBuffer`）：最多 32 个文件、2 MiB，其中必须有 `app.json`。页面只接受打开它的那个窗口发来的应用，并显示该窗口的来源、应用、版本，以及它将替换的已安装版本。
+3. 在用户选择 **安装到设备** 之前什么都不会改变。之后页面把文件写入应用管理器会跳过的 `/workspace/media/apps/.<id>.bapp/`，把已安装的 `<id>.bapp/` 移到一旁，把新目录重命名到位，再删除旧目录，所以应用管理器不会看到只写了一半的应用（[应用格式](/zh/plugins/app-manager/app-format)）。
+4. 页面把每一步报告给该来源：`{"type": "barracuda/status", "v": 1, "id", "state", "message"?}`，`state` 为 `review`、`writing`、`installed`、`refused`（用户没有安装）或 `failed`（附带设备的 `message`；用户可以重试）。
+
 ## 保留的注册
 
 插件在整个生命周期内保留它的门户入口和六个路由注册；卸载插件会移除页面和所有路由。
