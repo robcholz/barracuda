@@ -546,3 +546,13 @@ button.bc-link{padding:0;border:0;background:none;font:inherit;cursor:pointer}
 /* Eyebrow: the section a page belongs to, above its title, after a 6px signal square. */
 .bc-eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:12px;line-height:16px;letter-spacing:.04em;color:var(--muted-foreground)}
 .bc-eyebrow::before{content:"";flex:none;width:6px;height:6px;background:var(--signal)}
+
+/* Site header: the top bar of the website and the docs, the same on both. 56px on the page colour over a hairline; the brand, the site's own links, then language, GitHub and the primary action, all at --sm. */
+.bc-site-header{display:flex;align-items:center;gap:4px;height:var(--topbar-height);padding:0 var(--space-4);border-bottom:1px solid var(--border);background:var(--background);color:var(--foreground)}
+.bc-site-header .bc-brand{flex:none}
+.bc-site-header__surface{color:var(--muted-foreground);font-weight:500}
+.bc-site-header__nav{display:flex;align-items:center;gap:2px;min-width:0;margin-left:16px}
+.bc-site-header__nav [aria-current="page"]{background:var(--muted)}
+.bc-site-header__end{display:flex;align-items:center;gap:4px;margin-left:auto}
+@media (max-width:960px){.bc-site-header__nav{display:none}}
+@media (max-width:720px){.bc-site-header{padding:0 var(--space-2)}.bc-site-header__optional{display:none}}

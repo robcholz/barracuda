@@ -41,6 +41,7 @@ const DOCS_TOKENS: [string, string][] = [
 
 /** Theme-independent docs variables. */
 const DOCS_CONSTANTS = [
+  "topbar-height",
   "radius-sm",
   "radius-md",
   "radius-lg",
