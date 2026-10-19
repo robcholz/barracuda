@@ -41,8 +41,8 @@ const cargo = Bun.spawnSync(
 if (cargo.exitCode !== 0) process.exit(cargo.exitCode ?? 1);
 fs.copyFileSync(
   join(
-    repository,
-    "target/wasm32-unknown-unknown/release/barracuda_live_editor_wasm.wasm",
+    resolve(repository, process.env.CARGO_TARGET_DIR ?? "target"),
+    "wasm32-unknown-unknown/release/barracuda_live_editor_wasm.wasm",
   ),
   join(dist, "live-editor.wasm"),
 );

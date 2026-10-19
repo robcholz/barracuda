@@ -140,6 +140,40 @@ that origin only, with `barracuda/offer`, and follows `barracuda/status` to the
 end. The package is built from the applied sources, not a proposal, and signed
 with an ECDSA P-256 key made once and kept in IndexedDB (`src/install/key.ts`).
 
+## Deploy
+
+Live Editor deploys to Vercel as a static site. The build needs the selected
+workspace, Rust's WebAssembly target and a PocketJS checkout, so
+`.github/workflows/live-editor.yml` builds it on GitHub Actions and Vercel only
+serves the result: on a push to `master` that touches Live Editor or what it
+bundles, or when run by hand, the workflow selects `local-linux`, checks out
+PocketJS at its pinned commit, builds and tests, writes `dist/` as Vercel's
+Build Output (`.vercel/output`), and deploys it with `vercel deploy --prebuilt --prod`.
+
+To set it up once:
+
+<Steps>
+  <Step title="Create the Vercel project">
+    Run `npx vercel link` in a checkout and create a project. Leave its Git
+    connection off, or Vercel builds every push itself and fails; leave its Root
+    Directory empty.
+  </Step>
+  <Step title="Give the workflow access">
+    Create a token under Vercel's Account Settings › Tokens, and add the
+    repository secrets `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`;
+    the two IDs are in `.vercel/project.json` after linking.
+  </Step>
+  <Step title="Deploy">
+    Run the Live Editor workflow from the Actions tab, or push to `master`.
+  </Step>
+</Steps>
+
+The site needs HTTPS, for WebCrypto, and nothing else from its host: routes are
+in the URL's hash and every file is loaded by a relative path. Settle on its
+domain before people use it: apps, conversations and the signing key stay with
+the origin, and a device takes updates to an app only from the key that signed
+it.
+
 ## Storage
 
 `src/state/db.ts` keeps everything in IndexedDB: the apps (`src/state/project.ts`:
