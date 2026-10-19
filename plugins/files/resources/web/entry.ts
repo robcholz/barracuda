@@ -321,6 +321,8 @@ class Browser {
   private readonly cardSlot = h("span");
   /** Where an app Live Editor sends shows, above the browser. */
   readonly incomingSlot = h("div", { hidden: true });
+  /** Whether that app waits for Install, the page's one primary action meanwhile. */
+  private incomingAsks = false;
   private readonly picker = h("input", { type: "file", hidden: true });
 
   constructor(private readonly context: PortalContext) {
@@ -401,6 +403,12 @@ class Browser {
       frame,
       this.picker,
     );
+  }
+
+  /** Makes Upload an outline button while an app from Live Editor waits for Install. */
+  quietUpload(quiet: boolean) {
+    this.incomingAsks = quiet;
+    this.renderPane();
   }
 
   /** Opens `path`, a folder beneath a writable place, reading each folder on the way. */
@@ -970,6 +978,7 @@ class Browser {
         }),
       );
       const upload = button(t.upload, lang, {
+        variant: this.incomingAsks ? "outline" : undefined,
         size: "sm",
         icon: ICONS.upload,
         onClick: () => this.picker.click(),
@@ -1258,6 +1267,8 @@ export const mount: PortalModule["mount"] = (root, context) => {
     context,
     browser.incomingSlot,
     (path) => void browser.reveal(path),
+    window.opener as Window | null,
+    (asking) => browser.quietUpload(asking),
   ).start();
   return () => {
     root.replaceChildren();

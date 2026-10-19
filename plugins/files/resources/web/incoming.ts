@@ -127,12 +127,18 @@ export class Incoming {
   private progress = 0;
   /** The installed version this app replaces, once known. */
   private replaces: string | null = null;
+  private asked = false;
 
+  /**
+   * `asking` hears whether the card holds the page's primary action, Install, so the page can
+   * quiet its own.
+   */
   constructor(
     private readonly context: PortalContext,
     private readonly slot: HTMLElement,
     private readonly installed: (path: string) => void,
     private readonly opener: Window | null = window.opener as Window | null,
+    private readonly asking: (asking: boolean) => void = () => {},
   ) {}
 
   /** Tells the opener this page is ready, and listens to it. */
@@ -299,6 +305,8 @@ export class Incoming {
 
   private render() {
     const offer = this.offer;
+    const asking = !!offer && this.state === "review";
+    if (asking !== this.asked) this.asking((this.asked = asking));
     // An empty slot would still take its place in the page's gaps.
     this.slot.hidden = !offer;
     if (!offer) return this.slot.replaceChildren();

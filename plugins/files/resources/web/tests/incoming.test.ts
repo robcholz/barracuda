@@ -132,11 +132,13 @@ function opened() {
   } as unknown as PortalContext;
   const slot = browser.document.createElement("div");
   const shown: string[] = [];
+  const asking: boolean[] = [];
   new Incoming(
     context,
     slot,
     (path) => shown.push(path),
     opener as unknown as Window,
+    (value) => asking.push(value),
   ).start();
   // happy-dom has no MessageEvent: a plain event carries what one would.
   const deliver = (data: unknown, source: unknown = opener) => {
@@ -154,7 +156,7 @@ function opened() {
       .click();
     await settle(30);
   };
-  return { heard, deliver, slot, press, shown, toasts };
+  return { heard, deliver, slot, press, shown, toasts, asking };
 }
 
 test("only a well-formed app is taken", () => {
@@ -188,8 +190,11 @@ test("the app is written only once the person installs it, and swapped in whole"
   expect(page.slot.textContent).toContain("https://barracuda.dev");
   expect(page.slot.textContent).toContain("这台设备上还没有");
   expect(fake.files.size).toBe(0);
+  // Install is the page's one primary action until it is pressed.
+  expect(page.asking).toEqual([true]);
 
   await page.press("安装到设备");
+  expect(page.asking).toEqual([true, false]);
   expect(
     new TextDecoder().decode(fake.files.get(`${APPS}/counter.bapp/main.lua`)),
   ).toBe('print("0.1.0")');
