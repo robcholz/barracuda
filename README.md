@@ -18,7 +18,7 @@
   ·
   <a href="https://github.com/robcholz/barracuda/releases">Changelog</a>
   ·
-  <a href="https://barracuda-os.vercel.app/zh/">中文</a>
+  <a href="README.zh-CN.md">简体中文</a>
 </p>
 
 > [!NOTE]
