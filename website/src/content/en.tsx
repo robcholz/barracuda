@@ -1,5 +1,12 @@
 import type { IconName } from "@/components/Icon";
+import { BOARDS } from "@/content/boards";
+import { CHANNELS, PLATFORMS, PLUGINS } from "@/content/repo";
 import type { Lang } from "@/lib/links";
+
+/** A count as the stats show it: `08`. */
+export function padded(count: number): string {
+  return String(count).padStart(2, "0");
+}
 
 export const en = {
   lang: "en" as Lang,
@@ -10,7 +17,7 @@ export const en = {
       "An embedded platform where every feature is a plugin. Compose firmware in minutes, add an AI agent, and test ideas live on real hardware.",
     boardsTitle: "Boards · Barracuda",
     boardsDescription:
-      "80 boards from M5Stack, Espressif, ST, and more. Pick one, flash it from the browser, and test ideas on it live.",
+      `${BOARDS.length} boards from M5Stack, Espressif, ST, and more. Pick one, flash it from the browser, and test ideas on it live.`,
   },
   banner: {
     label: "Announcement",
@@ -212,10 +219,10 @@ export const en = {
     whatsNew: "See what’s new →",
     installed: "Already installed? Reopen the installer to update",
     stats: [
-      ["Platforms", "08"],
-      ["Boards", "80"],
-      ["Built-in plugins", "44"],
-      ["Ways to chat", "06"],
+      ["Platforms", padded(PLATFORMS)],
+      ["Boards", padded(BOARDS.length)],
+      ["Built-in plugins", padded(PLUGINS)],
+      ["Ways to chat", padded(CHANNELS)],
     ],
     bullets: [
       ["Conversations", ": start, switch, and rename them in any app"],
@@ -260,7 +267,7 @@ export const en = {
       },
       { icon: "apps", title: "Apps", desc: "Install, open, and update apps" },
     ] as { icon: IconName; title: string; desc: string }[],
-    allTitle: "Browse all 44 plugins",
+    allTitle: `Browse all ${PLUGINS} plugins`,
     allBody: "See what each built-in plugin does and what it needs.",
   },
   makers: {
@@ -297,7 +304,7 @@ export const en = {
       },
     ] as { label: string; note: string; file?: string; body: string }[],
     supported: "Supported boards",
-    seeAll: "See all 80 →",
+    seeAll: `See all ${BOARDS.length} →`,
     lib: [
       {
         group: "M5Stack",
@@ -378,7 +385,7 @@ export const en = {
       },
       {
         q: "Which boards are supported?",
-        a: "80 boards from M5Stack, Espressif, ST, and more, with ESP32 and STM32 chips. No board yet? Try it on Linux or a Mac first.",
+        a: `${BOARDS.length} boards from M5Stack, Espressif, ST, and more, with ESP32 and STM32 chips. No board yet? Try it on Linux or a Mac first.`,
       },
       {
         q: "Where are my data and keys stored?",

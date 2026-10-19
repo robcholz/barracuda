@@ -1,4 +1,6 @@
-import type { Copy } from "./en";
+import { BOARDS } from "@/content/boards";
+import { CHANNELS, PLATFORMS, PLUGINS } from "@/content/repo";
+import { type Copy, padded } from "./en";
 
 export const zh: Copy = {
   lang: "zh",
@@ -9,7 +11,7 @@ export const zh: Copy = {
       "每个功能都是插件的嵌入式平台。几分钟组合出固件，加上 AI Agent，在真实硬件上即时验证想法。",
     boardsTitle: "开发板 · Barracuda",
     boardsDescription:
-      "来自 M5Stack、乐鑫、ST 等厂商的 80 块开发板。选一块，在浏览器里烧录，马上在上面验证想法。",
+      `来自 M5Stack、乐鑫、ST 等厂商的 ${BOARDS.length} 块开发板。选一块，在浏览器里烧录，马上在上面验证想法。`,
   },
   banner: {
     label: "公告",
@@ -201,10 +203,10 @@ export const zh: Copy = {
     whatsNew: "看看更新了什么 →",
     installed: "已经安装？重新打开安装页即可更新",
     stats: [
-      ["平台", "08"],
-      ["开发板", "80"],
-      ["内置插件", "44"],
-      ["聊天方式", "06"],
+      ["平台", padded(PLATFORMS)],
+      ["开发板", padded(BOARDS.length)],
+      ["内置插件", padded(PLUGINS)],
+      ["聊天方式", padded(CHANNELS)],
     ],
     bullets: [
       ["会话", "：在任何应用里新建、切换、重命名"],
@@ -237,7 +239,7 @@ export const zh: Copy = {
       { icon: "clock", title: "自动化", desc: "定时执行，或在事件发生时执行" },
       { icon: "apps", title: "应用", desc: "安装、打开和更新应用" },
     ],
-    allTitle: "浏览全部 44 个插件",
+    allTitle: `浏览全部 ${PLUGINS} 个插件`,
     allBody: "看看每个内置插件做什么、依赖什么。",
   },
   makers: {
@@ -274,7 +276,7 @@ export const zh: Copy = {
       },
     ],
     supported: "已经支持的开发板",
-    seeAll: "查看全部 80 款 →",
+    seeAll: `查看全部 ${BOARDS.length} 款 →`,
     lib: [
       {
         group: "M5Stack",
@@ -349,7 +351,7 @@ export const zh: Copy = {
       },
       {
         q: "支持哪些开发板？",
-        a: "80 款开发板，来自 M5Stack、乐鑫、ST 等厂商，覆盖 ESP32 和 STM32。手头没有开发板？先在 Linux 或 Mac 上试。",
+        a: `${BOARDS.length} 款开发板，来自 M5Stack、乐鑫、ST 等厂商，覆盖 ESP32 和 STM32。手头没有开发板？先在 Linux 或 Mac 上试。`,
       },
       {
         q: "我的数据和密钥存在哪里？",
