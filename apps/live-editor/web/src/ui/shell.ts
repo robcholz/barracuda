@@ -5,7 +5,7 @@
 
 import { activeChat } from "../state/project";
 import type { App, ThemeChoice } from "../app/app";
-import { MARK } from "./icons";
+import { MARK, SITE } from "./icons";
 import {
   append,
   button,
@@ -185,8 +185,8 @@ function sidebar(app: App, folded: boolean) {
       "a",
       {
         class: "bc-brand",
-        href: "#/new",
-        "aria-label": "Barracuda Live Editor",
+        href: SITE,
+        "aria-label": "Barracuda website",
       },
       svg(MARK),
       h(

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Copy } from "@/content/en";
-import { GITHUB, docs, install, page } from "@/lib/links";
+import { EDITOR, GITHUB, docs, install, page } from "@/lib/links";
 import { BrandMark } from "./BrandMark";
 import { Icon } from "./Icon";
 
@@ -101,6 +101,9 @@ export function Chrome({
             aria-current={current === "boards" ? "page" : undefined}
           >
             {copy.nav.boards}
+          </a>
+          <a className="bc-button bc-button--ghost bc-button--sm" href={EDITOR}>
+            {copy.nav.editor}
           </a>
           <a
             className="bc-button bc-button--ghost bc-button--sm"

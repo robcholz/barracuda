@@ -4,7 +4,7 @@ import type { App } from "../app/app";
 import { EXAMPLES } from "../app/templates";
 import { DEVICES, type Attachment, type DeviceId } from "../state/project";
 import { ago, fill, h, icon, size, svg, tooltip } from "./dom";
-import { MARK } from "./icons";
+import { MARK, SITE } from "./icons";
 import { readAttachment } from "./chat";
 import {
   resolvedTheme,
@@ -258,8 +258,8 @@ export class NewApp implements Page {
           "a",
           {
             class: "bc-brand le-phone",
-            href: "#/new",
-            "aria-label": "Barracuda Live Editor",
+            href: SITE,
+            "aria-label": "Barracuda website",
           },
           svg(MARK),
           h("span", { class: "bc-wordmark" }, "Barracuda"),

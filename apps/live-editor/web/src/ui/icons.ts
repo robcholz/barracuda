@@ -81,6 +81,9 @@ const MARK_PATHS =
   '<g style="fill: none; stroke: var(--signal-foreground); stroke-linejoin: round; stroke-linecap: round"><path d="M0.5 10.8L0.1 11.1L0 11.5L0 21L0.1 21.4L0.5 21.7L1.1 22.1L36.1 39.6L1.1 57.1L0.5 57.5L0.1 57.8L0 58.2L0 67.7L0.1 68L0.5 68.4L1.1 68.8L20.9 78.7L21.6 78.9L22.3 79.1L23 79.2L23.7 79.1L24.4 78.9L25.1 78.7L91.6 45.4L92.2 45.1L92.5 44.7L92.6 44.4L92.6 34.8L92.5 34.5L92.2 34.1L91.6 33.8L25.1 0.5L24.4 0.2L23.7 0.1L23 0L22.3 0.1L21.6 0.2L20.9 0.5L1.1 10.4Z" style="fill: var(--signal); stroke-width: 2.4"/><path d="M20.9 0.5L21.6 0.2L22.3 0.1L23 0L23.7 0.1L24.4 0.2L25.1 0.5L91.6 33.8L92.2 34.1L92.5 34.5L92.6 34.8L92.5 35.2L92.2 35.5L91.6 35.9L25.1 69.1L24.4 69.4L23.7 69.6L23 69.7L22.3 69.6L21.6 69.4L20.9 69.1L1.1 59.2L0.5 58.9L0.1 58.5L0 58.2L0.1 57.8L0.5 57.5L1.1 57.1L43.5 35.9L44.1 35.5L44.4 35.2L44.5 34.8L44.4 34.5L44.1 34.1L43.5 33.8L1.1 12.6L0.5 12.2L0.1 11.8L0 11.5L0.1 11.1L0.5 10.8L1.1 10.4Z" style="stroke-width: 1.1"/></g>';
 
 /** The mark alone, 24px, for the sidebar's brand. */
+/** The Barracuda website, which serves Live Editor at `/editor/`; the logo leads back to it. */
+export const SITE = "https://barracuda-os.vercel.app/";
+
 export const MARK = `<svg viewBox="-2.5 -9.2 97.6 97.6" width="24" height="24" aria-hidden="true" style="flex: none">${MARK_PATHS}</svg>`;
 
 /** The icon, the mark on an ink tile, 16px: the chat avatar. */

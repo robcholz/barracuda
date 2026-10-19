@@ -12,6 +12,9 @@ export function docs(lang: Lang, path = ""): string {
   return `${DOCS}${prefix}${path ? `/${path}` : prefix ? "" : "/"}`;
 }
 
+/** Live Editor, which this site's build serves (docs/tools/live-editor.mdx, Deploy). */
+export const EDITOR = "/editor/";
+
 /** Where every install button goes until the browser installer ships. */
 export function install(lang: Lang): string {
   return docs(lang, "get-started/installation");
