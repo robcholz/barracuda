@@ -83,7 +83,7 @@ jobs:
 
       - name: Test Live Editor
         run: |
-          cargo test --package barracuda-live-editor-wasm
+          cargo test --manifest-path apps/live-editor/wasm/Cargo.toml --locked
           bun test ./apps/live-editor/web
 
       # Vercel's Build Output API: the site as static files, deployed as built.

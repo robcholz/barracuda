@@ -25,23 +25,31 @@ const repository = resolve(web, "../../..");
 const dist = join(web, "dist");
 mkdirSync(dist, { recursive: true });
 
-// The linker and the preview, as WebAssembly.
+// The linker and the preview, as WebAssembly. The crate is a workspace of its own, so it builds
+// without a Board selected.
+const targetDir = resolve(
+  repository,
+  process.env.CARGO_TARGET_DIR ?? "target/live-editor-wasm",
+);
 const cargo = Bun.spawnSync(
   [
     "cargo",
     "build",
     "--release",
+    "--locked",
     "--target",
     "wasm32-unknown-unknown",
-    "--package",
-    "barracuda-live-editor-wasm",
+    "--manifest-path",
+    join(repository, "apps/live-editor/wasm/Cargo.toml"),
+    "--target-dir",
+    targetDir,
   ],
   { cwd: repository, stdout: "inherit", stderr: "inherit" },
 );
 if (cargo.exitCode !== 0) process.exit(cargo.exitCode ?? 1);
 fs.copyFileSync(
   join(
-    resolve(repository, process.env.CARGO_TARGET_DIR ?? "target"),
+    targetDir,
     "wasm32-unknown-unknown/release/barracuda_live_editor_wasm.wasm",
   ),
   join(dist, "live-editor.wasm"),

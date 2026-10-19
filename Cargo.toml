@@ -23,12 +23,14 @@ members = [
     "tools/system-image",
     "apps/barracuda-cli",
     "apps/barracuda-system",
-    "apps/live-editor/wasm",
 ]
 default-members = [
     "apps/barracuda-system",
 ]
 exclude = [
+    # Live Editor's WebAssembly module builds on its own, without a Board, so
+    # its static site can build anywhere (apps/live-editor/web/vercel.sh).
+    "apps/live-editor/wasm",
     # Vendored third-party crate, patched below.
     "shared/tls/mbedtls-rs",
     "apps/barracuda-cli/rustyline",

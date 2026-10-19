@@ -26,3 +26,13 @@ panic = "deny"
 todo = "deny"
 unimplemented = "deny"
 unreachable = "deny"
+
+# Its own workspace: the device workspace needs a Board selected, and this
+# module builds without one. The release profile is the device workspace's.
+[workspace]
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+codegen-units = 1
+lto = "fat"
