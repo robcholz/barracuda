@@ -3,7 +3,7 @@ name = "barracuda-ov3660-camera"
 version = "0.1.0"
 edition = "2024"
 description = "OV3660 QVGA JPEG Camera implementation over embedded-hal control bindings"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-driver-ov3660.workspace = true

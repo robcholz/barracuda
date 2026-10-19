@@ -3,7 +3,7 @@ name = "barracuda-sdmmc-fat-removable-storage"
 version = "0.1.0"
 edition = "2024"
 description = "FAT removable-filesystem peripheral over a Board-selected SDMMC device"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 portable-atomic-util.workspace = true

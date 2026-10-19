@@ -3,7 +3,7 @@ name = "barracuda-rx8130ce-rtc"
 version = "0.1.0"
 edition = "2024"
 description = "RX8130CE real-time clock implementation over embedded-hal I2C"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-driver-rx8130ce.workspace = true

@@ -3,7 +3,7 @@ name = "barracuda-driver-cst816t"
 version = "0.1.0"
 edition = "2024"
 description = "Low-level Hynitron CST816T touch-controller driver"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 embedded-hal.workspace = true

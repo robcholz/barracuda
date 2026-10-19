@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 description = "Built-in Lua packages owned by the Barracuda VM Plugin"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [features]
 default = []

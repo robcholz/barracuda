@@ -3,7 +3,7 @@ name = "barracuda-es8388-es7210-audio-codec"
 version = "0.1.0"
 edition = "2024"
 description = "ES8388 output and ES7210 microphone audio-codec implementation"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-driver-es7210.workspace = true

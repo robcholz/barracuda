@@ -106,11 +106,23 @@ build target, and memory layout, or your coding tool can write it for you with
 the `create-board` skill. Read the
 [board guide](https://barracuda-os.mintlify.site/boards/overview).
 
+## Licensing
+
+Barracuda is licensed under the [AGPL v3](LICENSE). Directories that carry
+their own `LICENSE` file, such as vendored third-party code, are licensed under
+that file.
+
+To ship Barracuda in a closed-source product, email
+[finn.robcholz.dev@gmail.com](mailto:finn.robcholz.dev@gmail.com) about a
+commercial license.
+
 ## Open Source & Contributing
 
 Barracuda is open source and lives in this repository: drivers, apps, and
 custom firmware in one Rust repo, with the coding tools you already use. We
 welcome community contributions, from new plugins and boards to fixes and docs.
+For the full contribution flow, read our [CONTRIBUTING.md](CONTRIBUTING.md)
+guide.
 
 > [!TIP]
 > **Work with your coding agent.** The repository includes
@@ -123,7 +135,9 @@ welcome community contributions, from new plugins and boards to fixes and docs.
 Before filing, [search existing issues](https://github.com/robcholz/barracuda/issues)
 for your bug or feature request. If nothing exists,
 [report an issue](https://github.com/robcholz/barracuda/issues/new) with the
-board you use and the steps to reproduce it.
+board you use and the steps to reproduce it. Before your first pull request is
+merged, accept the [Contributor License Agreement](CLA.md) as
+[CONTRIBUTING.md](CONTRIBUTING.md#contributor-license-agreement) describes.
 
 ### Building the Repo Locally
 
@@ -147,6 +161,12 @@ contract, the platform architecture, code style, and how to write docs.
    question or get help with a board.
 3. Follow the [changelog](https://github.com/robcholz/barracuda/releases) to see
    what's new.
+
+## Code of Conduct
+
+We ask everyone to be respectful and empathetic. Barracuda follows the
+[Code of Conduct](CODE_OF_CONDUCT.md). To report violations, email
+[finn.robcholz.dev@gmail.com](mailto:finn.robcholz.dev@gmail.com).
 
 ## Open Source Dependencies
 

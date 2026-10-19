@@ -3,7 +3,7 @@ name = "barracuda-bq27220-power-monitor"
 version = "0.1.0"
 edition = "2024"
 description = "BQ27220 battery power-monitor peripheral implementation"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-driver-bq27220.workspace = true
