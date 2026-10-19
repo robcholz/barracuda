@@ -1,66 +1,151 @@
 ---
-title: "Live Editor"
-description: "Build and pack an app's view in the browser with the same compiler and linker the toolchain uses."
+title: "Live Editor internals"
+sidebarTitle: "Live Editor"
+description: "Find how Live Editor builds, previews and installs apps in the browser, and how its agent works."
 ---
 
-Live Editor writes, builds and installs Barracuda apps in the browser. It lives
-in `apps/live-editor`: `wasm/` is a Rust crate built to WebAssembly, and
-`web/` is the TypeScript that runs in the page. This page covers the build
-pipeline it has so far; the editor's interface is still to come.
-
-## Build an app in the browser
-
-An app builds in the browser the way `build-app.ts` builds it on disk, so the
-package Live Editor makes is the one the toolchain would make:
-
-| Step | In the browser | On disk |
-| --- | --- | --- |
-| Compile `app.tsx` against `app.d.ts` | PocketJS's MicroTS compiler over an in-memory file system (`web/src/microts.ts`) | PocketJS's `buildAot` |
-| Link View IR into `view.bvir` | `barracuda-live-editor-wasm` as WebAssembly (`web/src/wasm.ts`) | `ui-link` |
-| Fill in the manifest's `view` | `web/src/container.ts` | `build-app.ts` |
-| Pack, and sign, a `.bapp` | `web/src/package.ts`, with WebCrypto | `pack-app.ts` |
-
-Both link with `barracuda_ui_runtime::compiler::link`, and both pack with the
-layout in [App format](/plugins/app-manager/app-format#packages). A signed
-package's signer has the name a device shows: the first 8 bytes of the key's
-SHA-256. Font atlases are not baked yet, so a view built in the browser draws
-with the device's system fonts.
-
-## Build the compiler
-
-The MicroTS compiler is not part of this repository. Point `POCKETJS_ROOT` at a
-PocketJS checkout at the commit
-[Vendored PocketJS](/plugins/app-manager/pocketjs) names, as `build-app.ts`
-needs it, and install the `wasm32-unknown-unknown` target:
+Live Editor is a static site in `apps/live-editor` that writes, previews and
+installs Barracuda apps without a server: `wasm/` is a Rust crate built to
+WebAssembly, and `web/` is the TypeScript page and its two workers. Using it is
+in [Live Editor](/apps/live-editor); this page is how it works.
 
 ```sh
 rustup target add wasm32-unknown-unknown
 POCKETJS_ROOT=~/src/pocketjs bun apps/live-editor/web/build.ts
+bun apps/live-editor/web/serve.ts   # http://localhost:8790/
 ```
 
-It writes `apps/live-editor/web/dist/`:
+## What the build writes
 
-- `live-editor.wasm`: the linker, built with
-  `cargo build --release --target wasm32-unknown-unknown --package barracuda-live-editor-wasm`.
-- `microts.js`: the MicroTS compiler and TypeScript, bundled for the browser,
-  with `node:fs` resolved to the in-memory file system.
-- `microts-files.json`: the files the compiler reads. The script compiles every
-  app in the repository on disk and records each file it reads; an app that
-  imports a PocketJS module none of them use does not find it in the browser.
+`web/build.ts` writes the site to `apps/live-editor/web/dist/`:
 
-## The linker's interface
-
-The WebAssembly module exports `memory` and four functions:
-
-| Export | Does |
+| File | What it is |
 | --- | --- |
-| `input(len)` | makes the input buffer `len` bytes and answers its address |
-| `link()` | links the View IR JSON in the input: `0` with the BVIR as output, or `1` with the reason as output |
-| `output()`, `output_len()` | the last output's address and length |
+| `index.html`, `main.js`, `app.css`, `ds/` | the page, on the design system's `tokens.css` and `bundle.css` |
+| `workers/build.js`, `workers/run.js` | the build worker and the run worker |
+| `live-editor.wasm` | `barracuda-live-editor-wasm`: the view linker and the preview |
+| `lua.wasm` | Lua 5.4 for the preview, from wasmoon |
+| `fonts/` | the system fonts from the `system-fonts` Plugin, with `index.json` |
+| `templates.json` | the app manager's examples (`plugins/app-manager/resources/examples`) |
+| `microts.js`, `microts-files.json` | PocketJS's MicroTS compiler bundled for the browser, and the files it reads |
 
-Call `input` before taking a view of `memory`: it may grow memory, which
-detaches any earlier view. `web/src/wasm.ts` wraps this as
-`link(json) → Uint8Array`.
+The MicroTS compiler is not part of this repository. Point `POCKETJS_ROOT` at a
+PocketJS checkout at the commit [Vendored PocketJS](/plugins/app-manager/pocketjs)
+names. Without it, the build keeps an existing `microts.js` and rebuilds the
+rest. To know which files the compiler reads, the build compiles every app in
+the repository on disk and records each file it opens; an app that imports a
+PocketJS module none of them use does not find it in the browser.
+
+## Build an app
+
+The build worker (`src/workers/build.ts`) builds a container the way
+`build-app.ts` builds one on disk, so a package from Live Editor is the one the
+toolchain would make:
+
+| Step | In the browser | On disk |
+| --- | --- | --- |
+| Compile `app.tsx` against `app.d.ts` | PocketJS's MicroTS compiler over an in-memory file system (`src/microts.ts`) | PocketJS's `buildAot` |
+| Link View IR into `view.bvir` | `barracuda_ui_runtime::compiler::link` in `live-editor.wasm` (`src/wasm.ts`) | `ui-link` |
+| Fill in the manifest's `view` | `src/container.ts` | `build-app.ts` |
+| Check the manifest | the app manager's `app-manifest.json` schema and its other rules (`src/manifest.ts`) | the device, on install |
+| Check the entry program | Lua's `load`, for syntax | the device's VM, on run |
+| Pack, and sign, a `.bapp` | `src/package.ts`, with WebCrypto | `pack-app.ts` |
+
+A problem comes back with its file, line and column, which Code underlines.
+Font atlases are not baked in the browser, so a view draws with the device's
+system fonts.
+
+## Preview an app
+
+The run worker (`src/workers/run.ts`) holds one run at a time, so a program
+that spins cannot stall the page.
+
+- **The view.** `wasm/src/preview.rs` mounts the BVIR in a
+  `barracuda_ui_runtime::Document` on the vendored PocketJS core, the view's
+  own font atlases first and the system fonts for the other slots, as the UI
+  kit does. Each tick it steps the document and rasterizes its DrawList to RGBA
+  with `pocketjs_core::raster::render_scaled`, at the screen's pixel ratio;
+  an unchanged DrawList is not drawn again. A tap is `Document::press_at`, and
+  the handler call it selects goes to Lua.
+- **The program.** `src/run/boot.lua.ts` builds the `app` and `notify`
+  packages over one host function and runs the entry program in a coroutine:
+  `app.events()` yields until the host has an event, `notify.ask` until the
+  person answers. Values cross as JSON, encoded in Lua so integers and floats
+  stay apart as they do on the device, and `view:set` checks them with the
+  device's rules and messages.
+- **The rules.** `src/run/app-run.ts` keeps the [App API](/plugins/app-manager/app-api)'s:
+  `app:active` first, the 1 s grace period after `app:background` and
+  `app:terminate`, `app.events{ every }` at least 100 ms, and the `app.kv` and
+  `app.fs` limits. A count hook stops a program that runs 5 s without
+  returning to `app.events()`.
+
+### The module's interface
+
+`live-editor.wasm` exports `memory` and these functions. `input(len)` sizes the
+input buffer and answers its address; each call reads the input and leaves its
+result at `output()`, `output_len()`. Calls that can fail answer `0`, or `1`
+with the reason as output. Call `input` before taking a view of `memory`: it
+may grow memory, which detaches earlier views.
+
+| Export | Input | Answer and output |
+| --- | --- | --- |
+| `link()` | View IR JSON | `0` with the BVIR |
+| `stage(kind)` | a view file | keeps it for `open`: `0` the BVIR, `1` the stylesheet, `2` the view's font atlas, `3` a system font atlas |
+| `open(width, height)` | | `0` once the staged view runs; the view's files are unstaged, the system fonts kept |
+| `contract()` | | the view's values and handlers as JSON |
+| `set()` | `{"name", "value"}` JSON | `0`, or `1` with `view:set`'s error |
+| `frame()` | | steps one tick |
+| `tick_rate()` | | ticks per second |
+| `draw(scale)` | | `1` with new RGBA pixels, `0` when the picture did not change |
+| `press(x, y)` | | `1` with the handler call as JSON, `0` when the tap hits no handler |
+| `texts()` | | the text on screen as a JSON array |
+
+`src/wasm.ts` wraps it as a `Module` with `link`, `open` and `systemFonts`.
+
+## The agent
+
+`src/agent/agent.ts` runs one turn per message. Each step streams a model
+response into the chat, runs the tools it calls, and sends their results back,
+for at most 40 steps.
+
+| Tool | Does |
+| --- | --- |
+| `list_files`, `read_file` | reads the sources with the proposal applied |
+| `write_file`, `edit_file`, `delete_file` | changes the proposal, never the sources |
+| `build` | builds the proposal and restarts the preview with it |
+| `look` | the screen as a PNG, its text, the view's contract and the run's state |
+| `tap` | taps the screen, then looks; only while **Let Barracuda tap the preview** is on |
+| `read_console`, `restart` | the console's last lines; a fresh run |
+
+The model services are `src/agent/anthropic.ts`, through the Anthropic SDK
+with streaming, adaptive thinking with summaries, `effort: "high"`, prompt
+caching and `fallbacks: "default"` on the models that take it, and
+`src/agent/openai.ts`, the Chat Completions API over `fetch`. Tool inputs stream
+as they are generated and are checked against their schemas before they run.
+The system prompt (`src/agent/prompt.ts`) never changes during a conversation.
+
+A finished turn keeps the messages it sent and received in its service's own
+format, thinking blocks included, and the next request replays them unchanged:
+history only grows, as preserved thinking and prompt caching need. A turn that
+stopped or failed, or one from the other service, goes back as its reply's
+text. When the turn ends, its proposal is applied, or waits in Changes while
+**Review before applying** is on; applying it takes a version.
+
+## Install on a device
+
+`src/install/handoff.ts` follows the
+[app portal's Live Editor protocol](/plugins/app-portal#live-editor): it opens
+`http://<address>/portal/#apps`, answers `barracuda/ready` from that window, at
+that origin only, with `barracuda/offer`, and follows `barracuda/status` to the
+end. The package is built from the applied sources, not a proposal, and signed
+with an ECDSA P-256 key made once and kept in IndexedDB (`src/install/key.ts`).
+
+## Storage
+
+`src/state/db.ts` keeps everything in IndexedDB: the apps (`src/state/project.ts`:
+sources, versions, chats, the proposal and the preview's storage), the
+settings, the signing key, and each app's agent transcripts, kept apart because
+screenshots make them large.
 
 ## Tests
 
@@ -70,7 +155,11 @@ bun test ./apps/live-editor/web
 ```
 
 The Rust tests link the counter fixture and compare it with the committed
-`counter.bvir`. The web tests compare packages with `pack-app.ts`'s, signed and
-unsigned, and check the container against `build-app.ts`'s rules. Once `dist/`
-is built, they also compile the system view in memory and compare it with the
-committed `view.bvir` and `styles.bin`.
+`counter.bvir`, check `view:set`'s conversions and messages, and draw and tap
+the counter. The web tests cover packing against `pack-app.ts`, the container
+and manifest rules, the diff, versions and proposals, the portal handoff with a
+stand-in window, and the agent's tools and history. Once `dist/` is built, they
+also compile the system view in memory, compare it with the committed
+`view.bvir` and `styles.bin`, and run the counter app in the preview: taps,
+saved state, `view:set` errors, and the stops for a busy program and a missed
+grace period.

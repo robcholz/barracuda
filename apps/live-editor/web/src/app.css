@@ -157,6 +157,7 @@ body {
 .le-fresh > .bc-chat-log { overflow: visible; }
 .le-column { width: 100%; max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
 .le-examples { margin-top: 24px; }
+.le-examples .bc-option-title { white-space: nowrap; }
 
 /* Phones: no sidebar (the design system's rule below 768px); the top bar leads back to the apps. */
 @media (max-width: 767px) {

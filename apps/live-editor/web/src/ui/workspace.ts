@@ -205,7 +205,15 @@ export class Workspace implements Page {
         ),
         h("span", { class: "le-grow le-phone" }),
         built &&
-          status("success", "check", h("span", { class: "le-wide" }, "Built")),
+          h(
+            "span",
+            { class: "le-desk" },
+            status(
+              "success",
+              "check",
+              h("span", { class: "le-wide" }, "Built"),
+            ),
+          ),
         failed &&
           status(
             "destructive",
@@ -294,7 +302,8 @@ export class Workspace implements Page {
               ),
             ),
         ),
-        themeToggle(app),
+        // On a phone the theme stays in Settings and New app; the bar keeps to the views.
+        h("span", { class: "le-desk" }, themeToggle(app)),
         h(
           "a",
           {

@@ -236,19 +236,21 @@ function sidebar(app: App, folded: boolean) {
             h("span", { class: "bc-nav-text" }, chat.title),
           ),
         ),
-        h(
-          "a",
-          {
-            class: "bc-nav-item",
-            href: `#/app/${project.id}`,
-            onClick: (event: Event) => {
-              event.preventDefault();
-              app.newChat();
+        // A chat that has not started yet is the new chat; there is no second empty one.
+        (current?.items.length ?? 0) > 0 &&
+          h(
+            "a",
+            {
+              class: "bc-nav-item",
+              href: `#/app/${project.id}`,
+              onClick: (event: Event) => {
+                event.preventDefault();
+                app.newChat();
+              },
             },
-          },
-          icon("plus"),
-          h("span", { class: "bc-nav-text" }, "New chat"),
-        ),
+            icon("plus"),
+            h("span", { class: "bc-nav-text" }, "New chat"),
+          ),
       ),
     h(
       "div",

@@ -1,53 +1,99 @@
 ---
-title: "Live Editor"
-description: "在浏览器里用与工具链相同的编译器和链接器构建并打包应用的视图。"
+title: "Live Editor 内部实现"
+sidebarTitle: "Live Editor"
+description: "了解 Live Editor 如何在浏览器里构建、预览和安装应用，以及它的智能体如何工作。"
 ---
 
-Live Editor 在浏览器里编写、构建并安装 Barracuda 应用。它位于
-`apps/live-editor`：`wasm/` 是一个构建成 WebAssembly 的 Rust crate，`web/`
-是在页面里运行的 TypeScript。本页介绍目前已有的构建流程；编辑器界面还在后面。
-
-## 在浏览器里构建应用
-
-应用在浏览器里的构建方式与 `build-app.ts` 在磁盘上的构建方式相同，所以 Live
-Editor 生成的应用包就是工具链会生成的那个：
-
-| 步骤 | 在浏览器里 | 在磁盘上 |
-| --- | --- | --- |
-| 按 `app.d.ts` 编译 `app.tsx` | PocketJS 的 MicroTS 编译器，运行在内存文件系统上（`web/src/microts.ts`） | PocketJS 的 `buildAot` |
-| 把 View IR 链接为 `view.bvir` | 构建成 WebAssembly 的 `barracuda-live-editor-wasm`（`web/src/wasm.ts`） | `ui-link` |
-| 填写清单的 `view` | `web/src/container.ts` | `build-app.ts` |
-| 打包并签名 `.bapp` | `web/src/package.ts`，使用 WebCrypto | `pack-app.ts` |
-
-两者都用 `barracuda_ui_runtime::compiler::link` 链接，都按[应用格式](/zh/plugins/app-manager/app-format)中的布局打包。签名应用包的签名者名称与设备显示的一致：密钥 SHA-256 的前 8 个字节。字体图集还不会烘焙，所以在浏览器里构建的视图使用设备的系统字体。
-
-## 构建编译器
-
-MicroTS 编译器不在本仓库中。把 `POCKETJS_ROOT` 指向一个 PocketJS 检出，提交与[内置的 PocketJS](/zh/plugins/app-manager/pocketjs) 中写明的一致（`build-app.ts` 也需要它），并安装 `wasm32-unknown-unknown` 目标：
+Live Editor 是位于 `apps/live-editor` 的静态网站，不需要服务器就能编写、预览和安装 Barracuda 应用：`wasm/` 是一个构建成 WebAssembly 的 Rust crate，`web/` 是 TypeScript 页面和它的两个 worker。使用方法见 [Live Editor](/zh/apps/live-editor)；本页介绍它如何工作。
 
 ```sh
 rustup target add wasm32-unknown-unknown
 POCKETJS_ROOT=~/src/pocketjs bun apps/live-editor/web/build.ts
+bun apps/live-editor/web/serve.ts   # http://localhost:8790/
 ```
 
-它写入 `apps/live-editor/web/dist/`：
+## 构建产物
 
-- `live-editor.wasm`：链接器，用
-  `cargo build --release --target wasm32-unknown-unknown --package barracuda-live-editor-wasm` 构建。
-- `microts.js`：为浏览器打包的 MicroTS 编译器和 TypeScript，其中 `node:fs` 指向内存文件系统。
-- `microts-files.json`：编译器读取的文件。脚本先在磁盘上编译仓库里的每个应用，并记录它读取的每个文件；如果某个应用导入了这些应用都没有用到的 PocketJS 模块，在浏览器里会找不到它。
+`web/build.ts` 把网站写到 `apps/live-editor/web/dist/`：
 
-## 链接器的接口
-
-WebAssembly 模块导出 `memory` 和四个函数：
-
-| 导出 | 作用 |
+| 文件 | 内容 |
 | --- | --- |
-| `input(len)` | 把输入缓冲区设为 `len` 字节并返回它的地址 |
-| `link()` | 链接输入中的 View IR JSON：成功返回 `0`，输出为 BVIR；失败返回 `1`，输出为原因 |
-| `output()`、`output_len()` | 上一次输出的地址和长度 |
+| `index.html`、`main.js`、`app.css`、`ds/` | 页面，基于设计系统的 `tokens.css` 和 `bundle.css` |
+| `workers/build.js`、`workers/run.js` | 构建 worker 和运行 worker |
+| `live-editor.wasm` | `barracuda-live-editor-wasm`：视图链接器和预览 |
+| `lua.wasm` | 预览使用的 Lua 5.4，来自 wasmoon |
+| `fonts/` | `system-fonts` 插件的系统字体，以及 `index.json` |
+| `templates.json` | 应用管理器的示例（`plugins/app-manager/resources/examples`） |
+| `microts.js`、`microts-files.json` | 为浏览器打包的 PocketJS MicroTS 编译器，以及它读取的文件 |
 
-先调用 `input` 再取 `memory` 的视图：它可能扩大内存，这会使之前取得的视图失效。`web/src/wasm.ts` 把这些封装为 `link(json) → Uint8Array`。
+MicroTS 编译器不在本仓库中。把 `POCKETJS_ROOT` 指向一个 PocketJS 检出，提交与[内置的 PocketJS](/zh/plugins/app-manager/pocketjs) 中写明的一致。没有它时，构建会保留已有的 `microts.js`，只重新构建其余部分。为了知道编译器会读取哪些文件，构建会在磁盘上编译仓库中的每个应用，并记录它打开的每个文件；如果某个应用导入了这些应用都没用到的 PocketJS 模块，它在浏览器里找不到这个模块。
+
+## 构建应用
+
+构建 worker（`src/workers/build.ts`）构建容器的方式与 `build-app.ts` 在磁盘上相同，所以 Live Editor 生成的应用包就是工具链会生成的那个：
+
+| 步骤 | 在浏览器里 | 在磁盘上 |
+| --- | --- | --- |
+| 按 `app.d.ts` 编译 `app.tsx` | PocketJS 的 MicroTS 编译器，运行在内存文件系统上（`src/microts.ts`） | PocketJS 的 `buildAot` |
+| 把 View IR 链接为 `view.bvir` | `live-editor.wasm` 中的 `barracuda_ui_runtime::compiler::link`（`src/wasm.ts`） | `ui-link` |
+| 填写清单的 `view` | `src/container.ts` | `build-app.ts` |
+| 检查清单 | 应用管理器的 `app-manifest.json` 模式及其其他规则（`src/manifest.ts`） | 设备，安装时 |
+| 检查入口程序 | Lua 的 `load`，检查语法 | 设备的 VM，运行时 |
+| 打包并签名 `.bapp` | `src/package.ts`，使用 WebCrypto | `pack-app.ts` |
+
+问题会带着文件、行和列返回，Code 视图会标出它。浏览器里不烘焙字体图集，所以视图使用设备的系统字体。
+
+## 预览应用
+
+运行 worker（`src/workers/run.ts`）一次只运行一个应用，所以空转的程序不会卡住页面。
+
+- **视图。**`wasm/src/preview.rs` 把 BVIR 挂载到内置 PocketJS 核心上的 `barracuda_ui_runtime::Document` 中，像 UI kit 一样先加载视图自己的字体图集，其余槽位用系统字体。每个 tick 它推进文档，并用 `pocketjs_core::raster::render_scaled` 按屏幕的像素比把 DrawList 光栅化为 RGBA；DrawList 没有变化时不会重画。点按就是 `Document::press_at`，它选中的处理函数调用交给 Lua。
+- **程序。**`src/run/boot.lua.ts` 在一个宿主函数之上构建 `app` 和 `notify` 软件包，并在协程中运行入口程序：`app.events()` 让出执行，直到宿主有事件；`notify.ask` 让出执行，直到用户作答。值以 JSON 传递，并在 Lua 中编码，因此整数和浮点数像在设备上一样保持区分；`view:set` 按设备的规则和消息检查它们。
+- **规则。**`src/run/app-run.ts` 遵守[应用 API](/zh/plugins/app-manager/app-api) 的规则：`app:active` 最先，`app:background` 和 `app:terminate` 之后 1 秒的宽限期，`app.events{ every }` 至少 100 毫秒，以及 `app.kv` 和 `app.fs` 的限制。计数钩子会停止运行 5 秒仍不回到 `app.events()` 的程序。
+
+### 模块接口
+
+`live-editor.wasm` 导出 `memory` 和以下函数。`input(len)` 设置输入缓冲区大小并返回其地址；每个调用读取输入，并把结果留在 `output()`、`output_len()`。可能失败的调用返回 `0`，或返回 `1` 并把原因作为输出。在获取 `memory` 的视图之前先调用 `input`：它可能扩展内存，使之前的视图失效。
+
+| 导出 | 输入 | 返回值和输出 |
+| --- | --- | --- |
+| `link()` | View IR JSON | `0`，输出 BVIR |
+| `stage(kind)` | 一个视图文件 | 保留给 `open`：`0` BVIR，`1` 样式表，`2` 视图的字体图集，`3` 系统字体图集 |
+| `open(width, height)` | | 暂存的视图运行后返回 `0`；视图文件不再保留，系统字体保留 |
+| `contract()` | | 视图的值和处理函数，JSON 格式 |
+| `set()` | `{"name", "value"}` JSON | `0`，或 `1` 并输出 `view:set` 的错误 |
+| `frame()` | | 推进一个 tick |
+| `tick_rate()` | | 每秒 tick 数 |
+| `draw(scale)` | | `1` 并输出新的 RGBA 像素；画面没有变化时为 `0` |
+| `press(x, y)` | | `1` 并输出 JSON 格式的处理函数调用；点按没有命中处理函数时为 `0` |
+| `texts()` | | 屏幕上的文字，JSON 数组 |
+
+`src/wasm.ts` 把它包装为带 `link`、`open` 和 `systemFonts` 的 `Module`。
+
+## 智能体
+
+`src/agent/agent.ts` 每条消息运行一轮。每一步把模型的流式响应写进聊天，运行它调用的工具，再把结果发回去，最多 40 步。
+
+| 工具 | 作用 |
+| --- | --- |
+| `list_files`、`read_file` | 读取应用了提议修改后的源文件 |
+| `write_file`、`edit_file`、`delete_file` | 修改提议，从不直接修改源文件 |
+| `build` | 构建提议，并用它重启预览 |
+| `look` | 屏幕的 PNG、屏幕上的文字、视图的契约和运行状态 |
+| `tap` | 点按屏幕后再查看；只在 **Let Barracuda tap the preview** 打开时可用 |
+| `read_console`、`restart` | 控制台的最新几行；重新运行 |
+
+模型服务有两个：`src/agent/anthropic.ts` 通过 Anthropic SDK 调用，使用流式响应、带摘要的自适应思考、`effort: "high"`、提示缓存，并在支持的模型上使用 `fallbacks: "default"`；`src/agent/openai.ts` 通过 `fetch` 调用 Chat Completions API。工具输入在生成时以流式传输，运行前按其模式检查。系统提示（`src/agent/prompt.ts`）在对话中从不改变。
+
+完成的一轮会以其服务自己的格式保留它发送和收到的消息（包括思考块），下一次请求原样重放：历史只会增长，这正是保留思考和提示缓存所需要的。停止或失败的一轮，或来自另一个服务的一轮，以其回复的文字发回。一轮结束时，它的提议直接应用；或在 **Review before applying** 打开时在 Changes 中等待；应用时会生成一个版本。
+
+## 安装到设备
+
+`src/install/handoff.ts` 遵循[应用门户插件](/zh/plugins/app-portal)中的 Live Editor 协议：它打开 `http://<address>/portal/#apps`，只对来自该窗口、该来源的 `barracuda/ready` 用 `barracuda/offer` 应答，并跟随 `barracuda/status` 直到结束。应用包由已应用的源文件构建，而不是提议，并用一把只生成一次、保存在 IndexedDB 中的 ECDSA P-256 密钥签名（`src/install/key.ts`）。
+
+## 存储
+
+`src/state/db.ts` 把一切保存在 IndexedDB 中：应用（`src/state/project.ts`：源文件、版本、对话、提议和预览的存储）、设置、签名密钥，以及每个应用的智能体记录；记录因为含有截图而较大，所以单独保存。
 
 ## 测试
 
@@ -56,4 +102,4 @@ cargo test --package barracuda-live-editor-wasm
 bun test ./apps/live-editor/web
 ```
 
-Rust 测试链接 counter 夹具，并与提交的 `counter.bvir` 比较。Web 测试把应用包与 `pack-app.ts` 生成的（签名和未签名）比较，并按 `build-app.ts` 的规则检查容器。构建好 `dist/` 之后，测试还会在内存中编译系统视图，并与提交的 `view.bvir` 和 `styles.bin` 比较。
+Rust 测试链接计数器示例并与已提交的 `counter.bvir` 比较，检查 `view:set` 的转换和消息，并绘制、点按计数器。Web 测试覆盖与 `pack-app.ts` 一致的打包、容器和清单规则、差异、版本和提议、使用替身窗口的门户交接，以及智能体的工具和历史。构建 `dist/` 之后，它们还会在内存中编译系统视图，与已提交的 `view.bvir` 和 `styles.bin` 比较，并在预览中运行计数器应用：点按、保存的状态、`view:set` 错误，以及对忙碌程序和错过宽限期的停止。

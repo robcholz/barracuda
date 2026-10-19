@@ -182,6 +182,7 @@ export class CodePane implements Pane {
         syntaxHighlighting(highlight),
         language(name),
         EditorState.tabSize.of(2),
+        EditorView.lineWrapping,
         keymap.of([
           { key: "Mod-f", run: () => (this.openFind(), true) },
           {
@@ -620,7 +621,7 @@ export class CodePane implements Pane {
             icon("search"),
             h("input", {
               class: "bc-input bc-input--mono",
-              type: "search",
+              type: "text",
               "aria-label": "Find in file",
               value: this.query,
               onInput: (event: Event) => {

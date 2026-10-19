@@ -169,7 +169,7 @@ export class InstallPage implements Page {
     this.app.notify({
       tone: "success",
       title: `${project.id}.bapp downloaded`,
-      text: "Upload it in the device portal under Files, then install it under Apps.",
+      text: "Upload it in the device portal under Files, into media/apps, then install it under Apps.",
     });
   }
 

@@ -1,0 +1,148 @@
+---
+title: "Live Editor"
+description: "Write an app with an agent in the browser, run it as the device runs it, and install it on a device."
+---
+
+Live Editor writes Barracuda apps in your browser. Say what the device should
+do; its agent writes the screen and the program, builds them, and checks them
+in a preview that runs the app exactly as a device does. When the app works,
+send it to a device on your network.
+
+```sh
+bun install
+rustup target add wasm32-unknown-unknown
+POCKETJS_ROOT=~/src/pocketjs bun apps/live-editor/web/build.ts
+bun apps/live-editor/web/serve.ts
+```
+
+Open `http://localhost:8790/`. The build needs a PocketJS checkout at the
+commit [Vendored PocketJS](/plugins/app-manager/pocketjs) names, for the view
+compiler; see [Live Editor internals](/tools/live-editor) for what it builds.
+
+## Set up the agent
+
+Open **Settings** and pick the model service the agent runs on:
+
+| Service | You give |
+| --- | --- |
+| Anthropic | your API key, and a model (default `claude-opus-5-5`) |
+| OpenAI compatible | the service's base URL (such as `https://api.example.com/v1`), a key if it needs one, and a model |
+
+The key is kept in this browser and sent only to that service. An OpenAI
+compatible service must accept requests from Live Editor's page (CORS).
+
+Two switches decide how far the agent goes on its own:
+
+- **Review before applying**: its changes wait in **Changes** until you apply
+  them. Off, they apply when its turn ends.
+- **Let Barracuda tap the preview**: it taps the preview to check its own
+  changes.
+
+## Make an app
+
+<Steps>
+  <Step title="Start">
+    On **New app**, describe the app and send it, or pick an example: Counter,
+    Air quality, Light strip or Camera. Choose the preview device first: the
+    round 360 × 360 display or the square 320 × 320 one.
+  </Step>
+  <Step title="Ask for changes">
+    Talk to the agent in the chat. It lists and reads the app's files, edits
+    them, builds, looks at the preview and taps it, and ends with what it
+    changed and what it saw. **Stop** ends its turn.
+  </Step>
+  <Step title="Review">
+    Open **Changes** to read each file's diff. In **Preview**, **Before** and
+    **After** run the app without and with the changes. **Apply** keeps them;
+    **Discard** drops them.
+  </Step>
+  <Step title="Install">
+    Choose **Install** and send the app to a device. See
+    [Install on a device](#install-on-a-device).
+  </Step>
+</Steps>
+
+## The workspace
+
+The chat stays in the middle; the views open as columns beside it, from the
+top bar. With three views open (two on a laptop screen) the sidebar folds to
+its icons; **Ctrl B** (**⌘ B**) folds and opens it yourself.
+
+| View | Shows |
+| --- | --- |
+| Preview | the app on the preview device. Tap the screen; **Back**, **Background** and **Terminate** send the device's lifecycle events; **Reset storage** empties what the app saved; **Restart app** opens it again |
+| Code | the app's files. Edit them directly: every edit builds again. A failed build underlines the problem and keeps the last build running; **Ask Barracuda to fix** hands it to the agent |
+| Changes | the agent's changes waiting for review |
+| Console | what the program printed, its errors, the view calls and lifecycle events, and what it stored with `app.kv` |
+
+Every set of changes you apply becomes a version. **Versions** in the top bar
+restores one; the newer versions stay, and edits not yet in a version are kept
+as one first.
+
+An app's files are the ones [App format](/plugins/app-manager/app-format)
+describes: `app.json`, `main.lua`, and for a screen `app.tsx`, `app.d.ts` and
+`pocket.json`. **Settings** also changes the open app's name, version and
+display shape. The app ID is fixed: devices know the app by it.
+
+## The preview
+
+The preview builds the app as the toolchain does and runs it on the same UI
+core and the same Lua 5.4 as a device, with the device's system fonts. It keeps
+the device's rules from the [App API](/plugins/app-manager/app-api): one event
+stream starting with `app:active`, the 1 s grace period after `app:background`
+and `app:terminate`, and the limits of `app.kv` and `app.fs`. A build checks the
+manifest and the program's syntax as the device would.
+
+Some things only a device has:
+
+- Board packages such as `light` and `camera`: `require` fails in the preview.
+  Name them in `permissions` and try them on the device.
+- `app.fs` keeps text in the preview; binary files need a device.
+- `notify.post` shows a toast, and `notify.ask` shows its card on the preview's
+  screen.
+
+A program that runs for 5 s without returning to `app.events()` is stopped.
+
+## Install on a device
+
+The device must be on your computer's network, with the portal's Apps page
+(the `app-portal` Plugin).
+
+<Steps>
+  <Step title="Open the device portal">
+    Type the address the portal opens at, such as `192.168.1.42:8787`, and
+    choose **Open device portal**. The portal opens in a window next to Live
+    Editor, which hands it the app's package.
+  </Step>
+  <Step title="Send it from the portal window">
+    The portal shows what it received, and from which page. Choose **发送到设备**
+    (**Send to device**) there.
+  </Step>
+  <Step title="Install it on the device">
+    The person at the device installs it on the screen, or, on a device without
+    one, from a phone on its setup hotspot. Live Editor shows when it is
+    installed or declined.
+  </Step>
+</Steps>
+
+Live Editor signs the package with a key it makes once in this browser. A
+device that installed the app takes updates to it only from the same key, so
+use the same browser for every version. When the portal cannot be reached,
+**Download** saves the `.bapp`: upload it in the portal under **文件**
+(**Files**) into `media/apps/`, then install it under **应用** (**Apps**).
+
+## Where your work is kept
+
+Apps, their versions, conversations and stored data, the settings and the
+signing key stay in this browser's storage for the page. Nothing leaves the
+browser except the requests to the model service and the packages you send to
+a device.
+
+<CardGroup cols={2}>
+  <Card title="App format" icon="box" href="/plugins/app-manager/app-format">
+    The files, the manifest, the Lua program and views.
+  </Card>
+  <Card title="App API" icon="plug" href="/plugins/app-manager/app-api">
+    What an app may use on every device.
+  </Card>
+</CardGroup>
