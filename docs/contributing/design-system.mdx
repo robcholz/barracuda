@@ -4,11 +4,11 @@ description: "Change the one design system the website, the installer, Live Edit
 ---
 
 The website, its installer, Live Editor and the device portal share one design
-system in `design-system/`. Change a token, a component or an icon there and
+system in `ui/`. Change a token, a component or an icon there and
 all four follow; none of them keeps a copy.
 
 ```bash terminal
-bun test ./design-system
+bun test ./ui
 ```
 
 ## What it holds
@@ -46,7 +46,7 @@ So a new component costs the portal nothing until a page uses it.
 ## Change it
 
 <Steps>
-  <Step title="Edit design-system/">
+  <Step title="Edit ui/">
     Keep to the rules at the top of `components.css`: radii by surface,
     every pressable state, quiet selection, one focus line. Add an icon as a
     Lucide `ICON_*` constant.
@@ -68,7 +68,7 @@ So a new component costs the portal nothing until a page uses it.
   <Step title="Check">
     ```bash terminal
     bun run format && bun run lint && bun run check
-    bun test ./design-system ./tools/web ./plugins/captive-portal
+    bun test ./ui ./tools/web ./plugins/captive-portal
     ```
   </Step>
 </Steps>

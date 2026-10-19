@@ -30,9 +30,9 @@ import {
   ICON_USB,
   ICON_WIFI,
   ICON_X,
-} from "../../../design-system/icons";
+} from "../../../ui/icons";
 
-/** The design system's Lucide icons (design-system/icons.ts) by the names the site's pages use. */
+/** The design system's Lucide icons (ui/icons.ts) by the names the site's pages use. */
 const ICONS = {
   x: ICON_X,
   languages: ICON_LANGUAGES,

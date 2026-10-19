@@ -1,6 +1,6 @@
-import { MARK_ART, MARK_VIEWBOX } from "../../../design-system/marks";
+import { MARK_ART, MARK_VIEWBOX } from "../../../ui/marks";
 
-/** The Barracuda mark: the lime tile and its ink outline (design-system/marks.ts). */
+/** The Barracuda mark: the lime tile and its ink outline (ui/marks.ts). */
 export function BrandMark() {
   return (
     <svg

@@ -1,6 +1,6 @@
 /* Barracuda components. Plain CSS over tokens.css: no script, no framework.
    The one copy: the website, Live Editor and the device portal all draw with it. The portal ships
-   only the rules its pages use (design-system/prune.ts), so a new component costs it nothing.
+   only the rules its pages use (ui/prune.ts), so a new component costs it nothing.
    Radii: surfaces radius-lg, controls radius-md, anything nested in a control radius-sm.
    States: every pressable thing has hover, pressed (:active), keyboard focus and disabled.
    Selected is a quiet fill (`muted`), never a heavier outline.

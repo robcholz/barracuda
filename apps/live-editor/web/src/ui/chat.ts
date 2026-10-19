@@ -11,7 +11,7 @@ import {
   type Step,
   type ToolCall,
 } from "../state/project";
-import { MARK_TILE } from "../../../../../design-system/marks";
+import { MARK_TILE } from "../../../../../ui/marks";
 import {
   button,
   fill,

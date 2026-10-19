@@ -4,7 +4,7 @@ import type { App } from "../app/app";
 import { EXAMPLES } from "../app/templates";
 import { DEVICES, type Attachment, type DeviceId } from "../state/project";
 import { ago, fill, h, icon, mark, size, tooltip } from "./dom";
-import { MARK_BARE } from "../../../../../design-system/marks";
+import { MARK_BARE } from "../../../../../ui/marks";
 import { readAttachment } from "./chat";
 import { lang, t } from "../i18n";
 import {

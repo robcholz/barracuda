@@ -3,11 +3,11 @@ title: "Design system"
 description: "修改官网、安装页、Live Editor 和设备门户共用的那一套 design system。"
 ---
 
-官网、它的安装页、Live Editor 和设备门户共用 `design-system/` 里的一套
+官网、它的安装页、Live Editor 和设备门户共用 `ui/` 里的一套
 design system。在这里改一个 token、一个组件或一个图标，四处都会跟着变；它们都不再保留副本。
 
 ```bash terminal
-bun test ./design-system
+bun test ./ui
 ```
 
 ## 里面有什么
@@ -38,7 +38,7 @@ bun test ./design-system
 ## 修改
 
 <Steps>
-  <Step title="修改 design-system/">
+  <Step title="修改 ui/">
     遵守 `components.css` 开头的规则：按表面选圆角，每种可按状态都要有，选中用安静的填充，焦点只有一条线。新图标以 Lucide 的 `ICON_*` 常量添加。
   </Step>
   <Step title="重新生成生成的文件">
@@ -57,7 +57,7 @@ bun test ./design-system
   <Step title="检查">
     ```bash terminal
     bun run format && bun run lint && bun run check
-    bun test ./design-system ./tools/web ./plugins/captive-portal
+    bun test ./ui ./tools/web ./plugins/captive-portal
     ```
   </Step>
 </Steps>

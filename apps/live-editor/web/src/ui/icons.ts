@@ -1,6 +1,6 @@
 /**
  * The icons Live Editor draws, by their Lucide names, from the design system's set
- * (design-system/icons.ts).
+ * (ui/icons.ts).
  */
 import {
   ICON_APP_WINDOW,
@@ -47,7 +47,7 @@ import {
   ICON_UPLOAD,
   ICON_WRENCH,
   ICON_X,
-} from "../../../../../design-system/icons";
+} from "../../../../../ui/icons";
 
 export const ICONS = {
   "arrow-left": ICON_ARROW_LEFT,

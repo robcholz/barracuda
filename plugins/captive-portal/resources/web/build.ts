@@ -1,6 +1,6 @@
 import { Glob } from "bun";
 import { fileURLToPath } from "node:url";
-import { prune, scan } from "../../../../design-system/prune";
+import { prune, scan } from "../../../../ui/prune";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const plugins = fileURLToPath(new URL("../../../", import.meta.url));
@@ -37,12 +37,11 @@ async function pageStyles(): Promise<string[]> {
   return sheets;
 }
 
-const designSystem = fileURLToPath(
-  new URL("../../../../design-system/", import.meta.url),
-);
+/** The repository's shared UI (ui/), not this shell's own kit in ./ui. */
+const sharedUi = fileURLToPath(new URL("../../../../ui/", import.meta.url));
 const names = ["tokens.css", "components.css"];
 const cut = prune(
-  await Promise.all(names.map((name) => Bun.file(designSystem + name).text())),
+  await Promise.all(names.map((name) => Bun.file(sharedUi + name).text())),
   scan(await sources()),
   await pageStyles(),
 );
@@ -55,13 +54,19 @@ const result = await Bun.build({
   naming: "[name].[ext]",
   plugins: [
     {
-      name: "design-system",
+      name: "shared-ui",
       setup(build) {
-        build.onLoad({ filter: /design-system\/[\w-]+\.css$/ }, (args) => {
-          const index = names.indexOf(args.path.slice(designSystem.length));
-          if (index < 0) throw new Error(`${args.path} is not in ${names}`);
-          return { contents: cut[index], loader: "css" };
-        });
+        build.onLoad(
+          { filter: /[\\/]ui[\\/](tokens|components)\.css$/ },
+          (args) => {
+            const index = args.path.startsWith(sharedUi)
+              ? names.indexOf(args.path.slice(sharedUi.length))
+              : -1;
+            if (index < 0)
+              throw new Error(`${args.path} is not in ${sharedUi}`);
+            return { contents: cut[index], loader: "css" };
+          },
+        );
       },
     },
   ],

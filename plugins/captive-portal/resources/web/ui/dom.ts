@@ -1,5 +1,5 @@
 import type { Lang, PortalText } from "../src/contract";
-import { h, icon as drawIcon } from "../../../../../design-system/dom";
+import { h, icon as drawIcon } from "../../../../../ui/dom";
 
 /** A string in both portal languages, or one string used for both (product names, machine values). */
 export type Text = string | PortalText;
@@ -16,7 +16,7 @@ export {
   type Child,
   type Children,
   type Props,
-} from "../../../../../design-system/dom";
+} from "../../../../../ui/dom";
 
 /**
  * A Lucide icon (`ICON_*` from `./icons`) as `.bc-icon`, 16px unless `size` says otherwise. `className`

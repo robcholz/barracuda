@@ -3,7 +3,7 @@
  * shimmer parts this page shares with the design's chat sessions, and the Card progress line the
  * Live Editor card shows while it writes. The shell's stylesheet is held
  * to the device's flash budget, so the page adds them while it is open and the shell's build leaves
- * them out (design-system/prune.ts). Copied from design-system/components.css; keep them in step.
+ * them out (ui/prune.ts). Copied from ui/components.css; keep them in step.
  */
 export const STYLE =
   ".bc-tree{flex:none;width:260px;display:flex;flex-direction:column;gap:2px;padding:var(--space-4) var(--space-3);border-right:1px solid var(--border);background:var(--background)}" +

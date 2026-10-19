@@ -1,10 +1,6 @@
-/** Builds DOM: the design system's builder (design-system/dom.ts) and the few helpers every Live Editor page uses. */
+/** Builds DOM: the design system's builder (ui/dom.ts) and the few helpers every Live Editor page uses. */
 
-import {
-  h,
-  icon as drawIcon,
-  type Children,
-} from "../../../../../design-system/dom";
+import { h, icon as drawIcon, type Children } from "../../../../../ui/dom";
 import { ICONS, type IconName } from "./icons";
 import { t } from "../i18n";
 
@@ -17,7 +13,7 @@ export {
   type Child,
   type Children,
   type Props,
-} from "../../../../../design-system/dom";
+} from "../../../../../ui/dom";
 
 /** A Lucide icon as `.bc-icon`; `className` adds classes, such as `bc-muted` or `bc-spinner`. */
 export function icon(name: IconName, className = ""): SVGSVGElement {

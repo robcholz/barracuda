@@ -1,7 +1,7 @@
 /* The portal's one stylesheet: the design system, cut by build.ts to what the portal's pages use,
    then only what the shell's layout needs. */
-@import "../../../../../design-system/tokens.css";
-@import "../../../../../design-system/components.css";
+@import "../../../../../ui/tokens.css";
+@import "../../../../../ui/components.css";
 
 html,
 body {

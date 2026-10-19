@@ -7,7 +7,7 @@ import { activeChat } from "../state/project";
 import type { App, ThemeChoice } from "../app/app";
 import { lang, STRINGS, t, type Lang } from "../i18n";
 import { SITE } from "./icons";
-import { MARK_BARE } from "../../../../../design-system/marks";
+import { MARK_BARE } from "../../../../../ui/marks";
 import {
   append,
   button,

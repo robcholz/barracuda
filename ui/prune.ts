@@ -162,7 +162,7 @@ function closeBlock(css: string, start: number): number {
     else if (ch === "{") depth++;
     else if (ch === "}" && depth-- === 0) return i;
   }
-  throw new Error("design-system/prune: unbalanced braces");
+  throw new Error("ui/prune: unbalanced braces");
 }
 
 function parse(css: string): Node[] {
