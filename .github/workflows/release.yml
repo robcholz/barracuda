@@ -1,0 +1,236 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds every device Board at that version,
+# packages each with `cargo image package`, and publishes one archive per
+# Board and SHA256SUMS as the tag's GitHub Release. Any Board that fails
+# stops the release.
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: "1.4.0"
+  ESPUP_VERSION: v0.17.1
+  # See ci.yml: esp 1.99.0.0 no longer links ESP32-S3 release builds.
+  ESP_RUST_VERSION: 1.98.1.0
+  # Merges each ESP Board's bootloader, partition table and app.
+  ESPFLASH_VERSION: v4.6.0
+  ESPFLASH_SKIP_UPDATE_CHECK: "true"
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  plan:
+    name: Version & Board matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      board_matrix: ${{ steps.boards.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Read the version from the tag
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $GITHUB_REF_NAME is not v<major>.<minor>.<patch>"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.98.1
+
+      - name: Cache Cargo tools
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace-tools
+          save-if: false
+
+      - name: Select Board
+        run: cargo board select local-linux
+
+      - name: Group all Boards by target
+        id: boards
+        run: |
+          matrix="$(.github/scripts/board-matrix.sh)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          jq . <<< "$matrix"
+
+  build:
+    name: Build (${{ matrix.label }})
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      # Report every Board that fails; publish still waits for all of them.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.board_matrix) }}
+    env:
+      BOARD_GROUP: ${{ toJSON(matrix.boards) }}
+      BARRACUDA_VERSION: ${{ needs.plan.outputs.version }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.98.1
+
+      # Reuse the dependencies CI built on master; a tag saves no cache.
+      - name: Cache Board builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: boards-${{ matrix.key }}
+          add-job-id-key: false
+          key: esp-${{ env.ESP_RUST_VERSION }}
+          save-if: false
+
+      - name: Install Rust target
+        if: matrix.toolchain == 'rust'
+        run: rustup target add ${{ matrix.key }}
+
+      - name: Install Espressif RISC-V GCC
+        if: matrix.c_toolchain == 'esp-riscv'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/espup" \
+            "https://github.com/esp-rs/espup/releases/download/$ESPUP_VERSION/espup-x86_64-unknown-linux-gnu"
+          chmod +x "$RUNNER_TEMP/espup"
+          targets=esp32c3,esp32c6,esp32p4
+          if [[ "${{ matrix.toolchain }}" == esp ]]; then
+            targets="esp32s3,$targets"
+          fi
+          "$RUNNER_TEMP/espup" install --targets "$targets" --esp-riscv-gcc \
+            --toolchain-version "$ESP_RUST_VERSION" --stable-version 1.98.1
+
+      - name: Install C cross-toolchain
+        if: matrix.c_toolchain == 'arm'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi
+
+      - name: Install Bun for Plugin build hooks
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install Rust for Xtensa
+        if: matrix.toolchain == 'esp' && matrix.chip != ''
+        uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          buildtargets: ${{ matrix.chip }}
+          version: ${{ env.ESP_RUST_VERSION }}
+          default: false
+          ldproxy: false
+          override: false
+
+      # `cargo board select` records PATH, so the Platform's release command
+      # must be installed before any Board is selected.
+      - name: Install espflash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/espflash.zip" \
+            "https://github.com/esp-rs/espflash/releases/download/$ESPFLASH_VERSION/espflash-x86_64-unknown-linux-gnu.zip"
+          unzip -o -d "$HOME/.cargo/bin" "$RUNNER_TEMP/espflash.zip" espflash
+          espflash --version
+
+      - name: Build & package every Board
+        run: |
+          mkdir -p dist
+          failed=0
+          while IFS= read -r board; do
+            echo "::group::$board: cargo build --release, cargo image package"
+            name="barracuda-$BARRACUDA_VERSION-$board"
+            if cargo board select "$board" &&
+              cargo build --release &&
+              cargo image package &&
+              tar -C target/package -czf "dist/$name.tar.gz" "$name"; then
+              echo "$board packaged"
+            else
+              echo "::error title=Board release failed::$board"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < <(jq -r '.[]' <<< "$BOARD_GROUP")
+          exit "$failed"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.key }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      BOARD_MATRIX: ${{ needs.plan.outputs.board_matrix }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Check every Board is packaged
+        run: |
+          missing=0
+          while IFS= read -r board; do
+            if [[ ! -f "dist/barracuda-$VERSION-$board.tar.gz" ]]; then
+              echo "::error title=Missing package::$board"
+              missing=1
+            fi
+          done < <(jq -r '.include[].boards[]' <<< "$BOARD_MATRIX")
+          exit "$missing"
+
+      - name: Write checksums
+        working-directory: dist
+        run: sha256sum -- *.tar.gz > SHA256SUMS
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<'EOF'
+          Firmware for every device Board: `barracuda-<version>-<board>.tar.gz`.
+          Each archive holds the firmware, the resource image `resources.img`,
+          and `manifest.json`, which gives every part's flash offset, size and
+          SHA-256. `SHA256SUMS` covers the archives.
+
+          Flash each raw part at its offset, for example with
+          `espflash write-bin <offset> <part>` on ESP32 Boards; flash
+          `firmware.elf` with `probe-rs download`.
+          EOF
+          prerelease=()
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Barracuda $GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --generate-notes \
+            "${prerelease[@]}"
