@@ -1,9 +1,9 @@
 import { resolve } from "node:path";
 
-/** The design system's tokens as the repository carries them. */
+/** The design system's tokens as the website carries them. */
 export const TOKENS_CSS = resolve(
   import.meta.dir,
-  "../../plugins/captive-portal/resources/web/src/ds/tokens.css",
+  "../../website/src/styles/ds/tokens.css",
 );
 export const DOCS_CSS = resolve(import.meta.dir, "../../docs/style.css");
 
@@ -30,11 +30,10 @@ const DOCS_TOKENS: [string, string][] = [
   ["success", "success"],
   ["warning", "warning"],
   ["destructive", "destructive"],
-  // The design system's success and warning alert grounds and edges.
-  ["success-surface", "lime-100"],
-  ["success-border", "lime-400"],
-  ["warning-surface", "amber-100"],
-  ["warning-border", "amber-400"],
+  ["success-surface", "success-surface"],
+  ["success-border", "success-border"],
+  ["warning-surface", "warning-surface"],
+  ["warning-border", "warning-border"],
   ["destructive-surface", "destructive-surface"],
   ["destructive-border", "destructive-border"],
   ["shadow-xs", "shadow-xs"],

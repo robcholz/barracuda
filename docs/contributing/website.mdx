@@ -1,0 +1,52 @@
+---
+title: "Website"
+description: "Run, change, and deploy the Barracuda website in website/, a static Next.js site on Vercel."
+---
+
+The website is a static Next.js site in `website/`, in English at `/` and in
+Chinese at `/zh/`. Run it locally:
+
+```bash terminal
+cd website
+bun install
+bun run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). `bun run build` writes
+the static site to `website/out/`.
+
+## Where things are
+
+| Path | Holds |
+| --- | --- |
+| `src/content/en.tsx`, `src/content/zh.tsx` | Every word on the site. Change both languages in the same pull request |
+| `src/content/boards.ts` | The boards page's list: one entry per Board in `boards/configs/` |
+| `src/components/` | The pages, built from the design system's components |
+| `src/styles/ds/` | The design system's `tokens.css` and `bundle.css`, copied from the design system unchanged |
+| `src/styles/site.css` | The website's own layout, on the design system's tokens |
+| `public/images/` | The painting, the brand logos, and the board figure |
+
+Links to the docs go through `src/lib/links.ts`, so every page links to the
+docs in the reader's language. Until the browser installer ships, every install
+button opens [Installation](/get-started/installation).
+
+## Rules
+
+- Draw with the design system's components (`bc-*`) and tokens. A component the
+  website and the docs both need belongs in the design system; copy its new
+  `tokens.css` and `bundle.css` into `src/styles/ds/`, then run
+  `bun tools/web/docs-tokens.ts` so the docs follow.
+- Adding a Board adds its entry to `src/content/boards.ts`. `bun test tools/web`
+  fails while the list and `boards/configs/` differ, or a listed Board has no
+  docs page.
+
+## Deploy
+
+Vercel builds the site from this repository:
+
+- **Root Directory**: `website`
+- **Framework Preset**: Next.js (detected)
+- **Production branch**: `master`
+
+Every push to `master` deploys the site, and every pull request gets a preview
+link.
