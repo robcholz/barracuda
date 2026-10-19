@@ -34,11 +34,12 @@ body {
 .le-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .le-phone, .le-phone-list { display: none; }
 
-/* The top bar is the top of the page, so its tooltips open downwards. */
-.le-main .bc-topbar .bc-tooltip { top: calc(100% + 6px); bottom: auto; }
-/* Install loses its label first; its tooltip, at the window's right edge, opens leftwards. */
+/* Tooltips show in a layer above the page (ui/tooltips.ts): the columns would clip them in place.
+   The design system's rules still decide when one shows; in place it is only invisible. */
+.le-app .bc-tooltip { visibility: hidden; }
+.bc-tooltip.le-float-tip { position: fixed; right: auto; bottom: auto; transform: none; z-index: 1000; display: block; visibility: visible; }
+.bc-tooltip.le-float-tip[hidden] { display: none; }
 .le-install { position: relative; }
-.le-main .bc-topbar .le-install-tip { left: auto; right: 0; transform: none; }
 .le-crumb { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .le-views-toggle { gap: 2px; flex-wrap: nowrap; }
 /* Narrow places keep one line: labels give way to their icons. */
