@@ -51,11 +51,6 @@ export const en = {
     noteSource: "Needs the Rust toolchain",
     copyLabel: "Copy command",
     readDocs: "Read the docs →",
-    chatYou: "You",
-    chatAsk: "Make the LED strip change color with the temperature",
-    chatWho: "Barracuda · wrote a script and ran it",
-    chatReply:
-      "It’s 26.4°C now, so the strip is blue. Above 28°C it turns orange.",
     brandsLabel: "Hardware and model companies Barracuda works with",
   },
   product: {
