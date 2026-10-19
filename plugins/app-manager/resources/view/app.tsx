@@ -9,7 +9,6 @@ import {
   apps,
   battery,
   batteryFill,
-  blocked,
   brightness,
   brightnessFill,
   cancel,
@@ -167,7 +166,7 @@ export default function System() {
                   <Show when={app().running}>
                     <View class="w-[6px] h-[6px] rounded-full bg-[#CCFF00]" />
                   </Show>
-                  <Text class={app().offered ? "text-sm text-[#A1A1AA]" : "text-sm text-[#FAFAFA]"}>{app().name}</Text>
+                  <Text class={app().dimmed ? "text-sm text-[#A1A1AA]" : "text-sm text-[#FAFAFA]"}>{app().name}</Text>
                 </View>
               </View>
             )}
@@ -241,7 +240,7 @@ export default function System() {
         </View>
       </View>
 
-      {/* Launching, exited, install, and app info: one centered column. */}
+      {/* Launching, exited, and app info: one centered column. */}
       <Show when={screen() >= 5 && screen() <= 8}>
         <View class="absolute left-0 top-0 w-full h-full bg-[#09090B] flex-col items-center justify-center">
           <View
@@ -276,7 +275,7 @@ export default function System() {
               <Text class="text-lg font-bold text-[#FAFAFA]">{secondary()}</Text>
             </View>
           </Show>
-          <Show when={screen() === 7 || screen() === 8}>
+          <Show when={screen() === 8}>
             <Text class="text-lg font-bold text-[#FAFAFA] mt-[8px]">{title()}</Text>
             <Text class="text-sm text-[#A1A1AA]">{detail()}</Text>
             <View class="w-[256px] flex-col mt-[8px]">
@@ -297,18 +296,9 @@ export default function System() {
               <View class="w-[100px] h-12 rounded-md border border-[#63636B] items-center justify-center" focusable onPress={() => cancel()}>
                 <Text class="text-lg font-bold text-[#FAFAFA]">{secondary()}</Text>
               </View>
-              <Show when={primary() !== "" && !blocked()}>
-                <View
-                  class={screen() === 8 ? "w-[124px] h-12 rounded-md bg-[#FF7878] items-center justify-center" : "w-[124px] h-12 rounded-md bg-[#CCFF00] items-center justify-center"}
-                  focusable
-                  onPress={() => confirm()}
-                >
+              <Show when={primary() !== ""}>
+                <View class="w-[124px] h-12 rounded-md bg-[#FF7878] items-center justify-center" focusable onPress={() => confirm()}>
                   <Text class="text-lg font-bold text-[#09090B]">{primary()}</Text>
-                </View>
-              </Show>
-              <Show when={blocked()}>
-                <View class="w-[124px] h-12 rounded-md bg-[#27272A] items-center justify-center">
-                  <Text class="text-lg font-bold text-[#63636B]">{primary()}</Text>
                 </View>
               </Show>
             </View>

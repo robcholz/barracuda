@@ -80,12 +80,35 @@ registrations, and task cancellation as they apply. Run formatting, the
 Plugin's focused tests, clippy, `cargo plugin sync --check`, and
 `git diff --check`; for web pages, the root `bun run` checks and tests.
 
+A runnable example goes in the crate's `examples/*.rs`: one usage per file,
+named in its doc comment, checked with `assert!` against observable state,
+under the crate's lints, and run from the Plugin page with
+`cargo run -p <package> --example <name> --target <host-triple>`.
+
 ## 7. Document
 
-Write the Plugin page `docs/plugins/<id>.mdx` in the template form, plus
-`docs/plugins/<id>/action.mdx` and `event.mdx` when schemas exist, and add
-them to the Plugin's category in `docs/docs.json`. Describe the current contract; history belongs in version
-control.
+Write the Plugin page `docs/plugins/<id>.mdx` in the
+[template form](../../../docs/architecture/plugin-api.mdx#plugin-documentation),
+plus `docs/plugins/<id>/action.mdx` and `event.mdx` when schemas exist. A
+Plugin with a large surface may add topic pages beside them, such as
+`usage.mdx` for callers and `design.mdx` for maintainers;
+`docs/plugins/imessage-gateway/` is the reference.
+
+- Describe the current contract. History belongs in version control, and a
+  page has no status or "not yet implemented" section.
+- State the design positively. Use negation only for a real invariant or
+  boundary, with its reason, and delete any note whose only job is to explain
+  why something is absent. Give a decision and its cost only for the one or
+  two choices that matter.
+- Describe behavior in concepts. Code blocks are minimal and match the real
+  public API; update them in the change that changes the API.
+- Follow [Writing docs](../../../docs/contributing/docs.mdx) for the
+  frontmatter, the first screen, and the words for Plugin developers.
+
+In the same change, add the Chinese copy of every page under
+`docs/zh/plugins/`, add each page to the Plugin's category in both
+navigations of `docs/docs.json`, and run `npx mint validate` and
+`npx mint broken-links` from `docs/`.
 
 ## Migrating an old contract
 

@@ -6,9 +6,10 @@
 //! the switcher. This module turns those into app states, lifecycle events
 //! for the program, and VM and memory budgets.
 
-use crate::bapp::{self, Seal};
 use crate::builtin::{Backends, BuiltinApp, BuiltinBackend};
-use crate::bundle::{self, AppInfo, AppKind, AppList, Builtins, INSTALLED_APPS, Shelf};
+use crate::bundle::{
+    self, APP_EXTENSION, AppInfo, AppKind, AppList, Builtins, Shelf, WORKSPACE_APPS,
+};
 use crate::device::{self, Device, Packages};
 use crate::package::AppPackage;
 use crate::port::{AppState, Lifecycle, Port, Ports};
@@ -36,9 +37,6 @@ use embassy_time::{Duration, Instant, Timer};
 use portable_atomic_util::Arc;
 use serde::Serialize;
 
-/// The key of the signer an app was installed from, beside its container.
-const SIGNER_FILE: &str = ".signer";
-
 /// Apps that may run at once. The VM has four execution slots; one stays
 /// free for Workflow and Agent runs.
 pub const MAX_APP_RUNS: usize = 3;
@@ -54,11 +52,9 @@ pub const MAX_EXIT_OUTPUT_LINES: usize = 16;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AppError {
-    /// No system or installed app has that ID.
+    /// No system or installable app has that ID.
     NotFound,
-    /// The app is offered in the Workspace but not installed.
-    NotInstalled,
-    /// System apps cannot be installed over or uninstalled.
+    /// System apps cannot be uninstalled.
     SystemApp,
     /// The container breaks the app format.
     InvalidBundle,
@@ -70,8 +66,6 @@ pub enum AppError {
     NoDisplay,
     /// The app cannot run on this device; its `incompatible` says why.
     Incompatible,
-    /// The offered app changed after the person was asked to install it.
-    Changed,
     /// No app is in the foreground.
     NoForegroundApp,
     /// The foreground app is not taking input.
@@ -86,14 +80,12 @@ impl core::fmt::Display for AppError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
             AppError::NotFound => "app not found",
-            AppError::NotInstalled => "the app is offered but not installed",
-            AppError::SystemApp => "system apps cannot be installed over or uninstalled",
+            AppError::SystemApp => "system apps cannot be uninstalled",
             AppError::InvalidBundle => "invalid app container",
             AppError::Storage => "app storage failed",
             AppError::ViewRejected => "app view rejected",
             AppError::NoDisplay => "the device has no display for the app's view",
             AppError::Incompatible => "the app cannot run on this device",
-            AppError::Changed => "the offered app changed after it was approved",
             AppError::NoForegroundApp => "no app is in the foreground",
             AppError::NotInteractive => "the foreground app is not taking input",
             AppError::RuntimeUnavailable => "VM runtime is unavailable",
@@ -204,8 +196,6 @@ struct State {
     slots: [Slot; MAX_APP_RUNS],
     foreground: Option<usize>,
     last_exit: Option<AppExit>,
-    /// The app an install was requested for, awaiting the person's answer.
-    install_request: Option<AppInfo>,
 }
 
 impl State {
@@ -328,15 +318,15 @@ impl AppManager {
     }
 
     /// What package `name` lets an app do, in the words its Plugin declared
-    /// for the install screen; `None` for a package that promises nothing or
+    /// for the app info screen; `None` for a package that promises nothing or
     /// one this device lacks.
     #[must_use]
     pub fn purpose(&self, name: &str) -> Option<&'static str> {
         device::purpose(&self.packages(), name)
     }
 
-    /// What app `info` asks to be allowed, as the install screen and the
-    /// portal show it: one line per package it names, in the words the
+    /// What app `info` asks to be allowed, as the app info screen shows it:
+    /// one line per package it names, in the words the
     /// package's Plugin declared, or by its name for one this device lacks,
     /// with packages it only uses marked optional. Each line comes with its
     /// package's name.
@@ -413,11 +403,11 @@ impl AppManager {
         Ok(registration)
     }
 
-    /// Bytes that installed apps and every app's data take up.
+    /// Bytes that installable apps and every app's data take up.
     pub async fn used_bytes(&self) -> u64 {
         let filesystem = &self.inner.filesystem;
         let mut used = 0;
-        let mut pending = alloc::vec![String::from(INSTALLED_APPS), String::from(APP_DATA)];
+        let mut pending = alloc::vec![String::from(WORKSPACE_APPS), String::from(APP_DATA)];
         while let Some(dir) = pending.pop() {
             let Ok(entries) = filesystem.read_dir(&dir).await else {
                 continue;
@@ -459,205 +449,25 @@ impl AppManager {
     }
 
     /// Waits until something the system UI shows may have changed: an app
-    /// opened, moved, or ended, an app was installed or uninstalled, or an
-    /// install was requested. One waiter, the system UI, is served.
+    /// opened, moved, or ended, or was uninstalled. One waiter, the system
+    /// UI, is served.
     pub async fn changed(&self) {
         self.inner.changed.wait().await;
     }
 
-    /// Every launchable app, sorted by ID, every Workspace container that can
-    /// be installed, and every container that fails the app format with the
-    /// reason.
+    /// Every app, sorted by ID, and every container that fails the app
+    /// format with the reason.
     pub async fn list(&self) -> AppList {
         bundle::list(&self.shelf()).await
     }
 
-    /// Asks the system UI to offer the Workspace container `id` for
-    /// installation; the person installs or declines it there. A newer
-    /// request replaces one still unanswered.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AppError`] when the Workspace offers no valid container
-    /// `id`, the ID belongs to a system app, or the app cannot run on this
-    /// device.
-    pub async fn request_install(&self, id: &str) -> Result<AppInfo, AppError> {
-        let offered = self.install_offer(id).await?;
-        if offered.incompatible.is_some() {
-            return Err(AppError::Incompatible);
-        }
-        self.inner.state.borrow_mut().install_request = Some(offered.clone());
-        self.inner.changed.signal(());
-        Ok(offered)
-    }
-
-    /// The Workspace container offered as app `id` as an install would take
-    /// it: with the digest of its files, the signer of a signed package, and
-    /// why it cannot be installed here, if it cannot. Besides not fitting
-    /// the device, an app installed from a signed package takes updates
-    /// only from its signer.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AppError`] when the Workspace offers no valid container
-    /// `id`, a package's signature does not verify, or the ID belongs to a
-    /// system app.
-    pub async fn install_offer(&self, id: &str) -> Result<AppInfo, AppError> {
-        let (offered, seal) = self.sealed(id).await?;
-        let mut info = offered.info;
-        if info.incompatible.is_none() && !self.trusts(id, &seal).await {
-            info.incompatible = Some(String::from("签名与已安装的版本不同"));
-        }
-        info.digest = Some(bapp::hex(&seal.digest));
-        info.signer = seal.signer.as_ref().map(bapp::fingerprint);
-        Ok(info)
-    }
-
-    /// The offered container `id` and what its files hash to.
-    async fn sealed(&self, id: &str) -> Result<(bundle::Container, Seal), AppError> {
-        let offered = bundle::offered(&self.shelf(), id).await?;
-        if self.system_app(id).await {
-            return Err(AppError::SystemApp);
-        }
-        let seal = offered.seal().await?;
-        Ok((offered, seal))
-    }
-
-    /// Whether `seal` may replace installed app `id`: one installed from a
-    /// signed package takes only packages its signer signed.
-    async fn trusts(&self, id: &str, seal: &Seal) -> bool {
-        match self
-            .inner
-            .filesystem
-            .read(&format!("{INSTALLED_APPS}/{id}/{SIGNER_FILE}"))
-            .await
-        {
-            Ok(signer) => seal.signer.is_some_and(|key| key[..] == signer[..]),
-            Err(_) => true,
-        }
-    }
-
-    /// The install the system UI should ask the person about.
-    #[must_use]
-    pub fn install_request(&self) -> Option<AppInfo> {
-        self.inner.state.borrow().install_request.clone()
-    }
-
-    /// Drops the install request for app `id`, if it is the pending one.
-    pub fn decline_install(&self, id: &str) {
-        let mut state = self.inner.state.borrow_mut();
-        if state
-            .install_request
-            .as_ref()
-            .is_some_and(|request| request.id == id)
-        {
-            state.install_request = None;
-            drop(state);
-            self.inner.changed.signal(());
-        }
-    }
-
-    /// The Workspace container offered as app `id`, with why it cannot run on
-    /// this device, if it cannot.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AppError`] when the Workspace offers no valid container
-    /// `id` or the ID belongs to a system app.
-    pub async fn offered(&self, id: &str) -> Result<AppInfo, AppError> {
-        let offered = bundle::offered(&self.shelf(), id).await?;
-        if self.system_app(id).await {
-            return Err(AppError::SystemApp);
-        }
-        Ok(offered.info)
-    }
-
-    async fn system_app(&self, id: &str) -> bool {
-        bundle::info(&self.shelf(), id)
-            .await
-            .is_ok_and(|app| app.kind == AppKind::System)
-    }
-
-    /// Installs the Workspace container `id` as an installable app, with the
-    /// permissions its manifest asks for. The system UI calls this once the
-    /// person agreed; an installed app at another version is replaced, and a
-    /// running copy is terminated first. The app's data is kept.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AppError`] when the Workspace offers no valid container
-    /// `id`, the ID belongs to a system app, the app cannot run on this
-    /// device, or the copy fails.
-    pub async fn install(&self, id: &str) -> Result<AppInfo, AppError> {
-        let (offered, seal) = self.sealed(id).await?;
-        if offered.info.incompatible.is_some() || !self.trusts(id, &seal).await {
-            return Err(AppError::Incompatible);
-        }
-        // What the person was asked about is what is installed.
-        let pinned = self
-            .inner
-            .state
-            .borrow()
-            .install_request
-            .as_ref()
-            .filter(|request| request.id == id)
-            .and_then(|request| request.digest.clone());
-        if pinned.is_some_and(|digest| digest != bapp::hex(&seal.digest)) {
-            return Err(AppError::Changed);
-        }
-        self.terminate(id);
-        let filesystem = &self.inner.filesystem;
-        let target = format!("{INSTALLED_APPS}/{id}");
-        let staging = format!("{INSTALLED_APPS}/.{id}");
-        let copied = async {
-            remove_tree(filesystem, &staging).await?;
-            filesystem.create_dir_all(&staging).await?;
-            for file in offered.files() {
-                let bytes = offered
-                    .source
-                    .read(file, bundle::MAX_VIEW_BYTES)
-                    .await
-                    .map_err(|_| FsError::Io)?;
-                filesystem
-                    .write(&format!("{staging}/{file}"), &bytes)
-                    .await?;
-            }
-            if let Some(signer) = &seal.signer {
-                filesystem
-                    .write(&format!("{staging}/{SIGNER_FILE}"), signer)
-                    .await?;
-            }
-            remove_tree(filesystem, &target).await?;
-            filesystem.rename(&staging, &target).await
-        }
-        .await;
-        if let Err(error) = copied {
-            log::warn!("app: cannot install {id}: {error:?}");
-            let _cleaned = remove_tree(filesystem, &staging).await;
-            return Err(AppError::Storage);
-        }
-        log::info!("app: installed {id} {}", offered.info.version);
-        {
-            let mut state = self.inner.state.borrow_mut();
-            if state
-                .install_request
-                .as_ref()
-                .is_some_and(|request| request.id == id)
-            {
-                state.install_request = None;
-            }
-        }
-        self.inner.changed.signal(());
-        bundle::info(&self.shelf(), id).await
-    }
-
     /// Uninstalls installable app `id`: terminates it and deletes its
-    /// container and its data.
+    /// `<id>.bapp` directory and its data.
     ///
     /// # Errors
     ///
     /// Returns [`AppError::SystemApp`] for a system app, [`AppError::NotFound`]
-    /// when no app `id` is installed, and [`AppError::Storage`] when the
+    /// when no app `id` is there, and [`AppError::Storage`] when the
     /// filesystem fails.
     pub async fn uninstall(&self, id: &str) -> Result<(), AppError> {
         let app = bundle::info(&self.shelf(), id).await?;
@@ -666,7 +476,10 @@ impl AppManager {
         }
         self.terminate(id);
         let filesystem = &self.inner.filesystem;
-        for tree in [format!("{INSTALLED_APPS}/{id}"), format!("{APP_DATA}/{id}")] {
+        for tree in [
+            format!("{WORKSPACE_APPS}/{id}{APP_EXTENSION}"),
+            format!("{APP_DATA}/{id}"),
+        ] {
             remove_tree(filesystem, &tree).await.map_err(|error| {
                 log::warn!("app: cannot remove {tree}: {error:?}");
                 AppError::Storage
@@ -691,12 +504,7 @@ impl AppManager {
         if let Some(index) = running {
             return self.reopen(index).await;
         }
-        let bundle = match bundle::load(&self.shelf(), id).await {
-            Err(AppError::NotFound) if bundle::offered(&self.shelf(), id).await.is_ok() => {
-                return Err(AppError::NotInstalled);
-            }
-            loaded => loaded?,
-        };
+        let bundle = bundle::load(&self.shelf(), id).await?;
         // Another open may have launched it while the container loaded.
         let running = self.inner.state.borrow().find(id);
         if let Some(index) = running {

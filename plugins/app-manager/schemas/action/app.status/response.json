@@ -18,7 +18,6 @@
         "location": {
           "enum": [
             "builtin",
-            "installed",
             "workspace"
           ]
         },
@@ -79,16 +78,6 @@
         },
         "incompatible": {
           "type": "string"
-        },
-        "digest": {
-          "type": "string",
-          "minLength": 64,
-          "maxLength": 64
-        },
-        "signer": {
-          "type": "string",
-          "minLength": 16,
-          "maxLength": 16
         }
       },
       "required": [

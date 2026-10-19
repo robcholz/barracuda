@@ -2,7 +2,7 @@
 name = "barracuda-appkit"
 version = "0.1.0"
 edition = "2024"
-description = "Lists, installs, launches, and supervises Lua apps and their views"
+description = "Lists, launches, and supervises Lua apps and their views"
 license = "Apache-2.0"
 
 [dependencies]
@@ -24,11 +24,8 @@ embassy-sync.workspace = true
 embassy-time.workspace = true
 json-validator.workspace = true
 log.workspace = true
-# App packages: their digest and P-256 signatures.
-p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
-sha2 = { version = "0.10", default-features = false }
 
 [dev-dependencies]
 futures-lite = "2"

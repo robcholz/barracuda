@@ -82,6 +82,21 @@ Use the defined terms in the [glossary](/product/glossary) everywhere: Plugin,
 Board, Platform, System, Agent, channel. Say "on-board Agent", not "assistant";
 say "Lua script", not "code" alone.
 
+## Styles
+
+`style.css` draws Mintlify's components as the Barracuda design system's: code
+blocks are its Window, callouts its Alert, Steps its step marks, cards lead
+with its icon tile, and prose links and inline code follow its Text. Use its
+tokens (`--bc-*`) and radii, never a new color or size. The token block at the
+top is generated from the design system's `tokens.css`; after the tokens change,
+regenerate it:
+
+```bash terminal
+bun tools/web/docs-tokens.ts
+```
+
+`bun test tools/web` fails while the block is out of date.
+
 ## Check before you push
 
 ```bash terminal

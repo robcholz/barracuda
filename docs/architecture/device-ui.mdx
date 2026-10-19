@@ -13,19 +13,19 @@ the Plugins' docs.
 
 | | System | System app | Installable app |
 | --- | --- | --- | --- |
-| What it is | native Rust in the `app-manager` Plugin | a builtin app: an app container another Plugin ships | an app container the person installed |
-| Where it lives | the `app-manager` Plugin's `/resources/view` | `/resources/app` of its `builtin-app-<name>` Plugin | the `app-manager` Plugin's `/media/apps/<id>` |
+| What it is | native Rust in the `app-manager` Plugin | a builtin app: an app container another Plugin ships | an app container put in the Workspace |
+| Where it lives | the `app-manager` Plugin's `/resources/view` | `/resources/app` of its `builtin-app-<name>` Plugin | `/workspace/media/apps/<id>.bapp/` |
 | Runs as | the `app-manager` task | a Lua run with a MicroTS view, under the app lifecycle | the same |
 | Lua packages | none | every registered package, its own package included | the ambient packages and those its manifest names; never a builtin app's package |
 | Removable | no | no; only app info; a Board leaves out its Plugin | yes; app info and uninstall |
 | When it fails | the device is broken | the system shows that it exited | the same |
-| Examples | home and the Agent's states, launcher, switcher, notification and control centers, launching, exited, install, app menu and info | Sessions, Workflows, Files, Settings | the air quality, light strip, camera, and counter examples |
+| Examples | home and the Agent's states, launcher, switcher, notification and control centers, launching, exited, app menu and info | Sessions, Workflows, Files, Settings | the air quality, light strip, camera, and counter examples |
 
 ## The Plugins
 
 | Plugin | Holds |
 | --- | --- |
-| `app-manager` | the app kit (apps, installs, the lifecycle, the `app` package), the UI kit (views, the display, touch, gestures, the system fonts and icons), and the entry point that connects them and runs the system UI |
+| `app-manager` | the app kit (apps, the lifecycle, the `app` package), the UI kit (views, the display, touch, gestures, the system fonts and icons), and the entry point that connects them and runs the system UI |
 | `builtin-app-<name>` | one system app: its container, and the backend of its own Lua package |
 | `system-fonts` | the system fonts every view on a display draws with |
 | `system-wifi` | Wi-Fi in the system UI: the link, the offline card, and the setup hotspot the portal tile opens, through `app-manager`'s `SystemNetwork` |
@@ -58,15 +58,14 @@ ships with, that needs the device's state an installable app could not get
 without asking, and that may fail without taking the device down: Settings,
 conversations, Workflows, files.
 
-Everything else is an **installable app**: it is offered in the Workspace by
-the portal, an Agent, or another Plugin, and the person installs it.
+Everything else is an **installable app**: a directory in the Workspace,
+written there by the portal, an Agent, or another Plugin.
 
 ## The system
 
 The `app-manager` Plugin's system UI is the system. It is the only caller
-that switches and uninstalls apps for the person, the only owner of the
-system gestures, and, with the `app-portal` Plugin's portal page on the
-device's setup hotspot, the only way the person installs apps. Its view sits on the system layer, above the
+that switches and uninstalls apps for the person, and the only owner of the
+system gestures. Its view sits on the system layer, above the
 app layer: while an app is in the foreground and no system screen covers it,
 the app's view shows; any system screen covers the app and stops its input
 (`AppManager::set_interactive`) until the screen closes.
@@ -100,7 +99,7 @@ A system app is a builtin app: a `builtin-app-<name>` Plugin depends on
 Plugins in the image can do that, so nothing installed can make a system app.
 System apps run under the same lifecycle as any app (active, inactive,
 background, suspended, terminating) and may `require` every registered Lua
-package without declaring it. No installed app may take a system app's ID,
+package without declaring it. No installable app may take a system app's ID,
 and system apps cannot be uninstalled.
 
 A builtin app reaches the device through its own Lua package, such as
@@ -113,27 +112,22 @@ no atlases of their own.
 
 ## Installable apps
 
-An installable app starts as a container offered in the Workspace under
-`/workspace/media/apps/<id>`; it is not launchable there. It is written
-against the app API
+An installable app is a container directory in the Workspace,
+`/workspace/media/apps/<id>.bapp/`. Putting the directory there installs
+it, and it runs from there: nothing is copied, asked, or signed. Whoever can
+write the Workspace installs apps, such as the portal's file manager, an
+Agent, or another Plugin; an app being written goes in a directory whose
+name starts with `.` and is renamed once it is complete.
+
+It is written against the app API
 ([App API](/plugins/app-manager/app-api)): its manifest
 names the `app` package version, the stable packages it requires or uses
 with the least version it needs, other packages it asks for, and the Boards
-it is for when it talks to their hardware. The
-system checks it against the device; one that cannot run here shows why and
-cannot be installed. Otherwise the install screen lists what it asks for in
-the words each package's Plugin declares; when the person installs it, the
-`app-manager` Plugin copies the container into its private `/media/apps/<id>`,
-and from then on every run of it may `require` only the ambient packages and
-those it named.
-A Workflow or Agent asks for an install with `app.install`; only the person
-completes it, on the device's install screen or, on the portal's Apps page,
-from a phone on the device's setup hotspot, which is how a Board without a
-display installs apps. Either way the install takes exactly what the person
-was shown: the offer's digest is pinned when the install is asked for. An
-offer may be a signed `.bapp` package; an app installed from one takes
-updates only from the same signer. Uninstalling deletes the container and the app's data; the
-Workspace offer stays until its author removes it.
+it is for when it talks to their hardware. The system checks it against the
+device; one that cannot run here is listed dimmed and its info screen says
+why. Every run of an app may `require` only the ambient packages and those
+its manifest named; its info screen lists them in the words each package's
+Plugin declares. Uninstalling deletes the directory and the app's data.
 
 ## Fonts
 
