@@ -11,11 +11,9 @@ Before we can merge your first pull request, you need to accept the
 the agreement lets the project offer Barracuda under the
 [AGPL v3](LICENSE) and under commercial licenses.
 
-To accept it, add this comment to your pull request:
-
-```text
-I have read the Barracuda CLA and I accept it.
-```
+When you open your first pull request, the CLA assistant bot comments on it
+with a link. Follow the link, sign in with GitHub, and accept the agreement;
+the bot's check on your pull request then turns green.
 
 You only need to do this once. If you contribute on behalf of your employer,
 make sure you have its permission first.
@@ -29,7 +27,8 @@ make sure you have its permission first.
    what happened. For a feature, describe the problem it solves.
 3. For a large change, such as a new plugin, board, or platform, wait for a
    maintainer to agree on the design in the issue before you write the code.
-4. Open a pull request that links the issue and accept the CLA in it.
+4. Open a pull request that links the issue, and accept the CLA when the bot
+   asks.
 
 Report security vulnerabilities privately with **Report a vulnerability** under
 the repository's **Security** tab, never in a public issue.
