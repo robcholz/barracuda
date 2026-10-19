@@ -23,13 +23,34 @@ bun run dev
 | `src/styles/ds/` | design system 的 `tokens.css` 和 `bundle.css`，原样复制自 design system |
 | `src/styles/site.css` | 官网自己的布局，基于 design system 的 token |
 | `public/images/` | 油画、品牌 logo 和开发板插图 |
+| `src/content/repo.ts` | 首页引用的平台、插件和消息通道数量，由仓库生成 |
+| `src/components/Installer.tsx`、`src/components/InstallerSteps.tsx` | `/install/` 的浏览器安装页：它的流程和六个步骤 |
+| `src/content/install-en.ts`、`src/content/install-zh.ts` | 安装页的文字。因为里面有函数，所以和网站其他文字分开放 |
+| `src/lib/install/` | 安装页的逻辑：发布压缩包、闪存布局、串口状态行、版本列表和刷写 |
+| `public/install/` | 安装页的开发板插图，浅色和深色各一套 |
 
-指向文档的链接都通过 `src/lib/links.ts` 生成，每个页面都会链接到读者所用语言的文档。浏览器安装器上线前，所有安装按钮都打开[安装](/zh/get-started/installation)。
+指向文档的链接都通过 `src/lib/links.ts` 生成，每个页面都会链接到读者所用语言的文档。所有安装按钮都打开安装页。
+
+## 安装页
+
+`/install/` 和 `/zh/install/` 在桌面版 Chrome 或 Edge 里刷写 ESP 开发板；[安装](/zh/get-started/installation)一页带用户走完整个流程。它不需要服务器：
+
+- 版本列表和更新说明来自 GitHub Releases API，这个接口允许跨站读取。
+- 发布压缩包不允许跨站读取，所以由用户下载后拖回页面。页面在浏览器里解压，并检查其中的 `manifest.json`：开发板、版本和每个文件的 SHA-256。
+- `esptool-js` 通过 Web Serial 连接，检查芯片和闪存大小，读取分区表和应用描述信息，判断开发板上是否已有 Barracuda，然后写入各个文件。
+- 设备重启后，页面读取开发板的 `BARRACUDA wifi=…` 串口状态行，一路跟到设备门户的地址。
+
+发布里有什么，参见[发布](/zh/contributing/releases)。
 
 ## 规则
 
 - 用 design system 的组件（`bc-*`）和 token 来画。官网和文档都要用的组件属于 design system；把它新的 `tokens.css` 和 `bundle.css` 复制到 `src/styles/ds/`，再运行 `bun tools/web/docs-tokens.ts`，让文档跟上。
 - 新增开发板时，在 `src/content/boards.ts` 里加上它。列表和 `boards/configs/` 不一致，或列出的开发板没有文档页时，`bun test tools/web` 会失败。
+- 首页的数量来自 `src/content/repo.ts`。增删平台或插件后重新生成它；它过期时 `bun test tools/web` 会失败：
+
+  ```bash terminal
+  bun tools/web/website-repo.ts
+  ```
 
 ## 部署
 

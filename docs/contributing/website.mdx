@@ -25,10 +25,33 @@ the static site to `website/out/`.
 | `src/styles/ds/` | The design system's `tokens.css` and `bundle.css`, copied from the design system unchanged |
 | `src/styles/site.css` | The website's own layout, on the design system's tokens |
 | `public/images/` | The painting, the brand logos, and the board figure |
+| `src/content/repo.ts` | The Platform, Plugin and channel counts the home page quotes, generated from the repository |
+| `src/components/Installer.tsx`, `src/components/InstallerSteps.tsx` | The browser installer at `/install/`: its flow and its six steps |
+| `src/content/install-en.ts`, `src/content/install-zh.ts` | The installer's words, kept apart from the site's because they hold functions |
+| `src/lib/install/` | The installer's logic: release archives, flash layout, console lines, releases, and flashing |
+| `public/install/` | The installer's board figures, light and dark |
 
 Links to the docs go through `src/lib/links.ts`, so every page links to the
-docs in the reader's language. Until the browser installer ships, every install
-button opens [Installation](/get-started/installation).
+docs in the reader's language. Every install button opens the installer.
+
+## The installer
+
+`/install/` and `/zh/install/` flash ESP Boards from desktop Chrome or Edge;
+[Installation](/get-started/installation) walks a visitor through it. It works
+without a server:
+
+- The version list and release notes come from the GitHub Releases API, which
+  allows cross-site reads.
+- The release archives do not allow cross-site reads, so the visitor downloads
+  one and drops it back on the page. The page unpacks it in the browser and
+  checks its `manifest.json`: the Board, the version, and every part's SHA-256.
+- `esptool-js` connects over Web Serial, checks the chip and its flash size,
+  reads the partition table and the app descriptor to tell whether Barracuda
+  is already on the Board, and writes the parts.
+- After the restart, the page reads the Board's `BARRACUDA wifi=…` console
+  lines to follow Wi-Fi setup to the portal's address.
+
+What a release holds is in [Releases](/contributing/releases).
 
 ## Rules
 
@@ -39,6 +62,13 @@ button opens [Installation](/get-started/installation).
 - Adding a Board adds its entry to `src/content/boards.ts`. `bun test tools/web`
   fails while the list and `boards/configs/` differ, or a listed Board has no
   docs page.
+- The home page's counts come from `src/content/repo.ts`. After adding or
+  removing a Platform or a Plugin, regenerate it; `bun test tools/web` fails
+  while it is out of date:
+
+  ```bash terminal
+  bun tools/web/website-repo.ts
+  ```
 
 ## Deploy
 

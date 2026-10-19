@@ -33,6 +33,11 @@ cargo image deploy
 - `cargo image deploy` builds the Plugin resource image and writes it with
   `probe-rs download`.
 
+A [release](/contributing/releases) ships STM32 Boards as `firmware.elf` and
+`resources.img`, which the browser installer does not write. Write them with
+`probe-rs download`: the ELF as it is, and the resource image with
+`--binary-format bin --base-address` set to its offset in `manifest.json`.
+
 ## Hardware the Platform drives
 
 The `stm32` Platform provides digital inputs and outputs, GPIO, I2C devices,

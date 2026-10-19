@@ -1,6 +1,6 @@
 ---
 title: "System Image Tool"
-description: "Build a FATFS or LittleFS image of Plugin resources and flash it to the selected Board."
+description: "Build a FATFS or LittleFS image of Plugin resources, flash it to the selected Board, or package a release."
 ---
 
 This host-only crate builds a FATFS or LittleFS image containing enabled Plugin
@@ -12,13 +12,15 @@ cargo board select
 cargo image build
 cargo image flash
 cargo image deploy
+cargo image package
 ```
 
 All operations read `.barracuda/selected-board`; none accepts a Board or
 Platform argument. `build` reads the Board's native physical layout and writes
 `target/barracuda-system.img`. `flash` requires that complete image to already
 exist and writes it only to the selected Board's native `resources` region.
-`deploy` builds a fresh image and then flashes it.
+`deploy` builds a fresh image and then flashes it. `package` packages a release
+build of the selected Board; see [Package a release](#package-a-release).
 The Board-native `resources` partition entry chooses `fatfs` or `littlefs`:
 file-region layouts use that region's `filesystem` field, ESP layouts use its
 partition subtype, and linker layouts use its inline `filesystem` annotation.
@@ -50,3 +52,43 @@ logical `/workspace/resources/` mount. Conflicting shared paths fail the build
 instead of making Plugin discovery order observable. Disabled Plugins are not
 bundled, and mutable `/data`, `/cache`, and `/media` trees can never be
 prebuilt.
+
+## Package a release
+
+`cargo image package` turns the selected Board's release build into the folder
+a [release](/contributing/releases) archives:
+
+```bash terminal
+BARRACUDA_VERSION=0.1.0 cargo build --release
+BARRACUDA_VERSION=0.1.0 cargo image package
+```
+
+It reads `target/<target>/release/barracuda-system`, which
+`cargo build --release` writes, and writes
+`target/package/barracuda-<version>-<board>/`
+with the firmware file, a fresh `resources.img`, and `manifest.json`, which
+gives every part's offset, size and SHA-256. The version is
+`BARRACUDA_VERSION`, or `dev` when it is unset.
+
+The Platform's `application.release` driver in `platform.yml` says how the
+built application becomes the firmware file:
+
+| Driver | Firmware file | Used by |
+| --- | --- | --- |
+| `elf` | `firmware.elf`, the built application itself; flash tools place it by its own addresses | `stm32` |
+| `command` | `firmware.bin`, which the command writes to `{output}`; flashed at the driver's `offset` | the ESP Platforms, with `espflash save-image --merge` |
+
+```yaml platform.yml
+application:
+  release:
+    driver: command
+    program: espflash
+    arguments: [save-image, --chip, "{chip}", --merge, --skip-padding, --flash-size, "{flash-size}", --partition-table, "{layout}", --target-app-partition, ota_0, "{application}", "{output}"]
+    offset: 0
+```
+
+A command runs without a shell. Besides `{chip}` and `{layout}`, it may name
+`{application}`, the built application; `{output}`, the file to write; and
+`{flash-size}`, the Board's `hardware.flash-size`, or for an ESP partition
+table the smallest flash size that holds it. A Platform without a release
+driver, such as a host Platform, publishes no firmware.

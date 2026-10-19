@@ -74,6 +74,12 @@ cargo image deploy
 - `cargo image deploy` builds the Plugin resource image and writes it to the
   `resources` partition with `espflash write-bin`.
 
+A [release](/contributing/releases) ships each ESP Board as `firmware.bin`, the
+bootloader, partition table and app merged from `0x0`, beside
+`resources.img`. The browser [installer](/get-started/installation) writes
+both; to write them yourself, run `espflash write-bin` with each part's offset
+from `manifest.json`.
+
 ## Hardware the Platforms drive
 
 Every ESP32 Platform provides digital inputs and outputs, GPIO, SPI devices,
