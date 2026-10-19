@@ -18,6 +18,9 @@ export const en = {
     boardsTitle: "Boards · Barracuda",
     boardsDescription:
       `${BOARDS.length} boards from M5Stack, Espressif, ST, and more. Pick one, flash it from the browser, and test ideas on it live.`,
+    installTitle: "Flash a device · Barracuda",
+    installDescription:
+      "Flash Barracuda onto your board from Chrome or Edge, then connect it to Wi-Fi with your phone.",
   },
   banner: {
     label: "Announcement",

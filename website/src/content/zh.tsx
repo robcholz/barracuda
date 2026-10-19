@@ -12,6 +12,9 @@ export const zh: Copy = {
     boardsTitle: "开发板 · Barracuda",
     boardsDescription:
       `来自 M5Stack、乐鑫、ST 等厂商的 ${BOARDS.length} 块开发板。选一块，在浏览器里烧录，马上在上面验证想法。`,
+    installTitle: "刷写设备 · Barracuda",
+    installDescription:
+      "在 Chrome 或 Edge 里把 Barracuda 刷进开发板，再用手机给它连上 Wi-Fi。",
   },
   banner: {
     label: "公告",

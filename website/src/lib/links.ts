@@ -12,12 +12,15 @@ export function docs(lang: Lang, path = ""): string {
   return `${DOCS}${prefix}${path ? `/${path}` : prefix ? "" : "/"}`;
 }
 
-/** Where every install button goes until the browser installer ships. */
+/** Where every install button goes: the browser installer. */
 export function install(lang: Lang): string {
-  return docs(lang, "get-started/installation");
+  return page(lang, "/install/");
 }
 
 /** A page of this site in the reader's language. */
-export function page(lang: Lang, path: "/" | "/boards/"): string {
+export function page(
+  lang: Lang,
+  path: "/" | "/boards/" | "/install/",
+): string {
   return lang === "zh" ? `/zh${path}` : path;
 }
