@@ -84,7 +84,10 @@ Where a container lives decides its `AppKind`, as
   system UI calls them, after asking the person; `AppManager::request_install`
   (the `app.install` Action) asks the system UI to show an offer, and
   `AppManager::install_request` and `AppManager::decline_install` are its side
-  of that request.
+  of that request. `AppManager::offer_package` writes a package it is handed
+  (at most `MAX_PACKAGE_BYTES`) into the Workspace as `<id>.bapp` and asks
+  for its install the same way, removing it again when it is not a valid
+  package; the portal's Apps page uses it for apps Live Editor sends.
 
 Each app's data lives under the private `/media/data/<id>/`, keyed by ID, so
 it survives updates.

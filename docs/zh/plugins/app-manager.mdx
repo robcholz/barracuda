@@ -49,7 +49,7 @@ tag: "NEW"
 - **系统应用**是其他插件提供的内置应用，各自位于自己文件系统的 `/resources/app`；插件通过 `AppManager::add_builtin` 把自己加入，见下文。它们的运行可以 `require` 每个已注册的 Lua 包，`uninstall` 会拒绝它们，任何已安装应用都不能占用它们的 ID。
 - **可安装应用**安装在私有的 `/media/apps` 下。它们的运行通过 `Vm::run_scoped` 获得 `LuaPackageScope::Only`，只包含环境 Lua 包和清单中列出的 Lua 包。
 - **提供的应用**是位于共享的 `/workspace/media/apps` 下的容器，由门户、Agent 或其他插件写入。它们不能启动；`open` 会返回 `NotInstalled`。`AppManager::install` 把一个提供的应用（目录或 `.bapp` 包）复制到 `/media/apps`，替换已安装的其他版本；它只接受待处理请求所固定的内容（否则返回 `Changed`），而对于从签名包安装的应用，只接受同一签名者的包。`AppManager::install_offer` 按安装时的样子描述一个提供的应用，包括它的 `digest`、`signer`，以及在无法安装时的原因。格式见[应用格式](/zh/plugins/app-manager/app-format)，
-  `AppManager::uninstall` 删除已安装的应用及其数据。只有系统 UI 会在询问用户之后调用它们；`AppManager::request_install`（即 `app.install` Action）请求系统 UI 显示一个提供的应用，而 `AppManager::install_request` 和 `AppManager::decline_install` 是该请求在系统 UI 一侧的接口。
+  `AppManager::uninstall` 删除已安装的应用及其数据。只有系统 UI 会在询问用户之后调用它们；`AppManager::request_install`（即 `app.install` Action）请求系统 UI 显示一个提供的应用，而 `AppManager::install_request` 和 `AppManager::decline_install` 是该请求在系统 UI 一侧的接口。`AppManager::offer_package` 把交给它的应用包（最多 `MAX_PACKAGE_BYTES`）以 `<id>.bapp` 写进工作区，并以同样的方式请求安装；不是有效应用包时会再把它删除。门户的应用页面用它接收 Live Editor 发来的应用。
 
 每个应用的数据按 ID 存放在私有的 `/media/data/<id>/` 下，所以更新后依然保留。
 

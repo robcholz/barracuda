@@ -55,7 +55,7 @@ pub use agent::{AgentState, AgentStatus};
 pub use barracuda_appkit::{
     API_LEVEL, APP_DATA, APP_PACKAGE, AppError, AppExit, AppInfo, AppKind, AppList, AppLocation,
     AppManager, AppState, BUILTIN_APP, BuiltinApp, BuiltinBackend, BuiltinError, BuiltinPackage,
-    Device, InvalidApp, RunningApp, ViewShape, VmRunOutcome,
+    Device, InvalidApp, MAX_PACKAGE_BYTES, RunningApp, ViewShape, VmRunOutcome, valid_id,
 };
 pub use barracuda_uikit::icons;
 pub use fonts::{FontAtlases, SystemFonts};

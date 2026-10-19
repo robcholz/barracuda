@@ -15,6 +15,9 @@ use sha2::{Digest as _, Sha256};
 pub const PACKAGE_EXTENSION: &str = ".bapp";
 /// The most files a package holds.
 pub const MAX_PACKAGE_FILES: usize = 64;
+/// The largest package `AppManager::offer_package` takes: well above a
+/// valid one, whose manifest, program and view files come to at most 580 KiB.
+pub const MAX_PACKAGE_BYTES: u64 = 1024 * 1024;
 
 const MAGIC: &[u8; 4] = b"BAPP";
 const SIGNATURE_MAGIC: &[u8; 4] = b"BSIG";

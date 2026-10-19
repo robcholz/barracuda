@@ -1,10 +1,10 @@
 ---
 title: "App Portal 插件"
 sidebarTitle: "App Portal"
-description: "在门户的应用页面审核并安装应用，也可以用连在设置热点上的手机操作。"
+description: "在门户的应用页面审核并安装应用，也可以用连在设置热点上的手机操作，并接收 Live Editor 发来的应用。"
 ---
 
-为门户添加应用页面：显示等待用户确认的安装，包括它请求什么、由谁签名，以及工作区提供的应用。只有连在设备设置热点上的客户端才能安装或拒绝，所以没有显示屏的开发板可以用设备旁边的手机来安装应用。
+为门户添加应用页面：显示等待用户确认的安装，包括它请求什么、由谁签名，以及工作区提供的应用。只有连在设备设置热点上的客户端才能安装或拒绝，所以没有显示屏的开发板可以用设备旁边的手机来安装应用。页面也接收 Live Editor 发来的应用：Live Editor 在一个窗口里打开这一页，把应用包发到这里，见 [Live Editor](#live-editor)。
 
 - 插件 ID：`app-portal`
 - 依赖：`app-manager`、`webserver`、`captive-portal`、`wifi`
@@ -26,12 +26,22 @@ description: "在门户的应用页面审核并安装应用，也可以用连在
 
 | 路由 | 作用 |
 | --- | --- |
-| `GET /api/apps` | `{"waiting": {id, name, version, digest, signer, asks} \| null, "offers": [{id, name, version, incompatible?}]}`；`asks` 是安装界面上的各行说明（`AppManager::asks`） |
+| `GET /api/apps` | `{"waiting": {id, name, version, digest, signer, asks} \| null, "offers": [{id, name, version, incompatible?}], "installed": [{id, version}], "hotspot"}`；`asks` 是安装界面上的各行说明（`AppManager::asks`），`installed` 是已安装的应用（不含系统应用），`hotspot` 表示这个请求是否来自设置热点 |
 | `POST /api/apps/request` `{"id"}` | 请求安装某个提供的应用（`AppManager::request_install`），之后它进入等待；返回 `204`，或者返回 `409 incompatible` 并以 `message` 给出原因 |
 | `POST /api/apps/install` `{"id", "digest"}` | 当 `id` 和 `digest` 与正在等待的应用一致时安装它，这样安装的正是页面显示的内容（否则返回 `409 changed`）；返回已安装的 `{id, name, version}` |
 | `POST /api/apps/decline` `{"id"}` | 拒绝正在等待的应用；返回 `204` |
+| `PUT /api/apps/offer/<id>`，请求体是 `.bapp` | 把应用包以 `<id>.bapp` 放进工作区，替换旧的同名包，并请求安装它（`AppManager::offer_package`）；返回 `201` 和 `GET` 中显示的等待中的应用，或者 `400 invalid_id`、超过 1 MiB 时 `413 too_large`、请求体不是有效应用包时 `422 invalid_bundle`（该包会被删除），或者 `409 incompatible` 并给出原因 |
 
-除非请求来自设置热点，安装和拒绝都会返回 `403 setup_hotspot_only`；`WifiStatus::is_setup_access_point` 根据连接在设备一端的地址（`HttpRequest::local_address`）判断这一点。这样，决定权就留给热点运行期间处于设备 Wi-Fi 范围内的人，而热点运行的时间是 Wi-Fi 尚未设置时，或者用户打开门户之后：家庭网络或互联网上的任何人都无法安装。这依据的是距离，而不是身份：设置热点是开放的，所以热点运行期间范围内的任何人都能访问该页面。请求安装可以在任何网络上进行，与 `app.install` Action 相同。失败时返回 `{"error", "message"}`，其中的消息使用面向用户的措辞。
+除非请求来自设置热点，安装和拒绝都会返回 `403 setup_hotspot_only`；`WifiStatus::is_setup_access_point` 根据连接在设备一端的地址（`HttpRequest::local_address`）判断这一点。这样，决定权就留给热点运行期间处于设备 Wi-Fi 范围内的人，而热点运行的时间是 Wi-Fi 尚未设置时，或者用户打开门户之后：家庭网络或互联网上的任何人都无法安装。这依据的是距离，而不是身份：设置热点是开放的，所以热点运行期间范围内的任何人都能访问该页面。请求安装可以在任何网络上进行，与 `app.install` Action 相同，发送应用包也一样。失败时返回 `{"error", "message"}`，其中的消息使用面向用户的措辞。不在热点上时，页面不显示安装和拒绝按钮，而是说明去哪里确认。
+
+## Live Editor
+
+Live Editor 运行在 HTTPS 网站上，浏览器不允许这样的页面请求局域网里的 `http://` 地址。它改为在一个窗口里打开设备的 `/portal/#apps`，两个窗口之间用 `postMessage` 通信，再由这一页像门户平时一样调用设备。
+
+1. 被另一个窗口打开时，页面向它发送 `{"type": "barracuda/ready", "v": 1}`。
+2. Live Editor 回复 `{"type": "barracuda/offer", "v": 1, "id", "name", "version", "bapp"}`，其中 `bapp` 是应用包的字节，为最多 1 MiB 的 `ArrayBuffer`。页面只接受打开它的那个窗口发来的应用，并把那个窗口的来源和应用一起显示出来。
+3. 用户选择“发送到设备”之前，设备上什么都不会改变。之后页面发送 `PUT /api/apps/offer/<id>`，安装和平时一样等待设备旁的人确认。
+4. 页面把每一步报告给那个来源：`{"type": "barracuda/status", "v": 1, "id", "state", "message"?}`，`state` 为 `review`、`sending`、`waiting`、`installed`、`declined`、`refused`（用户没有发送）或 `failed`（附上设备的 `message`）。应用不再等待后，如果 `installed` 中有它且版本是发送的版本，就是已安装；否则就是被拒绝了。
 
 ## 构建
 

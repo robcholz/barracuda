@@ -8,7 +8,9 @@
 
 use crate::bapp::{self, Seal};
 use crate::builtin::{Backends, BuiltinApp, BuiltinBackend};
-use crate::bundle::{self, AppInfo, AppKind, AppList, Builtins, INSTALLED_APPS, Shelf};
+use crate::bundle::{
+    self, AppInfo, AppKind, AppList, Builtins, INSTALLED_APPS, Shelf, WORKSPACE_APPS,
+};
 use crate::device::{self, Device, Packages};
 use crate::package::AppPackage;
 use crate::port::{AppState, Lifecycle, Port, Ports};
@@ -21,7 +23,7 @@ use alloc::{
     vec::Vec,
 };
 use barracuda_uikit::{UiService, UiSession};
-use barracuda_vfs::{FsError, ScopedVfs};
+use barracuda_vfs::{FsError, OpenOptions, ScopedVfs};
 use barracuda_vm_plugin::{
     LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError, LuaPackageScope,
     PackageInterface, Vm, VmError, VmExecutionError, VmInputRequest, VmRun, VmRunCompletion,
@@ -33,6 +35,7 @@ use core::pin::Pin;
 use embassy_futures::select::{Either3, select_array, select3};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
+use embedded_io_async::{Read, Write as _};
 use portable_atomic_util::Arc;
 use serde::Serialize;
 
@@ -489,6 +492,86 @@ impl AppManager {
         self.inner.state.borrow_mut().install_request = Some(offered.clone());
         self.inner.changed.signal(());
         Ok(offered)
+    }
+
+    /// Offers package `id` in the Workspace from `length` bytes of `body`,
+    /// as `<id>.bapp`, replacing an older package with that ID, and asks for
+    /// its install as [`AppManager::request_install`] does. A body that is
+    /// not a valid package, or that takes a system app's ID, is removed
+    /// again; one that cannot run on this device stays offered, as any offer
+    /// would.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::InvalidBundle`] for an ID that is not an app ID,
+    /// a body that is empty, larger than [`crate::MAX_PACKAGE_BYTES`] or not a
+    /// valid package, or an ID the Workspace already offers as a directory;
+    /// [`AppError::Storage`] when the body ends early or cannot be written;
+    /// and what [`AppManager::request_install`] returns otherwise.
+    pub async fn offer_package<R: Read>(
+        &self,
+        id: &str,
+        body: &mut R,
+        length: u64,
+    ) -> Result<AppInfo, AppError> {
+        if !bundle::valid_id(id) || length == 0 || length > bapp::MAX_PACKAGE_BYTES {
+            return Err(AppError::InvalidBundle);
+        }
+        let filesystem = &self.inner.filesystem;
+        // A directory and a package with one ID make both invalid.
+        let directory = format!("{WORKSPACE_APPS}/{id}");
+        if filesystem.exists(&directory).await.unwrap_or(false) {
+            return Err(AppError::InvalidBundle);
+        }
+        let package = format!("{WORKSPACE_APPS}/{id}{}", bapp::PACKAGE_EXTENSION);
+        // Written beside it under a hidden name, which listing skips, so a
+        // broken upload never shows as an offer.
+        let partial = format!("{WORKSPACE_APPS}/.{id}.part");
+        let written = async {
+            filesystem.create_dir_all(WORKSPACE_APPS).await?;
+            let mut options = OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            let mut file = filesystem.open_with(&partial, &options).await?;
+            let mut buffer = [0; 1024];
+            let mut remaining = length;
+            while remaining > 0 {
+                let wanted =
+                    usize::try_from(remaining).map_or(buffer.len(), |left| left.min(buffer.len()));
+                let count = body
+                    .read(&mut buffer[..wanted])
+                    .await
+                    .map_err(|_| FsError::Io)?;
+                if count == 0 {
+                    return Err(FsError::Io);
+                }
+                file.write_all(&buffer[..count]).await?;
+                remaining -= count as u64;
+            }
+            file.flush().await?;
+            drop(file);
+            if filesystem.exists(&package).await? {
+                filesystem.remove_file(&package).await?;
+            }
+            filesystem.rename(&partial, &package).await
+        }
+        .await;
+        if let Err(error) = written {
+            log::warn!("app: cannot offer {id}: {error:?}");
+            let _cleaned = filesystem.remove_file(&partial).await;
+            return Err(AppError::Storage);
+        }
+        match self.request_install(id).await {
+            Err(AppError::InvalidBundle | AppError::NotFound) => {
+                let _cleaned = filesystem.remove_file(&package).await;
+                Err(AppError::InvalidBundle)
+            }
+            // No offer may take a system app's ID, so it is not kept either.
+            Err(AppError::SystemApp) => {
+                let _cleaned = filesystem.remove_file(&package).await;
+                Err(AppError::SystemApp)
+            }
+            requested => requested,
+        }
     }
 
     /// The Workspace container offered as app `id` as an install would take

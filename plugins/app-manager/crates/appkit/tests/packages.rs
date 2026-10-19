@@ -205,6 +205,70 @@ async fn scenario(spawner: Spawner) {
     offer(&fs, "plain", &app("plain", "2", "plain 2", Some(&mallory))).await;
     manager.install("plain").await.unwrap();
     assert_eq!(said(&manager, "plain").await, ["plain 2"]);
+
+    // A package sent whole, as the portal sends Live Editor's, is offered in
+    // the Workspace and asked about at once; a newer one replaces both.
+    let sent = app("sent", "1", "sent 1", Some(&alice));
+    let asked = manager
+        .offer_package("sent", &mut sent.as_slice(), sent.len() as u64)
+        .await
+        .unwrap();
+    assert_eq!((asked.id.as_str(), asked.version.as_str()), ("sent", "1"));
+    assert!(fs.exists(&format!("{APPS}/sent.bapp")).await.unwrap());
+    let newer = app("sent", "2", "sent 2", Some(&alice));
+    manager
+        .offer_package("sent", &mut newer.as_slice(), newer.len() as u64)
+        .await
+        .unwrap();
+    let waiting = manager.install_request().unwrap();
+    assert_eq!(
+        (waiting.id.as_str(), waiting.version.as_str()),
+        ("sent", "2")
+    );
+    manager.install("sent").await.unwrap();
+    assert_eq!(said(&manager, "sent").await, ["sent 2"]);
+
+    // Nothing that is not a whole, valid package stays offered.
+    let broken = b"not a package";
+    assert_eq!(
+        manager
+            .offer_package("broken", &mut &broken[..], broken.len() as u64)
+            .await
+            .err(),
+        Some(AppError::InvalidBundle)
+    );
+    assert_eq!(
+        manager
+            .offer_package("short", &mut &sent[..10], sent.len() as u64)
+            .await
+            .err(),
+        Some(AppError::Storage)
+    );
+    let names = fs.list_dir(APPS).await.unwrap();
+    assert!(
+        !names
+            .iter()
+            .any(|name| name.starts_with("broken") || name.contains("short"))
+    );
+
+    // Neither is a bad ID, an empty or oversized body, or an ID the
+    // Workspace offers as a directory.
+    for (id, length) in [
+        ("../escape", sent.len() as u64),
+        ("Sent", sent.len() as u64),
+        ("empty", 0),
+        ("huge", barracuda_appkit::MAX_PACKAGE_BYTES + 1),
+        ("twice", sent.len() as u64),
+    ] {
+        assert_eq!(
+            manager
+                .offer_package(id, &mut sent.as_slice(), length)
+                .await
+                .err(),
+            Some(AppError::InvalidBundle),
+            "{id}"
+        );
+    }
 }
 
 #[embassy_executor::task]

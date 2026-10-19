@@ -331,7 +331,8 @@ fn invalid(message: impl Into<String>) -> Problem {
 }
 
 /// App IDs are short lowercase names, safe in paths and Lua string literals.
-pub(crate) fn valid_id(id: &str) -> bool {
+#[must_use]
+pub fn valid_id(id: &str) -> bool {
     (1..=MAX_ID_LEN).contains(&id.len())
         && id
             .bytes()

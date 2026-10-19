@@ -1,14 +1,18 @@
 //! Installs offered apps from the portal: its page lists the apps the
 //! Workspace offers and the install waiting for the person, and only a
 //! client on the device's setup hotspot, someone at the device, may install
-//! or decline it. A Board without a display installs apps this way.
+//! or decline it. A Board without a display installs apps this way. The
+//! page also takes a package from Live Editor, which opens it in a window,
+//! offers it in the Workspace and asks for its install.
 
 #![no_std]
 
 extern crate alloc;
 
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
-use barracuda_app_manager_plugin::{AppError, AppInfo, AppManager};
+use barracuda_app_manager_plugin::{
+    AppError, AppInfo, AppLocation, AppManager, MAX_PACKAGE_BYTES, valid_id,
+};
 use barracuda_captive_portal_plugin::{
     CaptivePortal, EntryState, EntryStatus, ResourceFiles, WebEntry, WebGroup, WebText,
 };
@@ -17,7 +21,8 @@ use barracuda_plugin::manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
 };
 use barracuda_webserver_plugin::{
-    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
+    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, HttpUpload,
+    HttpUploadEndpoint, WebServer,
 };
 use barracuda_wifi_plugin::WifiControl;
 use serde::{Deserialize, Serialize};
@@ -30,6 +35,9 @@ pub const REQUEST_API_PATH: &str = "/api/apps/request";
 pub const INSTALL_API_PATH: &str = "/api/apps/install";
 /// `POST {"id"}`: declines the waiting app, from the hotspot only.
 pub const DECLINE_API_PATH: &str = "/api/apps/decline";
+/// `PUT /api/apps/offer/<id>` with a `.bapp` body: offers the package in the
+/// Workspace and asks for its install.
+pub const OFFER_API_PATH: &str = "/api/apps/offer/";
 const JSON: &str = "application/json";
 
 /// Registers the portal's apps page and its routes.
@@ -99,6 +107,11 @@ impl Plugin for AppPortalPlugin {
                     .map_err(PluginError::registration)?,
             );
         }
+        context.retain(
+            webserver
+                .serve_upload(OFFER_API_PATH, Offering(apps))
+                .map_err(PluginError::registration)?,
+        );
         Ok(())
     }
 }
@@ -176,17 +189,27 @@ struct Waiting {
     asks: Vec<String>,
 }
 
+/// An installed app, so the page can tell an install from a decline.
+#[derive(Serialize)]
+struct Installed {
+    id: String,
+    version: String,
+}
+
 #[derive(Serialize)]
 struct Listing {
     waiting: Option<Waiting>,
     offers: Vec<Offer>,
+    installed: Vec<Installed>,
+    /// Whether this client is on the setup hotspot, where it may install.
+    hotspot: bool,
 }
 
 impl HttpEndpoint for Apps {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             match (self.route, request.method()) {
-                (Route::List, HttpMethod::Get) => self.list().await,
+                (Route::List, HttpMethod::Get) => self.list(on_hotspot(&request, &self.wifi)).await,
                 (Route::List, _) => error(405, "method", "只能读取"),
                 (_, HttpMethod::Post) => {
                     let Ok(body) = serde_json::from_slice::<IdRequest>(request.body()) else {
@@ -215,11 +238,18 @@ impl HttpEndpoint for Apps {
 }
 
 impl Apps {
-    async fn list(&self) -> HttpResponse {
-        let offers = self
+    async fn list(&self, hotspot: bool) -> HttpResponse {
+        let listed = self.apps.list().await;
+        let installed = listed
             .apps
-            .list()
-            .await
+            .into_iter()
+            .filter(|app| app.location == AppLocation::Installed)
+            .map(|app| Installed {
+                id: app.id,
+                version: app.version,
+            })
+            .collect();
+        let offers = listed
             .installable
             .into_iter()
             .map(|app| Offer {
@@ -229,36 +259,25 @@ impl Apps {
                 incompatible: app.incompatible,
             })
             .collect();
-        let waiting = self.apps.install_request().map(|app| Waiting {
-            asks: self
-                .apps
-                .asks(&app)
-                .into_iter()
-                .map(|(_, line)| line)
-                .collect(),
-            id: app.id,
-            name: app.name,
-            version: app.version,
-            digest: app.digest,
-            signer: app.signer,
-        });
-        json(200, &Listing { waiting, offers })
+        let waiting = self
+            .apps
+            .install_request()
+            .map(|app| waiting(&self.apps, app));
+        json(
+            200,
+            &Listing {
+                waiting,
+                offers,
+                installed,
+                hotspot,
+            },
+        )
     }
 
     async fn request(&self, id: &str) -> HttpResponse {
         match self.apps.request_install(id).await {
             Ok(_) => HttpResponse::new(204, JSON, Vec::new()),
-            Err(AppError::Incompatible) => {
-                let reason = self
-                    .apps
-                    .install_offer(id)
-                    .await
-                    .ok()
-                    .and_then(|app| app.incompatible)
-                    .unwrap_or_default();
-                error(409, "incompatible", &reason)
-            }
-            Err(failure) => app_error(failure),
+            Err(failure) => refused(&self.apps, id, failure).await,
         }
     }
 
@@ -283,6 +302,64 @@ impl Apps {
             ),
             Err(failure) => app_error(failure),
         }
+    }
+}
+
+/// The install waiting for the person, with what it asks to be allowed.
+fn waiting(apps: &AppManager, app: AppInfo) -> Waiting {
+    Waiting {
+        asks: apps.asks(&app).into_iter().map(|(_, line)| line).collect(),
+        id: app.id,
+        name: app.name,
+        version: app.version,
+        digest: app.digest,
+        signer: app.signer,
+    }
+}
+
+/// Answers a refused install request, saying why an incompatible offer
+/// cannot be installed here.
+async fn refused(apps: &AppManager, id: &str, failure: AppError) -> HttpResponse {
+    if failure != AppError::Incompatible {
+        return app_error(failure);
+    }
+    let reason = apps
+        .install_offer(id)
+        .await
+        .ok()
+        .and_then(|app| app.incompatible)
+        .unwrap_or_default();
+    error(409, "incompatible", &reason)
+}
+
+/// `PUT /api/apps/offer/<id>`: Live Editor's package, which the page that
+/// it opened sends once the person chose to. The package goes into the
+/// Workspace and its install waits for the person, as any request does.
+struct Offering(Rc<AppManager>);
+
+impl HttpUploadEndpoint for Offering {
+    fn handle<'a>(&'a self, mut upload: HttpUpload<'a>) -> HttpFuture<'a> {
+        Box::pin(async move {
+            if upload.method() != HttpMethod::Put {
+                return error(405, "method", "只能上传");
+            }
+            let Some(id) = upload
+                .path()
+                .strip_prefix(OFFER_API_PATH)
+                .filter(|id| valid_id(id))
+                .map(String::from)
+            else {
+                return error(400, "invalid_id", "应用 ID 只能用小写字母、数字和 -");
+            };
+            let length = upload.content_length() as u64;
+            if length > MAX_PACKAGE_BYTES {
+                return error(413, "too_large", "应用包太大");
+            }
+            match self.0.offer_package(&id, &mut upload, length).await {
+                Ok(app) => json(201, &waiting(&self.0, app)),
+                Err(failure) => refused(&self.0, &id, failure).await,
+            }
+        })
     }
 }
 

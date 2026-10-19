@@ -24,7 +24,7 @@ mod storage;
 mod view;
 mod workflow;
 
-pub use bapp::{MAX_PACKAGE_FILES, PACKAGE_EXTENSION, PUBLIC_KEY_BYTES, Seal};
+pub use bapp::{MAX_PACKAGE_BYTES, MAX_PACKAGE_FILES, PACKAGE_EXTENSION, PUBLIC_KEY_BYTES, Seal};
 /// How an app run ended, as [`AppExit::outcome`] reports it.
 pub use barracuda_vm_plugin::VmRunOutcome;
 pub use builtin::{
@@ -33,7 +33,7 @@ pub use builtin::{
 pub use bundle::{
     APP_PACKAGE, AppInfo, AppKind, AppList, AppLocation, BUILTIN_APP, DEFAULT_ENTRY,
     FORMAT_VERSION, INSTALLED_APPS, InvalidApp, MANIFEST_FILE, MAX_PERMISSIONS, MAX_SOURCE_BYTES,
-    MAX_VIEW_BYTES, WORKSPACE_APPS,
+    MAX_VIEW_BYTES, WORKSPACE_APPS, valid_id,
 };
 pub use device::{API_LEVEL, Device, ViewShape, requirement};
 pub use manager::{
