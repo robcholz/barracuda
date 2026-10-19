@@ -71,99 +71,96 @@ export function Chrome({
           </button>
         </div>
       )}
-      <header className="w-top">
-        <div className="w-wrap">
-          <nav className="w-nav" aria-label={copy.nav.label}>
-            <a className="bc-brand" href={home}>
-              <BrandMark />
-              <span className="bc-wordmark">Barracuda</span>
-            </a>
-            <div className="w-nav__links">
-              <a
-                className="bc-button bc-button--ghost bc-button--sm"
-                href={`${home}#product`}
-              >
-                {copy.nav.product}
-              </a>
-              <a
-                className="bc-button bc-button--ghost bc-button--sm"
-                href={`${home}#ladder`}
-              >
-                {copy.nav.how}
-              </a>
-              <a
-                className="bc-button bc-button--ghost bc-button--sm"
-                href={`${home}#plugins`}
-              >
-                {copy.nav.plugins}
-              </a>
-              <a
-                className="bc-button bc-button--ghost bc-button--sm"
-                href={page(lang, "/boards/")}
-                aria-current={current === "boards" ? "page" : undefined}
-              >
-                {copy.nav.boards}
-              </a>
-              <a
-                className="bc-button bc-button--ghost bc-button--sm"
-                href={docs(lang)}
-              >
-                {copy.nav.docs}
-              </a>
-            </div>
-            <span style={{ flex: "1 1 auto" }} />
-            <div className="bc-menu-anchor w-hide-sm" ref={menu}>
-              <button
-                className="bc-button bc-button--ghost bc-button--sm"
-                type="button"
-                aria-haspopup="menu"
-                aria-expanded={langOpen}
-                onClick={() => setLangOpen(!langOpen)}
-              >
-                <Icon name="languages" />
-                {copy.nav.languageName}
-                <Icon name="chevronDown" />
-              </button>
-              {langOpen && (
-                <div
-                  className="bc-menu"
-                  role="menu"
-                  aria-label={copy.nav.language}
-                >
-                  <a
-                    className="bc-menu-item"
-                    role="menuitemradio"
-                    aria-checked={lang === "zh"}
-                    href={page("zh", here)}
-                    lang="zh-Hans"
-                  >
-                    <span style={{ flex: 1 }}>简体中文</span>
-                    {lang === "zh" && <Icon name="check" />}
-                  </a>
-                  <a
-                    className="bc-menu-item"
-                    role="menuitemradio"
-                    aria-checked={lang === "en"}
-                    href={page("en", here)}
-                    lang="en"
-                  >
-                    <span style={{ flex: 1 }}>English</span>
-                    {lang === "en" && <Icon name="check" />}
-                  </a>
-                </div>
-              )}
-            </div>
-            <a
-              className="bc-button bc-button--outline bc-button--sm w-hide-sm"
-              href={GITHUB}
+      <header className="bc-site-header">
+        <a className="bc-brand" href={home}>
+          <BrandMark />
+          <span className="bc-wordmark">Barracuda</span>
+        </a>
+        <nav className="bc-site-header__nav" aria-label={copy.nav.label}>
+          <a
+            className="bc-button bc-button--ghost bc-button--sm"
+            href={`${home}#product`}
+          >
+            {copy.nav.product}
+          </a>
+          <a
+            className="bc-button bc-button--ghost bc-button--sm"
+            href={`${home}#ladder`}
+          >
+            {copy.nav.how}
+          </a>
+          <a
+            className="bc-button bc-button--ghost bc-button--sm"
+            href={`${home}#plugins`}
+          >
+            {copy.nav.plugins}
+          </a>
+          <a
+            className="bc-button bc-button--ghost bc-button--sm"
+            href={page(lang, "/boards/")}
+            aria-current={current === "boards" ? "page" : undefined}
+          >
+            {copy.nav.boards}
+          </a>
+          <a
+            className="bc-button bc-button--ghost bc-button--sm"
+            href={docs(lang)}
+          >
+            {copy.nav.docs}
+          </a>
+        </nav>
+        <div className="bc-site-header__end">
+          <div className="bc-menu-anchor bc-site-header__optional" ref={menu}>
+            <button
+              className="bc-button bc-button--ghost bc-button--sm"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={langOpen}
+              onClick={() => setLangOpen(!langOpen)}
             >
-              <Icon name="github" />
-              GitHub
-            </a>
-            <a className="bc-button bc-button--sm" href={install(lang)}>
-              {copy.nav.getStarted}
-            </a>
-          </nav>
+              <Icon name="languages" />
+              {copy.nav.languageName}
+              <Icon name="chevronDown" />
+            </button>
+            {langOpen && (
+              <div
+                className="bc-menu"
+                role="menu"
+                aria-label={copy.nav.language}
+              >
+                <a
+                  className="bc-menu-item"
+                  role="menuitemradio"
+                  aria-checked={lang === "zh"}
+                  href={page("zh", here)}
+                  lang="zh-Hans"
+                >
+                  <span style={{ flex: 1 }}>简体中文</span>
+                  {lang === "zh" && <Icon name="check" />}
+                </a>
+                <a
+                  className="bc-menu-item"
+                  role="menuitemradio"
+                  aria-checked={lang === "en"}
+                  href={page("en", here)}
+                  lang="en"
+                >
+                  <span style={{ flex: 1 }}>English</span>
+                  {lang === "en" && <Icon name="check" />}
+                </a>
+              </div>
+            )}
+          </div>
+          <a
+            className="bc-button bc-button--ghost bc-button--sm bc-site-header__optional"
+            href={GITHUB}
+          >
+            <Icon name="github" />
+            GitHub
+          </a>
+          <a className="bc-button bc-button--sm" href={install(lang)}>
+            {copy.nav.getStarted}
+          </a>
         </div>
       </header>
     </>

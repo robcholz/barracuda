@@ -76,13 +76,13 @@
 .bc-radio-card:active{background:var(--ghost-active)}
 .bc-radio-card:has(input:checked){background:var(--muted)}
 .bc-radio-card:has(input:checked) .bc-option-icon{background:var(--background)}
-.bc-radio-card input{flex:none;appearance:none;-webkit-appearance:none;margin:2px 0 0;width:16px;height:16px;border:1px solid var(--input);border-radius:50%;background:var(--background);cursor:inherit;transition:border-color .1s}
+.bc-radio-card input,.bc-picker__row input{flex:none;appearance:none;-webkit-appearance:none;margin:2px 0 0;width:16px;height:16px;border:1px solid var(--input);border-radius:50%;background:var(--background);cursor:inherit;transition:border-color .1s}
 /* the radio is drawn, never the browser's: a 1px `input` ring; checked, a 5px `foreground` ring around a `background` dot (the switch's on colours) */
-.bc-radio-card:hover input:not(:checked):not(:disabled){border-color:var(--input-hover)}
-.bc-radio-card input:checked{border:5px solid var(--foreground)}
-.bc-radio-card input:disabled{border-color:var(--border);background:var(--muted)}
-.bc-radio-card input:checked:disabled{border-color:var(--disabled-foreground);background:var(--background)}
-.bc-radio-card input:focus-visible{outline:none}
+.bc-radio-card:hover input:not(:checked):not(:disabled),.bc-picker__row:hover input:not(:checked):not(:disabled){border-color:var(--input-hover)}
+.bc-radio-card input:checked,.bc-picker__row input:checked{border:5px solid var(--foreground)}
+.bc-radio-card input:disabled,.bc-picker__row input:disabled{border-color:var(--border);background:var(--muted)}
+.bc-radio-card input:checked:disabled,.bc-picker__row input:checked:disabled{border-color:var(--disabled-foreground);background:var(--background)}
+.bc-radio-card input:focus-visible,.bc-picker__row input:focus-visible{outline:none}
 .bc-radio-card:has(input:focus-visible){border-color:var(--ring)}
 .bc-radio-card:has(input:disabled){border-color:var(--border);background:var(--muted);color:var(--disabled-foreground);cursor:not-allowed}
 /* Icon variant: a 40px tile leads the card, the text sits beside it, the radio moves to the end */
@@ -546,3 +546,60 @@ button.bc-link{padding:0;border:0;background:none;font:inherit;cursor:pointer}
 /* Eyebrow: the section a page belongs to, above its title, after a 6px signal square. */
 .bc-eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:12px;line-height:16px;letter-spacing:.04em;color:var(--muted-foreground)}
 .bc-eyebrow::before{content:"";flex:none;width:6px;height:6px;background:var(--signal)}
+
+/* Stepper: where the reader is in a flow of pages; each step's mark is joined to the next by a line. */
+.bc-stepper{margin:0;padding:0;list-style:none;display:flex;flex-direction:column}
+.bc-stepper__item{position:relative;display:flex;align-items:flex-start;gap:12px;padding-bottom:20px;color:var(--muted-foreground)}
+.bc-stepper__item:last-child{padding-bottom:0}
+.bc-stepper__item:not(:last-child)::after{content:"";position:absolute;left:12px;top:28px;bottom:4px;width:1px;margin-left:-.5px;background:var(--border)}
+.bc-stepper__item--done:not(:last-child)::after{background:var(--border-active)}
+.bc-stepper__mark{flex:none;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:12px;line-height:16px;font-weight:400}
+.bc-stepper__label{min-width:0;padding-top:2px}
+.bc-stepper__item[aria-current="step"]{color:var(--foreground);font-weight:500}
+.bc-stepper__item[aria-current="step"]>.bc-stepper__mark{border-color:transparent;background:var(--muted)}
+.bc-stepper__item--done>.bc-stepper__mark{border-color:transparent;color:var(--success)}
+@media (max-width:720px){
+.bc-stepper--collapse{flex-direction:row;align-items:center;gap:8px}
+.bc-stepper--collapse>.bc-stepper__item{flex:1 1 0;align-items:center;gap:8px;min-width:0;padding-bottom:0}
+.bc-stepper--collapse>.bc-stepper__item:last-child{flex:none}
+.bc-stepper--collapse>.bc-stepper__item:not(:last-child)::after{position:static;flex:1 1 auto;min-width:8px;width:auto;height:1px;margin:0}
+.bc-stepper--collapse .bc-stepper__label{display:none}
+.bc-stepper--collapse>[aria-current="step"]>.bc-stepper__label{display:inline;padding-top:0;white-space:nowrap}
+}
+
+/* Picker: one choice among many, as a searchable list of radio rows in one frame; the radio is the RadioCard's. */
+.bc-picker{display:flex;flex-direction:column;min-width:0;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--background)}
+.bc-picker--flush{border:0;border-radius:0}
+.bc-picker__head{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border)}
+.bc-picker__search{position:relative;flex:1 1 240px;min-width:0}
+.bc-picker__search>.bc-icon{position:absolute;left:12px;top:50%;margin-top:-8px;color:var(--muted-foreground);pointer-events:none}
+.bc-picker__search>.bc-input{padding-left:36px}
+.bc-picker__count{margin-left:auto;font-family:var(--font-mono);font-size:12px;line-height:16px;color:var(--muted-foreground)}
+.bc-picker__list{max-height:var(--picker-height,440px);overflow-y:auto;border-radius:0 0 7px 7px}
+.bc-picker--flush>.bc-picker__list{border-radius:0}
+.bc-picker__group{position:sticky;top:0;z-index:1;margin:0;padding:var(--space-4) var(--space-5) var(--space-2);background:var(--background);font-size:12px;line-height:16px;font-weight:500;color:var(--muted-foreground)}
+.bc-picker__row{display:flex;align-items:center;gap:12px;min-height:44px;padding:0 var(--space-5);cursor:pointer;transition:background-color .1s}
+.bc-picker__row+.bc-picker__row,.bc-picker__row+.bc-picker__note,.bc-picker__row+.bc-picker__group{border-top:1px solid var(--border)}
+.bc-picker__row:not(:has(input:checked)):hover{background:var(--ghost-hover)}
+.bc-picker__row:active{background:var(--ghost-active)}
+.bc-picker__row:has(input:checked){background:var(--muted)}
+.bc-picker__row:has(input:focus-visible){outline:2px solid var(--ring);outline-offset:-2px}
+.bc-picker__row:has(input:disabled){background:none;color:var(--disabled-foreground);cursor:not-allowed}
+.bc-picker__row>.bc-option-title{flex:1 1 auto;min-width:0}
+.bc-picker__note{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-3);margin:0;padding:var(--space-4) var(--space-5);font-size:13px;line-height:18px;color:var(--muted-foreground)}
+@media (max-width:720px){
+.bc-picker__head{padding:var(--space-3) var(--space-4)}
+.bc-picker__group{padding:var(--space-4) var(--space-4) var(--space-2)}
+.bc-picker__row{min-height:52px;padding:0 var(--space-4)}
+.bc-picker__note{padding:var(--space-4)}
+}
+
+/* Site header: the top bar of the website and the docs, the same on both. 56px on the page colour over a hairline; the brand, the site's own links, then language, GitHub and the primary action, all at --sm. */
+.bc-site-header{display:flex;align-items:center;gap:4px;height:var(--topbar-height);padding:0 var(--space-4);border-bottom:1px solid var(--border);background:var(--background);color:var(--foreground)}
+.bc-site-header .bc-brand{flex:none}
+.bc-site-header__surface{color:var(--muted-foreground);font-weight:500}
+.bc-site-header__nav{display:flex;align-items:center;gap:2px;min-width:0;margin-left:16px}
+.bc-site-header__nav [aria-current="page"]{background:var(--muted)}
+.bc-site-header__end{display:flex;align-items:center;gap:4px;margin-left:auto}
+@media (max-width:960px){.bc-site-header__nav{display:none}}
+@media (max-width:720px){.bc-site-header{padding:0 var(--space-2)}.bc-site-header__optional{display:none}}

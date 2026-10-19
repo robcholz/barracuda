@@ -48,6 +48,7 @@
   --bc-destructive-surface: #FFEEF0;
   --bc-destructive-border: #FFD8D7;
   --bc-shadow-xs: 0px 1px 2px #00000029;
+  --bc-topbar-height: 56px;
   --bc-radius-sm: 4px;
   --bc-radius-md: 6px;
   --bc-radius-lg: 8px;
@@ -126,13 +127,15 @@ code, pre, kbd, .font-mono {
   background: var(--bc-background) !important;
   border-bottom: 1px solid var(--bc-border);
 }
-/* Top bar as in the design: logo on the left, search centered, then language,
-   GitHub, the primary button, and the theme toggle on the right, inside the
-   same 24px gutter as the logo. The left and right groups dissolve into one
-   row so the language select can move to the right. */
+/* Top bar: the design system's SiteHeader, the same bar as the website's.
+   56px on the page color over a hairline; the brand on the left, search
+   centered, then language, GitHub, the primary button, and the theme toggle on
+   the right, all 32px. The left and right groups dissolve into one row so the
+   language select can move to the right. */
 #navbar div:has(> div > #search-bar-entry) {
   position: relative;
-  column-gap: 16px;
+  height: var(--bc-topbar-height) !important;
+  column-gap: 4px;
 }
 #navbar div:has(> div > #search-bar-entry) > div:first-child,
 #navbar div:has(> div > #search-bar-entry) > div:last-child {
@@ -147,9 +150,36 @@ code, pre, kbd, .font-mono {
 #navbar div:has(> div > #search-bar-entry) > div:last-child > * {
   order: 2;
 }
-#localization-select-trigger {
-  color: var(--bc-muted-foreground) !important;
+/* Language and GitHub: ghost buttons at --sm in the ink, as on the website. */
+#localization-select-trigger,
+#navbar li.navbar-link > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px !important;
+  border-radius: var(--bc-radius-md) !important;
+  color: var(--bc-foreground) !important;
+  font-size: 13px;
   font-weight: 500;
+  transition: background-color 0.1s;
+}
+#localization-select-trigger:hover,
+#localization-select-trigger[data-state="open"],
+#navbar li.navbar-link > a:hover {
+  background: var(--bc-ghost-hover);
+}
+#localization-select-trigger > svg {
+  width: 16px;
+  height: 16px;
+  color: currentColor !important;
+}
+#navbar li.navbar-link > a > svg {
+  background-color: currentColor !important;
+}
+#navbar li.navbar-link {
+  display: flex;
+  align-items: center;
 }
 /* The design's languages icon (Lucide), drawn in the button's text color. */
 #localization-select-trigger::before {
@@ -157,14 +187,9 @@ code, pre, kbd, .font-mono {
   flex: none;
   width: 16px;
   height: 16px;
-  margin-right: 6px;
   background-color: currentColor;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 6 6'/%3E%3Cpath d='m4 14 6-6 2-3'/%3E%3Cpath d='M2 5h12'/%3E%3Cpath d='M7 2h1'/%3E%3Cpath d='m22 22-5-10-5 10'/%3E%3Cpath d='M14 18h6'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 6 6'/%3E%3Cpath d='m4 14 6-6 2-3'/%3E%3Cpath d='M2 5h12'/%3E%3Cpath d='M7 2h1'/%3E%3Cpath d='m22 22-5-10-5 10'/%3E%3Cpath d='M14 18h6'/%3E%3C/svg%3E") center / contain no-repeat;
-}
-#localization-select-trigger:hover,
-#localization-select-trigger[data-state="open"] {
-  color: var(--bc-foreground) !important;
 }
 #navbar div:has(> #theme-preference-menu-trigger) {
   margin-right: -6px !important;
@@ -191,6 +216,7 @@ code, pre, kbd, .font-mono {
 }
 #assistant-entry > span:first-child {
   color: var(--bc-foreground) !important;
+  font-size: 13px;
 }
 #assistant-entry > span:last-child {
   border: 1px solid var(--bc-border);
@@ -299,9 +325,12 @@ div:has(> div > textarea.chat-assistant-input):focus-within {
 }
 /* The navbar's primary button: lime with ink text in both themes. */
 #navbar a[href$="/get-started/quickstart"] {
+  height: 32px;
+  padding: 0 12px !important;
   background: var(--bc-signal) !important;
   color: var(--bc-signal-foreground) !important;
   border-radius: var(--bc-radius-md) !important;
+  font-size: 13px;
 }
 #navbar a[href$="/get-started/quickstart"] * {
   color: var(--bc-signal-foreground) !important;
@@ -309,8 +338,9 @@ div:has(> div > textarea.chat-assistant-input):focus-within {
 #navbar a[href$="/get-started/quickstart"]:hover {
   background: var(--bc-signal-hover) !important;
 }
+/* The brand at the design system's size: the 24px mark, the 14px wordmark. */
 .nav-logo {
-  height: 28px !important;
+  height: 24px !important;
 }
 
 /* Sidebar: muted group labels; the current page is a neutral fill, not
@@ -630,8 +660,23 @@ html.dark .code-block [data-component-part="code-block-root"],
 /* Banner: lime with ink text, as in the design. Sequoia forces the banner's
    text white with a layered !important color, so the ink is painted with
    -webkit-text-fill-color instead. */
+/* The design system's Banner: 36px, 13px at 500. */
 #banner {
+  min-height: 36px !important;
   background: var(--bc-signal) !important;
+  font-size: 13px !important;
+}
+#banner > div {
+  margin-top: 9px !important;
+  margin-bottom: 9px !important;
+  line-height: 18px;
+}
+@media (max-width: 720px) {
+  #banner {
+    justify-content: flex-start !important;
+    padding: 0 44px 0 16px !important;
+    text-align: left !important;
+  }
 }
 #banner * {
   -webkit-text-fill-color: var(--bc-signal-foreground);

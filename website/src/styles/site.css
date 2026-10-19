@@ -7,6 +7,7 @@ body{margin:0;background:#F5F5F7}
    translucent strip, and every section below is its own panel. Panels follow the system: background on the
    background-200 page, a border hairline, radius-lg. */
 .w{background:#F5F5F7}
+.w>.bc-site-header{margin-bottom:8px}
 .w>section,.w>footer{margin:0 8px 8px;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
 .w>section.w-hero{border:0;background:#BCD0E2 url(/images/painting.jpg) center 30%/cover}
 .w-hero .w-lead{color:var(--nav-foreground)}
@@ -35,16 +36,11 @@ a.w-chipcmd:hover{background:var(--muted);border-color:var(--input-hover)}
 @media (max-width:720px){.w>section,.w>footer{margin:0 4px 4px}
 }
 .w-wrap{width:100%;max-width:1200px;margin:0 auto;padding:0 40px}
-.w-nav{display:flex;align-items:center;gap:4px;height:72px}
-.w-nav__links{display:flex;align-items:center;gap:2px;margin-left:24px}
-.w-nav__links [aria-current="page"]{background:var(--muted);color:var(--foreground)}
 .w-plug{display:flex;flex-direction:column;padding:6px 18px 14px}
 .w-plug__row{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr) auto;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
 .w-plug__row .bc-small{text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .w-plug__name{font-weight:500}
 .w-plug__foot{padding-top:12px}
-@media (max-width:960px){.w-nav__links{display:none}
-}
 .w-display{margin:0;font-size:88px;line-height:90px;font-weight:600;letter-spacing:-.045em}
 .w-h2{margin:0;font-size:56px;line-height:60px;font-weight:600;letter-spacing:-.04em}
 .w-h3{margin:0;font-size:18px;line-height:24px;font-weight:500;letter-spacing:-.01em}
@@ -162,7 +158,6 @@ a.w-chipcmd:hover{background:var(--muted);border-color:var(--input-hover)}
 .w-foot{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:720px){.w-wrap{padding:0 16px}
-.w-nav__links{display:none}
 .w-display{font-size:44px;line-height:48px}
 .w-h2{font-size:34px;line-height:40px}
 .w-section{padding-top:80px;padding-bottom:80px}

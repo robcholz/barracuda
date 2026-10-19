@@ -108,9 +108,7 @@ export function Tour({ copy }: { copy: Copy }) {
             aria-pressed={i === step}
             onClick={() => setStep(i)}
           >
-            <span className="bc-step__mark">
-              {String(i + 1).padStart(2, "0")}
-            </span>
+            <span className="bc-step__mark">{i + 1}</span>
             <span style={{ fontWeight: 500 }}>{s.title}</span>
             <span
               className="w-stepbtn__cmd"
