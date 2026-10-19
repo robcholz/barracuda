@@ -1,4 +1,4 @@
-use crate::bundle::{AppInfo, AppList};
+use crate::bundle::AppList;
 use crate::manager::{AppError, AppExit, AppManager, RunningApp};
 use alloc::{boxed::Box, string::String, vec::Vec};
 use barracuda_workflow_plugin::{
@@ -43,11 +43,6 @@ pub(crate) struct StatusResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     texts: Option<Vec<String>>,
     last_exit: Option<AppExit>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct InstallResponse {
-    requested: AppInfo,
 }
 
 #[derive(Serialize)]
@@ -101,32 +96,20 @@ impl WorkflowActionHandler for OpenAction {
     const SCHEMA: WorkflowActionSchema = workflow_action_schema!("app.open");
 
     fn invoke(&self, request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
-        Box::pin(async move { Ok(self.0.open(&request.id).await.into()) })
-    }
-}
-
-struct InstallAction(AppManager);
-
-impl WorkflowActionHandler for InstallAction {
-    type Request = AppRequest;
-    type Response = Response<InstallResponse>;
-
-    const SCHEMA: WorkflowActionSchema = workflow_action_schema!("app.install");
-
-    fn invoke(&self, request: Self::Request) -> WorkflowActionFuture<'_, Self::Response> {
         Box::pin(async move {
-            Ok(match self.0.request_install(&request.id).await {
-                Ok(requested) => Response::Success(InstallResponse { requested }),
+            Ok(match self.0.open(&request.id).await {
                 Err(AppError::Incompatible) => Response::Error {
                     error: AppError::Incompatible,
                     reason: self
                         .0
-                        .install_offer(&request.id)
+                        .list()
                         .await
-                        .ok()
+                        .apps
+                        .into_iter()
+                        .find(|app| app.id == request.id)
                         .and_then(|app| app.incompatible),
                 },
-                Err(error) => Err::<InstallResponse, _>(error).into(),
+                opened => opened.into(),
             })
         })
     }
@@ -222,7 +205,6 @@ pub fn register_actions(
     Ok(alloc::vec![
         actions.add_action(ListAction(manager.clone()))?,
         actions.add_action(OpenAction(manager.clone()))?,
-        actions.add_action(InstallAction(manager.clone()))?,
         actions.add_action(HomeAction(manager.clone()))?,
         actions.add_action(InteractiveAction(manager.clone()))?,
         actions.add_action(TerminateAction(manager.clone()))?,
@@ -236,7 +218,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
     use super::*;
-    use crate::bundle::{AppKind, AppLocation, InvalidApp};
+    use crate::bundle::{AppInfo, AppKind, AppLocation, InvalidApp};
     use crate::device::ViewShape;
     use crate::port::AppState;
     use alloc::vec;
@@ -250,7 +232,7 @@ mod tests {
                 id: "counter".into(),
                 name: "计数器".into(),
                 version: "0.1.0".into(),
-                location: AppLocation::Installed,
+                location: AppLocation::Workspace,
                 kind: AppKind::Installable,
                 has_view: true,
                 api: 1,
@@ -262,8 +244,6 @@ mod tests {
                 view_shape: Some(ViewShape::Round),
                 icon: Some("lamp".into()),
                 incompatible: Some("此设备没有灯光".into()),
-                digest: Some("0".repeat(64)),
-                signer: Some("0123456789abcdef".into()),
             },
             run_id: 3,
             state,
@@ -287,29 +267,17 @@ mod tests {
         check::<ListAction>(AppList::default());
         check::<ListAction>(AppList {
             apps: vec![running(AppState::Active).app],
-            installable: vec![running(AppState::Active).app],
             invalid: vec![InvalidApp {
                 location: AppLocation::Workspace,
-                dir: "Draft".into(),
+                dir: "Draft.bapp".into(),
                 problem: "app.json is missing".into(),
             }],
         });
         check::<OpenAction>(Response::from(Ok::<_, AppError>(running(AppState::Active))));
-        for error in [
-            AppError::NotFound,
-            AppError::NotInstalled,
-            AppError::InvalidBundle,
-            AppError::Busy,
-        ] {
+        for error in [AppError::NotFound, AppError::InvalidBundle, AppError::Busy] {
             check::<OpenAction>(Response::<RunningApp>::from(Err(error)));
         }
-        check::<InstallAction>(Response::from(Ok::<_, AppError>(InstallResponse {
-            requested: running(AppState::Active).app,
-        })));
-        for error in [AppError::NotFound, AppError::SystemApp] {
-            check::<InstallAction>(Response::<InstallResponse>::from(Err(error)));
-        }
-        check::<InstallAction>(Response::<InstallResponse>::Error {
+        check::<OpenAction>(Response::<RunningApp>::Error {
             error: AppError::Incompatible,
             reason: Some("只适用于 espressif-esp-vocat-v1-2".into()),
         });
@@ -360,7 +328,6 @@ mod tests {
         assert!(request::<ListAction>(json!({})));
         assert!(request::<OpenAction>(json!({ "id": "counter" })));
         assert!(!request::<OpenAction>(json!({})));
-        assert!(request::<InstallAction>(json!({ "id": "counter" })));
         assert!(request::<InteractiveAction>(
             json!({ "interactive": false })
         ));

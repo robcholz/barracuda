@@ -1,12 +1,11 @@
 ---
 title: "App Manager Workflow Action"
 sidebarTitle: "Workflow Action"
-description: "App Manager 提供的 Workflow Action：列出、打开、安装和控制应用。"
+description: "App Manager 提供的 Workflow Action：列出、打开和控制应用。"
 ---
 
-`app-manager` 插件注册了 `app.list`、`app.open`、`app.install`、`app.home`、
-`app.interactive`、`app.terminate`、`app.status` 和 `app.tap`。除了只发出请求的
-`app.install`，它们都是系统 UI 执行的同一套操作；参见[生命周期](/zh/plugins/app-manager)。
+`app-manager` 插件注册了 `app.list`、`app.open`、`app.home`、
+`app.interactive`、`app.terminate`、`app.status` 和 `app.tap`，它们都是系统 UI 执行的同一套操作；参见[生命周期](/zh/plugins/app-manager)。把应用的 `<id>.bapp` 目录放进 `/workspace/media/apps` 就是安装，所以没有用于安装的 Action（[应用格式](/zh/plugins/app-manager/app-format)）。
 它们的请求和响应契约位于 `schemas/action/<address>/`。
 拒绝时返回 `{"error":"<code>"}`，以便 Workflow 根据它分支；
 `incompatible` 还会附带设备显示的 `reason`。
@@ -14,41 +13,33 @@ description: "App Manager 提供的 Workflow Action：列出、打开、安装�
 正在运行的应用以如下形式报告：
 
 ```json
-{"app":{"id":"counter","name":"Counter","version":"0.1.0","location":"installed",
+{"app":{"id":"counter","name":"Counter","version":"0.1.0","location":"workspace",
         "kind":"installable","has_view":true,"api":1,"requires":[],"uses":[],
         "permissions":[],"boards":[],"view_size":[360,360],"view_shape":"round"},
  "run_id":1,"state":"active"}
 ```
 
-镜像中的应用 `kind` 为 `system`，用户安装的应用为 `installable`。`api`、`requires`、`uses`、`permissions`、`boards`、
+镜像中的应用 `kind` 为 `system`，Workspace 中的应用为 `installable`。`api`、`requires`、`uses`、`permissions`、`boards`、
 `view_size` 和 `view_shape` 来自应用的清单，详见
 [应用 API](/zh/plugins/app-manager/app-api)；`incompatible` 只出现在本设备无法运行的可安装应用上，说明原因。
 
 `state` 为 `active`、`inactive`、`background`、`suspended`、`running`（无头应用）或 `terminating`。
 
-`app.list` 接受 `{}`，返回每个可启动的应用、每个可以安装的工作区容器（新应用，或已安装应用的其他版本），以及每个违反[应用格式](/zh/plugins/app-manager/app-format)的容器及其原因，以便作者修复。`location` 为 `builtin`、`installed` 或
-`workspace`：
+`app.list` 接受 `{}`，返回每个应用，以及每个违反[应用格式](/zh/plugins/app-manager/app-format)的容器及其原因，以便作者修复。`location` 为 `builtin` 或 `workspace`：
 
 ```json
-{"apps":[{"id":"settings","name":"Settings","version":"0.1.0","location":"builtin",
-          "kind":"system","has_view":true,"permissions":[]}],
- "installable":[{"id":"lamp","name":"Light strip","version":"1","location":"workspace",
-                 "kind":"installable","has_view":true,"api":1,"requires":["light"],
-                 "uses":[],"permissions":[],"boards":[],"view_size":[360,360],
-                 "view_shape":"round","incompatible":"This device has no light"}],
- "invalid":[{"location":"workspace","dir":"hello","problem":"main.lua is missing"}]}
+{"apps":[{"id":"lamp","name":"Light strip","version":"1","location":"workspace",
+          "kind":"installable","has_view":true,"api":1,"requires":["light"],
+          "uses":[],"permissions":[],"boards":[],"view_size":[360,360],
+          "view_shape":"round","incompatible":"This device has no light"},
+         {"id":"settings","name":"Settings","version":"0.1.0","location":"builtin",
+          "kind":"system","has_view":true,"api":1,"requires":[],"uses":[],
+          "permissions":[],"boards":[]}],
+ "invalid":[{"location":"workspace","dir":"hello.bapp","problem":"main.lua is missing"}]}
 ```
 
 `app.open` 接受 `{"id":"counter"}`。它恢复正在运行的应用或启动该应用，在程序启动后返回正在运行的应用；失败时返回
-`not_found`、`not_installed`（该应用只在工作区中提供）、
-`invalid_bundle`、`storage`、`view_rejected`、`no_display`（应用带视图而开发板没有显示屏）、`incompatible`（已安装的应用不再适配本设备）、`runtime_unavailable` 或 `busy`。
-
-`app.install` 接受 `{"id":"lamp"}`，请求系统 UI 提供该工作区容器以供安装。它立即返回
-`{"requested": <app>}`；用户在设备上安装或拒绝，`app.list` 会显示结果。较新的请求会替换仍未答复的请求。
-被请求的应用还带有 `digest`，即安装所锁定的文件的 SHA-256，以及 `signer`，即为
-`.bapp` 包签名的密钥的简称（[应用格式](/zh/plugins/app-manager/app-format)）。失败时返回
-`not_found`、`system_app`（该 ID 属于某个系统应用）、`invalid_bundle`
-（签名校验失败的包也算）、`storage`，或者 `incompatible` 并附上原因：本设备无法运行该应用，或者从已签名包安装的应用只接受其签名者的更新：
+`not_found`、`invalid_bundle`、`storage`、`view_rejected`、`no_display`（应用带视图而开发板没有显示屏）、`incompatible` 并附上本设备无法运行该应用的原因、`runtime_unavailable` 或 `busy`：
 
 ```json
 {"error":"incompatible","reason":"This device has no light"}
