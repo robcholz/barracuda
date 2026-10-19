@@ -3,15 +3,7 @@
 #![no_std]
 
 pub use barracuda_board::{BoardInfo, Hardware};
-pub use barracuda_platform::PlatformInfo;
-
-/// The firmware release this build belongs to: `BARRACUDA_VERSION` at build
-/// time, which the release workflow sets from its tag (`0.1.0` for `v0.1.0`),
-/// or `dev` for any other build.
-pub const FIRMWARE_VERSION: &str = match option_env!("BARRACUDA_VERSION") {
-    Some(version) => version,
-    None => "dev",
-};
+pub use barracuda_platform::{PlatformInfo, FIRMWARE_VERSION};
 
 /// Fixed identity of the independently selected Platform and Board.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
