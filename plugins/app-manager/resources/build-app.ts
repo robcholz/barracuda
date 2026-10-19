@@ -1,7 +1,8 @@
 // Builds app containers from their sources.
 //
 //   bun build-app.ts <source> <bundle>                   one app, drawn with the system fonts
-//   bun build-app.ts --own-fonts --each <sources> <bundles>  every app in <sources>, with its own fonts
+//   bun build-app.ts --own-fonts --each <sources> <bundles>  every app in <sources>, with its own fonts,
+//                                                         each into <bundles>/<id>.bapp
 //
 // A source is a directory with `app.json`, the entry program, and an
 // optional `app.tsx` view with its `app.d.ts` contract and `pocket.json`. The
@@ -49,7 +50,7 @@ const [from, to] = args.map((path) => resolve(path));
 const apps = each
   ? readdirSync(from, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
-      .map((entry) => ({ name: entry.name, source: join(from, entry.name), bundle: join(to, entry.name), ownFonts }))
+      .map((entry) => ({ name: entry.name, source: join(from, entry.name), bundle: join(to, `${entry.name}.bapp`), ownFonts }))
   : [{ name: JSON.parse(readFileSync(join(from, "app.json"), "utf8")).id, source: from, bundle: to, ownFonts }];
 // The system icon font, so apps with their own fonts can show system icons too.
 const icons = resolve(import.meta.dir, "icons/barracuda-icons.otf");

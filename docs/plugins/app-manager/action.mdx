@@ -1,13 +1,15 @@
 ---
 title: "App Manager Workflow Actions"
 sidebarTitle: "Workflow Actions"
-description: "Workflow Actions the App Manager provides: list, open, install, and control apps."
+description: "Workflow Actions the App Manager provides: list, open, and control apps."
 ---
 
-The `app-manager` Plugin registers `app.list`, `app.open`, `app.install`, `app.home`,
-`app.interactive`, `app.terminate`, `app.status`, and `app.tap`. Except for
-`app.install`, which only asks, they are the same operations the system UI
-performs; see [the lifecycle](/plugins/app-manager#lifecycle).
+The `app-manager` Plugin registers `app.list`, `app.open`, `app.home`,
+`app.interactive`, `app.terminate`, `app.status`, and `app.tap`, the same
+operations the system UI performs; see
+[the lifecycle](/plugins/app-manager#lifecycle). An app is installed by
+putting its `<id>.bapp` directory in `/workspace/media/apps`, so no Action
+installs one ([App format](/plugins/app-manager/app-format)).
 Their request and response contracts live at `schemas/action/<address>/`.
 Rejections return `{"error":"<code>"}` so a Workflow can branch on them;
 `incompatible` also carries the `reason` the device shows.
@@ -15,14 +17,14 @@ Rejections return `{"error":"<code>"}` so a Workflow can branch on them;
 A running app is reported as:
 
 ```json
-{"app":{"id":"counter","name":"Counter","version":"0.1.0","location":"installed",
+{"app":{"id":"counter","name":"Counter","version":"0.1.0","location":"workspace",
         "kind":"installable","has_view":true,"api":1,"requires":[],"uses":[],
         "permissions":[],"boards":[],"view_size":[360,360],"view_shape":"round"},
  "run_id":1,"state":"active"}
 ```
 
-`kind` is `system` for an app in the image and `installable` for one the
-person installed. `api`, `requires`, `uses`, `permissions`, `boards`,
+`kind` is `system` for an app in the image and `installable` for one in the
+Workspace. `api`, `requires`, `uses`, `permissions`, `boards`,
 `view_size`, and `view_shape` are from its manifest, as
 [App API](/plugins/app-manager/app-api) explains; `incompatible`, present only for an
 installable app this device cannot run, says why.
@@ -30,40 +32,26 @@ installable app this device cannot run, says why.
 `state` is `active`, `inactive`, `background`, `suspended`, `running` (a
 headless app), or `terminating`.
 
-`app.list` takes `{}` and returns every launchable app, every Workspace
-container that can be installed (a new app, or an installed one at another
-version), and every container that breaks the [app format](/plugins/app-manager/app-format) with
-the reason, so its author can fix it. `location` is `builtin`, `installed`, or
-`workspace`:
+`app.list` takes `{}` and returns every app, and every container that breaks
+the [app format](/plugins/app-manager/app-format) with the reason, so its
+author can fix it. `location` is `builtin` or `workspace`:
 
 ```json
-{"apps":[{"id":"settings","name":"Settings","version":"0.1.0","location":"builtin",
-          "kind":"system","has_view":true,"permissions":[]}],
- "installable":[{"id":"lamp","name":"Light strip","version":"1","location":"workspace",
-                 "kind":"installable","has_view":true,"api":1,"requires":["light"],
-                 "uses":[],"permissions":[],"boards":[],"view_size":[360,360],
-                 "view_shape":"round","incompatible":"This device has no light"}],
- "invalid":[{"location":"workspace","dir":"hello","problem":"main.lua is missing"}]}
+{"apps":[{"id":"lamp","name":"Light strip","version":"1","location":"workspace",
+          "kind":"installable","has_view":true,"api":1,"requires":["light"],
+          "uses":[],"permissions":[],"boards":[],"view_size":[360,360],
+          "view_shape":"round","incompatible":"This device has no light"},
+         {"id":"settings","name":"Settings","version":"0.1.0","location":"builtin",
+          "kind":"system","has_view":true,"api":1,"requires":[],"uses":[],
+          "permissions":[],"boards":[]}],
+ "invalid":[{"location":"workspace","dir":"hello.bapp","problem":"main.lua is missing"}]}
 ```
 
 `app.open` takes `{"id":"counter"}`. It resumes a running app or launches it,
 returns the running app once its program has started, and fails with
-`not_found`, `not_installed` (the app is only offered in the Workspace),
-`invalid_bundle`, `storage`, `view_rejected`, `no_display` (the app has a
-view and the Board no display), `incompatible` (the installed app no longer
-fits this device), `runtime_unavailable`, or `busy`.
-
-`app.install` takes `{"id":"lamp"}` and asks the system UI to offer that
-Workspace container for installation. It returns at once with
-`{"requested": <app>}`; the person installs or declines on the device, and
-`app.list` shows the outcome. A newer request replaces one still unanswered.
-The requested app also carries `digest`, the SHA-256 of its files that the
-install is pinned to, and `signer`, the short name of the key that signed a
-`.bapp` package ([App format](/plugins/app-manager/app-format#packages)). It fails with
-`not_found`, `system_app` (the ID belongs to a system app), `invalid_bundle`
-(also a package whose signature fails), `storage`, or `incompatible` with
-the reason this device cannot run the app, or that an app installed from a
-signed package takes updates only from its signer:
+`not_found`, `invalid_bundle`, `storage`, `view_rejected`, `no_display` (the
+app has a view and the Board no display), `incompatible` with the reason
+this device cannot run the app, `runtime_unavailable`, or `busy`:
 
 ```json
 {"error":"incompatible","reason":"This device has no light"}

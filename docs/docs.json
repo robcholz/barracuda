@@ -316,7 +316,6 @@
                       "plugins/captive-portal/ui-kit"
                     ]
                   },
-                  "plugins/app-portal",
                   "plugins/power",
                   "plugins/sound",
                   "plugins/time",
@@ -803,7 +802,6 @@
                       "zh/plugins/captive-portal/ui-kit"
                     ]
                   },
-                  "zh/plugins/app-portal",
                   "zh/plugins/power",
                   "zh/plugins/sound",
                   "zh/plugins/time",

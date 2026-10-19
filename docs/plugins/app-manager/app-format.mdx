@@ -6,7 +6,7 @@ description: "Package an app: its container locations, manifest, Lua program, an
 
 This is the format of an app container, version 1. The `app-manager` Plugin loads any
 container in this format from each of its locations, so a container written
-by the image build, the portal, or an Agent is the same thing; where it lives
+by the image build, the portal's file manager, or an Agent is the same thing; where it lives
 decides what kind of app it is (see
 [Device UI](/architecture/device-ui)).
 `crates/appkit/resources/app-manifest.json` is the machine-readable form of the manifest
@@ -18,24 +18,23 @@ app API, in [App API](/plugins/app-manager/app-api).
 | Location    | Directory                     | Written by                            | Holds |
 | ----------- | ----------------------------- | ------------------------------------- | ----- |
 | `builtin`   | `/resources/app/` of the Plugin that ships it | the image build (read-only) | system apps |
-| `installed` | `/media/apps/<id>/`           | the `app-manager` Plugin on install (private) | installable apps |
-| `workspace` | `/workspace/media/apps/<id>/` or `<id>.bapp` | the portal, Agents, other Plugins (shared Workspace) | apps offered for installation |
+| `workspace` | `/workspace/media/apps/<id>.bapp/` | the portal's file manager, Agents, other Plugins (shared Workspace) | installable apps |
 
 A builtin app Plugin hands its filesystem to the `app-manager` Plugin, whose
-own scope holds the other two; it only reads the Workspace. Builtin and
-installed apps are launchable; a Workspace container is an offer. Installing it copies
-the manifest and the files it names into `/media/apps/<id>/`, replacing an
-installed app at another version. A system app's ID belongs to it: no
-container elsewhere may use it, and `app.list` reports one that does as
-invalid.
+own scope holds the Workspace. Apps in both locations are launchable:
+putting a container in `/workspace/media/apps` installs it, overwriting its
+files updates it, and removing it uninstalls it. A system app's ID belongs to
+it: no Workspace container may use it, and `app.list` reports one that does
+as invalid.
 
 ## Container
 
-A container is a directory named after the app ID, holding a manifest and the
-files it names, side by side:
+A container is a directory holding a manifest and the files it names, side
+by side. An installable app's directory is named after its ID with `.bapp`
+after it:
 
 ```text
-<id>/
+<id>.bapp/
   app.json          the manifest
   main.lua          the entry program (or the file `entry` names)
   view.bvir         optional view program        ┐
@@ -43,47 +42,10 @@ files it names, side by side:
   font-1.bin …      its baked font atlases       ┘
 ```
 
-Other files are ignored. Directories whose names start with `.` are skipped.
-
-## Packages
-
-In the Workspace an app may also be offered as one file,
-`/workspace/media/apps/<id>.bapp`, which holds the same files and may be
-signed. An ID offered both as a directory and as a package is invalid.
-`resources/pack-app.ts` writes packages:
-
-```sh
-bun resources/pack-app.ts --new-key key.jwk                 # once, and keep it
-bun resources/pack-app.ts <bundle> <id>.bapp --key key.jwk  # sign a built container
-bun resources/pack-app.ts <bundle> <id>.bapp                # or leave it unsigned
-```
-
-All numbers are little-endian:
-
-| Offset | Size | What |
-| --- | --- | --- |
-| 0 | 4 | `BAPP` |
-| 4 | 1 | format version, 1 |
-| 5 | 1 | file count, 1 to 64 |
-| 6 | 1 | flags: bit 0, a signature block follows |
-| 7 | 1 | 0 |
-| 8 | 4 | the content's length: this header, the directory, and the files |
-| 12 | 40 per file | the directory: the file name, NUL-padded to 32 bytes, then its offset and length (4 bytes each) |
-| … | | the files, each where its entry says |
-| content length | 133 | when signed: `BSIG`, the SEC1 uncompressed P-256 public key (65 bytes), and the ECDSA signature over the content with SHA-256 as `r ‖ s` (64 bytes) |
-
-Listing reads only the header and the directory. When an install is asked
-for, the device hashes the content with SHA-256 and verifies the signature:
-a package whose signature fails is invalid, and the install screen shows a
-signed package's signer by the first bytes of its key's SHA-256, or says it
-is unsigned. The install takes exactly what the person was shown: the
-digest is pinned, and an offer that changed since answers `Changed`. A
-directory offer is pinned the same way, by the SHA-256 of its files.
-
-An app installed from a signed package keeps its signer's key beside its
-container, and from then on takes only packages that key signed: another
-key's package, an unsigned one, or a directory offers no update and says
-why. An app installed unsigned takes any update.
+Other files are ignored. In `/workspace/media/apps`, entries whose names
+start with `.` and files are skipped, so write an app into `.<id>.bapp/` and
+rename it to `<id>.bapp/` once every file is there; `app.list` reports a
+directory without `.bapp` as invalid.
 
 ## Manifest
 
@@ -109,7 +71,7 @@ why. An app installed unsigned takes any update.
 | Field          | Required | Rule                                                        |
 | -------------- | -------- | ----------------------------------------------------------- |
 | `format`       | yes      | `1`                                                         |
-| `id`           | yes      | 1–32 of `a-z`, `0-9`, `-`; equal to the directory name      |
+| `id`           | yes      | 1–32 of `a-z`, `0-9`, `-`; the directory name before `.bapp` |
 | `name`         | yes      | display name, 1–64 characters                               |
 | `version`      | yes      | the author's version string, 1–32 characters                |
 | `icon`         | no       | a system icon's name, such as `lamp`, shown on the launcher; without one it shows the name's first character |
@@ -141,9 +103,10 @@ device where the app is installed.
 
 An installable app's runs can `require` the ambient packages and the packages
 its manifest names; a package it did not name is not there, and `require`
-fails. Before the person installs the app, the install screen lists what it
-asks for in the words each package's Plugin declares, or says why this
-device cannot run it ([App API](/plugins/app-manager/app-api#install-check)). A system app
+fails. The app's info screen lists what it asks for in the words each
+package's Plugin declares; an app this device cannot run is dimmed in the
+launcher, and its info screen says why
+([App API](/plugins/app-manager/app-api#compatibility-check)). A system app
 may `require` every registered package, so its manifest needs none. A
 builtin app's own package, such as `settings`, is only for builtin apps: an
 installable app that asks for one is not valid.
@@ -232,15 +195,15 @@ atlases. A source manifest's `view` holds only the `shape`. An Agent that
 cannot run that toolchain writes a headless app, or copies the view files of
 an existing build next to its own entry program.
 
-## Example: a headless app an Agent can offer
+## Example: a headless app an Agent can install
 
-`/workspace/media/apps/hello/app.json`:
+`/workspace/media/apps/hello.bapp/app.json`:
 
 ```json
 { "format": 1, "id": "hello", "name": "Hello", "version": "1" }
 ```
 
-`/workspace/media/apps/hello/main.lua`:
+`/workspace/media/apps/hello.bapp/main.lua`:
 
 ```lua
 local app = require("app")
@@ -249,11 +212,11 @@ assert(app.kv.set("runs", runs))
 print("hello from " .. app.id .. ", run " .. runs)
 ```
 
-Offer it with `app.install` and `{"id":"hello"}`: the device shows the
-install screen, and once the person installs it, open it with `app.open` and
-`{"id":"hello"}`; `app.status` then shows `last_exit.output` as
+Once both files are there, the app is installed: open it with `app.open` and
+`{"id":"hello"}`, and `app.status` then shows `last_exit.output` as
 `["hello from hello, run 1"]`. `crates/appkit/tests/fixtures/` holds built
-example apps with views, each ready to copy into `/workspace/media/apps/<id>/`:
+example apps with views, each an `<id>.bapp/` directory ready to copy into
+`/workspace/media/apps/`:
 `air` (an air-quality app, no packages), `lamp` (a light-strip app, requires
 `light`), `camera` (a camera app, requires `camera`), and `counter` (a counter,
 no packages).

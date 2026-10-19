@@ -740,21 +740,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-app-portal-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-app-manager-plugin",
- "barracuda-captive-portal-plugin",
- "barracuda-plugin",
- "barracuda-webserver-plugin",
- "barracuda-wifi-plugin",
- "futures-lite",
- "log",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "barracuda-appkit"
 version = "0.1.0"
 dependencies = [
@@ -778,12 +763,10 @@ dependencies = [
  "futures-util",
  "json-validator",
  "log",
- "p256",
  "portable-atomic",
  "portable-atomic-util",
  "serde",
  "serde_json",
- "sha2 0.10.9",
 ]
 
 [[package]]
@@ -2229,7 +2212,6 @@ dependencies = [
  "barracuda-agent-workflow-plugin",
  "barracuda-analog-plugin",
  "barracuda-app-manager-plugin",
- "barracuda-app-portal-plugin",
  "barracuda-audio-plugin",
  "barracuda-builtin-app-files-plugin",
  "barracuda-builtin-app-sessions-plugin",
@@ -2260,6 +2242,7 @@ dependencies = [
  "barracuda-sound-plugin",
  "barracuda-spi-plugin",
  "barracuda-system-fonts-plugin",
+ "barracuda-system-wifi-plugin",
  "barracuda-time-plugin",
  "barracuda-uart-plugin",
  "barracuda-vm-agent-plugin",
