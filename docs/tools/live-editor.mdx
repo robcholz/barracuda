@@ -4,7 +4,7 @@ description: "Build and pack an app's view in the browser with the same compiler
 ---
 
 Live Editor writes, builds and installs Barracuda apps in the browser. It lives
-in `apps/live-editor`: `compiler/` is a Rust crate built to WebAssembly, and
+in `apps/live-editor`: `wasm/` is a Rust crate built to WebAssembly, and
 `web/` is the TypeScript that runs in the page. This page covers the build
 pipeline it has so far; the editor's interface is still to come.
 
@@ -16,7 +16,7 @@ package Live Editor makes is the one the toolchain would make:
 | Step | In the browser | On disk |
 | --- | --- | --- |
 | Compile `app.tsx` against `app.d.ts` | PocketJS's MicroTS compiler over an in-memory file system (`web/src/microts.ts`) | PocketJS's `buildAot` |
-| Link View IR into `view.bvir` | `barracuda-live-editor-compiler` as WebAssembly (`web/src/linker.ts`) | `ui-link` |
+| Link View IR into `view.bvir` | `barracuda-live-editor-wasm` as WebAssembly (`web/src/wasm.ts`) | `ui-link` |
 | Fill in the manifest's `view` | `web/src/container.ts` | `build-app.ts` |
 | Pack, and sign, a `.bapp` | `web/src/package.ts`, with WebCrypto | `pack-app.ts` |
 
@@ -40,8 +40,8 @@ POCKETJS_ROOT=~/src/pocketjs bun apps/live-editor/web/build.ts
 
 It writes `apps/live-editor/web/dist/`:
 
-- `compiler.wasm`: the linker, built with
-  `cargo build --release --target wasm32-unknown-unknown --package barracuda-live-editor-compiler`.
+- `live-editor.wasm`: the linker, built with
+  `cargo build --release --target wasm32-unknown-unknown --package barracuda-live-editor-wasm`.
 - `microts.js`: the MicroTS compiler and TypeScript, bundled for the browser,
   with `node:fs` resolved to the in-memory file system.
 - `microts-files.json`: the files the compiler reads. The script compiles every
@@ -59,13 +59,13 @@ The WebAssembly module exports `memory` and four functions:
 | `output()`, `output_len()` | the last output's address and length |
 
 Call `input` before taking a view of `memory`: it may grow memory, which
-detaches any earlier view. `web/src/linker.ts` wraps this as
+detaches any earlier view. `web/src/wasm.ts` wraps this as
 `link(json) → Uint8Array`.
 
 ## Tests
 
 ```sh
-cargo test --package barracuda-live-editor-compiler
+cargo test --package barracuda-live-editor-wasm
 bun test ./apps/live-editor/web
 ```
 

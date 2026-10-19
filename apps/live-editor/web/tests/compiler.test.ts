@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildContainer } from "../src/container";
-import { linker, LinkError, loadLinker } from "../src/linker";
+import { linker, LinkError, loadLinker } from "../src/wasm";
 import { compileView, type PocketCompiler } from "../src/microts";
 import { pack, packageFiles } from "../src/package";
 
@@ -61,7 +61,7 @@ test("the linker passes View IR in and BVIR or the reason out", () => {
 });
 
 test.if(built)("the WebAssembly linker links as ui-link does", async () => {
-  const link = await loadLinker(readFileSync(join(dist, "compiler.wasm")));
+  const link = await loadLinker(readFileSync(join(dist, "live-editor.wasm")));
   expect(
     link(readFileSync(join(FIXTURES, "counter.view.json"), "utf8")),
   ).toEqual(new Uint8Array(readFileSync(join(FIXTURES, "counter.bvir"))));
@@ -87,7 +87,7 @@ test.if(built)(
   "a view compiled in the browser is the one the toolchain committed",
   async () => {
     const compiler = await browserCompiler();
-    const link = await loadLinker(readFileSync(join(dist, "compiler.wasm")));
+    const link = await loadLinker(readFileSync(join(dist, "live-editor.wasm")));
     const view = join(repository, "plugins/app-manager/resources/view");
     const committed = join(
       repository,
@@ -107,7 +107,7 @@ test.if(built)(
   "an example app builds and packs in the browser, and a broken one is explained",
   async () => {
     const compiler = await browserCompiler();
-    const link = await loadLinker(readFileSync(join(dist, "compiler.wasm")));
+    const link = await loadLinker(readFileSync(join(dist, "live-editor.wasm")));
     const toolchain = {
       compileView: (app: Map<string, string>) => compileView(compiler, app),
       linkView: link,

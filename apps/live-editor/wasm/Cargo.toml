@@ -1,8 +1,8 @@
 [package]
-name = "barracuda-live-editor-compiler"
+name = "barracuda-live-editor-wasm"
 version = "0.1.0"
 edition = "2024"
-description = "Live Editor's in-browser compiler: links MicroTS views as ui-link does, built to WebAssembly"
+description = "Live Editor's WebAssembly module: links MicroTS views as ui-link does and previews them as the device draws them"
 license = "Apache-2.0"
 publish = false
 
@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 barracuda-ui-runtime = { path = "../../../plugins/app-manager/crates/runtime", features = ["compiler"] }
+serde_json = "1"
 
 [lints.rust]
 # The WebAssembly exports need `#[unsafe(no_mangle)]`; only that module allows it.

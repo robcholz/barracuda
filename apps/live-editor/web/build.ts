@@ -1,6 +1,6 @@
 // Builds Live Editor's compiler into dist/:
 //
-//   compiler.wasm       the view linker (apps/live-editor/compiler), as `ui-link` links
+//   live-editor.wasm    the view linker and the preview (apps/live-editor/wasm)
 //   microts.js          PocketJS's MicroTS compiler, bundled for the browser
 //   microts-files.json  the files it reads (TypeScript's library declarations, PocketJS's sources)
 //
@@ -21,7 +21,7 @@ const repository = resolve(web, "../../..");
 const dist = join(web, "dist");
 mkdirSync(dist, { recursive: true });
 
-// The linker, as WebAssembly.
+// The linker and the preview, as WebAssembly.
 const cargo = Bun.spawnSync(
   [
     "cargo",
@@ -30,7 +30,7 @@ const cargo = Bun.spawnSync(
     "--target",
     "wasm32-unknown-unknown",
     "--package",
-    "barracuda-live-editor-compiler",
+    "barracuda-live-editor-wasm",
   ],
   { cwd: repository, stdout: "inherit", stderr: "inherit" },
 );
@@ -38,11 +38,11 @@ if (cargo.exitCode !== 0) process.exit(cargo.exitCode ?? 1);
 fs.copyFileSync(
   join(
     repository,
-    "target/wasm32-unknown-unknown/release/barracuda_live_editor_compiler.wasm",
+    "target/wasm32-unknown-unknown/release/barracuda_live_editor_wasm.wasm",
   ),
-  join(dist, "compiler.wasm"),
+  join(dist, "live-editor.wasm"),
 );
-console.log("compiler.wasm");
+console.log("live-editor.wasm");
 
 const pocket = process.env.POCKETJS_ROOT && resolve(process.env.POCKETJS_ROOT);
 if (!pocket) {

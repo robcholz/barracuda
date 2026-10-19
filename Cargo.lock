@@ -1640,10 +1640,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-live-editor-compiler"
+name = "barracuda-live-editor-wasm"
 version = "0.1.0"
 dependencies = [
  "barracuda-ui-runtime",
+ "serde_json",
 ]
 
 [[package]]

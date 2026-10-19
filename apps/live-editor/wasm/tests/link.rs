@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use barracuda_live_editor_compiler::link_view;
+use barracuda_live_editor_wasm::link_view;
 
 const FIXTURES: &str = "../../../plugins/app-manager/crates/runtime/tests/fixtures";
 
