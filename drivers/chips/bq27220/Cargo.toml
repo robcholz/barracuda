@@ -3,7 +3,7 @@ name = "barracuda-driver-bq27220"
 version = "0.1.0"
 edition = "2024"
 description = "Low-level Texas Instruments BQ27220 battery fuel-gauge driver"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 embedded-hal.workspace = true

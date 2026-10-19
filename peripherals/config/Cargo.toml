@@ -3,7 +3,7 @@ name = "barracuda-peripheral-config"
 version = "0.1.0"
 edition = "2024"
 description = "Build-time peripheral implementation manifest loading and Board composition validation"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-board-config.workspace = true

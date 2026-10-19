@@ -3,7 +3,7 @@ name = "barracuda-vm-time-plugin"
 version = "0.1.0"
 edition = "2024"
 description = "Lua standard os time adapter for Barracuda's UTC clock"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [features]
 default = []

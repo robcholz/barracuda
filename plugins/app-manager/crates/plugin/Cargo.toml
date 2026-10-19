@@ -3,7 +3,7 @@ name = "barracuda-app-manager-plugin"
 version = "0.1.0"
 edition = "2024"
 description = "Barracuda Plugin that runs Lua apps and, with a display, the system UI"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [build-dependencies]
 barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }

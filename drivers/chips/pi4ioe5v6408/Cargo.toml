@@ -3,7 +3,7 @@ name = "barracuda-driver-pi4ioe5v6408"
 version = "0.1.0"
 edition = "2024"
 description = "Low-level PI4IOE5V6408 I2C digital I/O expander Driver"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 embedded-hal.workspace = true

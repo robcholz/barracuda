@@ -3,7 +3,7 @@ name = "barracuda-driver-st712x"
 version = "0.1.0"
 edition = "2024"
 description = "Low-level Sitronix ST7121/ST7123 display-touch controller driver"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [dependencies]
 embedded-hal.workspace = true
