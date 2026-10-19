@@ -1,0 +1,6 @@
+interface:
+  display_name: "Barracuda Create Platform"
+  short_description: "Add a Platform with its HAL, CI coverage, and docs"
+  default_prompt: "Use $create-platform to add a Barracuda Platform with its platform.yml, Platform implementation, entry macro, HAL adaptation, CI coverage, and docs."
+policy:
+  allow_implicit_invocation: true

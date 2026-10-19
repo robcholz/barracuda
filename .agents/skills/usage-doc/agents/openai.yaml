@@ -1,6 +1,0 @@
-interface:
-  display_name: "Usage Guide Authoring"
-  short_description: "Write caller-facing usage guides"
-  default_prompt: "Use $usage-doc to write or revise a usage guide."
-policy:
-  allow_implicit_invocation: true
