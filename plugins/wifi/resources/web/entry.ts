@@ -92,7 +92,7 @@ export const STRINGS = {
     joinHint: "连接后，在新网络中重新打开门户。",
     manual: "手动输入网络名称",
     forget: "忘记此网络",
-    /** Around the network name, in mono: 「设备会断开 `HomeNet`，并开启配置热点 `Barracuda Setup`」. */
+    /** Around the network name, in mono: 「设备会断开 `HomeNet`，并开启配置热点 `Barracuda-B2C3`」. */
     forgetA: "设备会断开",
     forgetB: "，并开启配置热点",
     forgetBtn: "忘记网络",
@@ -333,7 +333,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
   }
 
   /**
-   * 「设备会断开 `HomeNet`，并开启配置热点 `Barracuda Setup`」: a fragment, no full stop; the hotspot's
+   * 「设备会断开 `HomeNet`，并开启配置热点 `Barracuda-B2C3`」: a fragment, no full stop; the hotspot's
    * name only when the device reports it. The names are mono and stay muted like the line.
    */
   function forgetText(ssid: string) {

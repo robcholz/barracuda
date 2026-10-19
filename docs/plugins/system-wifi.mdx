@@ -28,9 +28,9 @@ At registration the Plugin gives `SystemNetwork` a `NetworkSource` over
   network's name, `Connecting`, or `Offline`); host Boards whose network the
   host manages are always connected;
 - the setup hotspot is open while the access point is starting or started;
-- the portal tile opens the access point `SETUP_AP_SSID` with
-  `SETUP_AP_PASSWORD` and shows how to reach the portal at
-  `SETUP_AP_ADDRESS`, and closes it again.
+- the portal tile opens the setup access point, named by
+  `WifiControl::setup_ssid`, with `SETUP_AP_PASSWORD` and shows how to reach
+  the portal at `SETUP_AP_ADDRESS`, and closes it again.
 
 A device Board that goes online enables this Plugin with `app-manager`; one
 built without networking leaves it out, and the system UI shows no network.
