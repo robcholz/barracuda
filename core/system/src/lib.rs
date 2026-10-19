@@ -35,7 +35,7 @@ use barracuda_plugin::api::{PlatformWifi, PluginContext, SharedEntropy};
 use barracuda_plugin::manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
 };
-use barracuda_target_api::{TargetIdentity, TargetResources};
+use barracuda_target_api::{TargetIdentity, TargetResources, FIRMWARE_VERSION};
 use barracuda_vfs::{
     create_dir_all, detach, global_namespace, mount, mount_scoped, unmount, FsError, MountOptions,
 };
@@ -282,6 +282,12 @@ where
         target_identity: TargetIdentity,
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
+        // A fixed line a setup tool on the console reads to tell which Board and
+        // release it is talking to.
+        log::info!(
+            "BARRACUDA system=boot board={} version={FIRMWARE_VERSION}",
+            target_identity.board().name()
+        );
         log::info!("assembling Barracuda System");
         let mut prepared = resources::prepare(resources)?;
         log::info!("assigned selected Target resources to System roles");
