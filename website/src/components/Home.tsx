@@ -64,24 +64,6 @@ export function Home({ copy }: { copy: Copy }) {
               {hero.readDocs}
             </a>
           </div>
-          <div className="w-hero-art">
-            <div className="w-chat">
-              <div className="w-chat__row w-chat__row--me">
-                <span className="w-chat__who">{hero.chatYou}</span>
-                <span>{hero.chatAsk}</span>
-              </div>
-              <div className="w-chat__row">
-                <span className="w-chat__who w-accent">{hero.chatWho}</span>
-                <pre className="bc-code w-chat__snippet">
-                  {`local sensor, strip = imu.open(), led_strip.open()
-local _, _, _, _, _, _, mc = sensor:read()
-local rgb = mc > 28000 and "\\255\\64\\0" or "\\0\\128\\255"
-strip:write(rgb:rep(strip:len()))`}
-                </pre>
-                <span>{hero.chatReply}</span>
-              </div>
-            </div>
-          </div>
         </div>
         <div className="w-brands" role="group" aria-label={hero.brandsLabel}>
           <div className="w-brands__view">

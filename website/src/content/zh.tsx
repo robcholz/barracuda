@@ -47,10 +47,6 @@ export const zh: Copy = {
     noteSource: "需要 Rust 工具链",
     copyLabel: "复制命令",
     readDocs: "阅读文档 →",
-    chatYou: "你",
-    chatAsk: "让灯带跟着温度变色",
-    chatWho: "Barracuda · 写了一段脚本并运行",
-    chatReply: "现在 26.4°C，灯带是蓝色。超过 28°C 会变成橙色。",
     brandsLabel: "与 Barracuda 配合使用的硬件与模型厂商",
   },
   product: {
