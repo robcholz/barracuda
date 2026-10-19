@@ -3,7 +3,9 @@ use core::net::Ipv4Addr;
 
 use alloc::rc::Rc;
 use barracuda_platform::{AccessPointState, StationState, VisibleNetwork, WifiCapabilities};
-use barracuda_webserver_plugin::{HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse};
+use barracuda_webserver_plugin::{
+    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WEB_SERVER_PORT,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{WifiControl, WifiControlErrorKind};
@@ -75,7 +77,18 @@ impl HttpEndpoint for WifiEndpoint {
                             }
                         };
                     };
-                    Self::static_response(204, b"")
+                    // the setup hotspot closes right after this reply, so it carries
+                    // where the portal is on the joined network
+                    Self::json_response(
+                        200,
+                        &JoinedResponse {
+                            address: self
+                                .control
+                                .station_address()
+                                .map(|address| address.to_string()),
+                            port: WEB_SERVER_PORT,
+                        },
+                    )
                 }
                 HttpMethod::Delete => {
                     if !self.control.capabilities().station_configuration {
@@ -160,6 +173,15 @@ impl HttpEndpoint for ScanEndpoint {
             }
         })
     }
+}
+
+/// `PUT` [`WIFI_API_PATH`] success: the station's address on the joined network and the
+/// portal's port there.
+#[derive(Serialize)]
+struct JoinedResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    address: Option<String>,
+    port: u16,
 }
 
 #[derive(Serialize)]

@@ -22,7 +22,7 @@ const CONNECTED: WifiStatus = {
     scanning: true,
     station_configuration: true,
   },
-  station: { state: "connected", ssid: "HomeNet" },
+  station: { state: "connected", ssid: "HomeNet", address: "192.168.1.42" },
   access_point: { state: "stopped" },
 };
 const SETUP: WifiStatus = {
@@ -66,7 +66,7 @@ beforeEach(() => {
   routes = {
     "GET /api/wifi/status": () => json(CONNECTED),
     "GET /api/wifi/scan": () => json(SCAN),
-    "PUT /api/wifi": () => new Response(null, { status: 204 }),
+    "PUT /api/wifi": () => json({ address: "192.168.1.50", port: 8787 }),
     "DELETE /api/wifi": () => new Response(null, { status: 204 }),
   };
   globalThis.fetch = Object.assign(
@@ -167,7 +167,9 @@ test("renders the status and the scan in Chinese", async () => {
     "/api/wifi/scan",
   ]);
   const status = page.root.querySelector("dl[role=status]")!;
-  expect(status.textContent).toBe("状态已连接网络HomeNet配置热点已关闭");
+  expect(status.textContent).toBe(
+    "状态已连接网络HomeNet地址192.168.1.42配置热点已关闭",
+  );
   expect(status.querySelector(".bc-badge--signal")?.textContent).toBe("已连接");
   expect(page.text()).toContain("扫描、连接或忘记无线网络。");
   expect(page.text()).toContain("附近的网络04");
@@ -242,7 +244,7 @@ test("renders in English", async () => {
   const page = await render("en");
   const status = page.root.querySelector("dl[role=status]")!;
   expect(status.textContent).toBe(
-    "StatusNot connectedNetwork—Setup hotspotBarracuda Setup",
+    "StatusNot connectedNetwork—Address—Setup hotspotBarracuda Setup",
   );
   expect(page.text()).toContain("Nearby networks04");
   expect(page.row("Cafe Guest").textContent).toBe("Cafe GuestOpen-70 dBm");
@@ -305,6 +307,23 @@ test("joins a secured network after validating the password", async () => {
       action: undefined,
     },
   ]);
+  // the setup hotspot closes after the join, so the page keeps where the portal is now
+  const joined = page.root.querySelector<HTMLElement>(
+    "section[aria-labelledby=wifi-joined]",
+  )!;
+  expect(joined.className).toBe("bc-card");
+  expect(joined.getAttribute("role")).toBe("status");
+  expect(joined.textContent).toBe(
+    "已连接 Office-5F门户地址http://192.168.1.50:8787/portal/连上 Office-5F 后，打开这个地址。",
+  );
+  expect(joined.querySelector("a.bc-link")?.getAttribute("href")).toBe(
+    "http://192.168.1.50:8787/portal/",
+  );
+  expect(joined.querySelector("svg.bc-success")).not.toBeNull();
+  // right under the header frame, above the networks
+  expect(joined.parentElement?.previousElementSibling?.className).toContain(
+    "bc-header",
+  );
   // the form closes, the password is gone and the status is read again
   expect(page.root.querySelector("form")).toBeNull();
   expect(calls.filter((call) => call.url === "/api/wifi/status")).toHaveLength(
@@ -315,6 +334,8 @@ test("joins a secured network after validating the password", async () => {
 });
 
 test("joins an open network without a password", async () => {
+  // a device that reports no address yet: nothing to show beyond the toast
+  routes["PUT /api/wifi"] = () => json({ port: 8787 });
   const page = await render("en");
   page.row("Cafe Guest").click();
   // an open network asks for nothing
@@ -325,6 +346,7 @@ test("joins an open network without a password", async () => {
     JSON.stringify({ ssid: "Cafe Guest", password: "" }),
   );
   expect(page.toasts[0]?.title).toBe("Connected to Cafe Guest");
+  expect(page.root.querySelector("[aria-labelledby=wifi-joined]")).toBeNull();
 });
 
 test("a rejected join keeps the form and reports the status", async () => {
@@ -397,7 +419,7 @@ test("reports failed reads and writes", async () => {
     { kind: "error", title: "无法读取 Wi-Fi 状态", code: "503" },
   ]);
   expect(other.root.querySelector("dl")?.textContent).toBe(
-    "状态—网络—配置热点—",
+    "状态—网络—地址—配置热点—",
   );
 });
 
@@ -406,7 +428,7 @@ test("a platform-managed network offers nothing to change", async () => {
   const page = await render();
   expect(calls.map((call) => call.url)).toEqual(["/api/wifi/status"]);
   expect(page.root.querySelector("dl")?.textContent).toBe(
-    "状态已连接网络—配置热点—",
+    "状态已连接网络—地址—配置热点—",
   );
   const note = page.root.querySelector(".bc-list-note")!;
   expect(note.textContent).toBe("网络由当前平台管理");
@@ -423,7 +445,7 @@ test("the phone layout is the design's list", async () => {
   expect(
     page.root.querySelector("section[aria-label='Current connection']")
       ?.textContent,
-  ).toBe("Wi-FiConnectedHomeNet");
+  ).toBe("Wi-FiConnectedHomeNet192.168.1.42");
   expect(page.root.querySelectorAll("ul > li")).toHaveLength(5);
   expect(page.root.querySelector("h1")?.className).toBe("bc-mobile-title");
   // List: the header block, the list head with its label, the list, the foot

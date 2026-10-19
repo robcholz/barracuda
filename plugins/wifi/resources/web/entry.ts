@@ -1,4 +1,5 @@
 import {
+  ICON_CHECK,
   ICON_CHEVRON_DOWN,
   ICON_CHEVRON_RIGHT,
   ICON_PLUS,
@@ -29,6 +30,8 @@ export interface WifiStatus {
   station: {
     state: "disconnected" | "connecting" | "connected";
     ssid?: string;
+    /** The station's IPv4 address while connected. */
+    address?: string;
   };
   access_point: { state: "stopped" | "starting" | "started"; ssid?: string };
 }
@@ -67,6 +70,7 @@ export const STRINGS = {
     connecting: "正在连接…",
     disconnected: "未连接",
     network: "网络",
+    address: "地址",
     hotspot: "配置热点",
     off: "已关闭",
     starting: "正在开启…",
@@ -94,6 +98,8 @@ export const STRINGS = {
     forgetBtn: "忘记网络",
     phoneCurrent: "当前连接",
     joined: (ssid: string) => `已连接 ${ssid}`,
+    portal: "门户地址",
+    joinedHint: (ssid: string) => `连上 ${ssid} 后，打开这个地址。`,
     forgot: (ssid: string) => `已忘记 ${ssid}`,
     statusFailed: "无法读取 Wi-Fi 状态",
     scanFailed: "扫描失败",
@@ -107,6 +113,7 @@ export const STRINGS = {
     connecting: "Connecting…",
     disconnected: "Not connected",
     network: "Network",
+    address: "Address",
     hotspot: "Setup hotspot",
     off: "Off",
     starting: "Starting…",
@@ -133,6 +140,8 @@ export const STRINGS = {
     forgetBtn: "Forget network",
     phoneCurrent: "Current connection",
     joined: (ssid: string) => `Connected to ${ssid}`,
+    portal: "Portal address",
+    joinedHint: (ssid: string) => `Once you're on ${ssid}, open this address.`,
     forgot: (ssid: string) => `Forgot ${ssid}`,
     statusFailed: "Couldn't read the Wi-Fi status",
     scanFailed: "Scan failed",
@@ -166,6 +175,22 @@ export function nearbyNetworks(networks: readonly VisibleNetwork[]) {
   return [...strongest.values()].sort(
     (left, right) => (right.signal_dbm ?? -128) - (left.signal_dbm ?? -128),
   );
+}
+
+/**
+ * The portal's address on the joined network, from the `PUT /api/wifi` reply
+ * (`JoinedResponse`: `{ address, port }`), or `null` when the device has none yet.
+ */
+export function portalUrl(reply: unknown): string | null {
+  const joined = reply as { address?: unknown; port?: unknown } | null;
+  if (
+    !joined ||
+    typeof joined.address !== "string" ||
+    !joined.address ||
+    typeof joined.port !== "number"
+  )
+    return null;
+  return `http://${joined.address}:${joined.port}/portal/`;
 }
 
 function isStatus(value: unknown): value is WifiStatus {
@@ -270,6 +295,11 @@ export const mount: PortalModule["mount"] = (root, context) => {
   let networks: VisibleNetwork[] | null = null;
   let scanning = false;
   let busy = false;
+  /**
+   * The network just joined and the portal's address there: the setup hotspot closes right
+   * after the join, so the page keeps the address in view for the reader to take along.
+   */
+  let joined: { ssid: string; portal: string } | null = null;
   /** The SSID whose join form is open, {@link MANUAL} for the manual form, or `null`. */
   let picked: string | null = null;
   const forms = new Map<string, JoinForm>();
@@ -473,6 +503,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
   async function join(key: string, body: { ssid: string; password: string }) {
     if (busy) return;
     busy = true;
+    joined = null;
     update();
     const outcome = await submitJson(context, {
       endpoint: CONFIG_URL,
@@ -480,6 +511,10 @@ export const mount: PortalModule["mount"] = (root, context) => {
       body,
       timeoutMs: JOIN_TIMEOUT_MS,
       success: { title: t.joined(body.ssid), body: t.joinHint },
+      onAccepted: (reply) => {
+        const portal = portalUrl(reply);
+        joined = portal ? { ssid: body.ssid, portal } : null;
+      },
     });
     if (outcome === "aborted") return;
     busy = false;
@@ -496,6 +531,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
     const ssid = status?.station.ssid ?? "—";
     if (busy) return;
     busy = true;
+    joined = null;
     update();
     const outcome = await submitJson(context, {
       endpoint: CONFIG_URL,
@@ -514,7 +550,11 @@ export const mount: PortalModule["mount"] = (root, context) => {
   const figures: HTMLElement[] = [];
   const statusSlot = h("span");
   const networkSlot = h("span");
+  const addressSlot = h("span");
   const hotspotSlot = h("span");
+  /** Holds the join result; in the page only while there is one, right after {@link joinedAfter}. */
+  const joinedSlot = h("div");
+  let joinedAfter: Element | null = null;
   const count = h("span");
   /**
    * Where the rows go: on a phone a `ul.bc-list`; on desktop the networks frame itself, after its
@@ -547,6 +587,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
           [
             [t.status, statusSlot],
             [t.network, networkSlot],
+            [t.address, addressSlot],
             [t.hotspot, hotspotSlot],
           ],
           lang,
@@ -587,6 +628,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
       thead,
     );
     listAfter = thead;
+    joinedAfter = head;
     return page(head, list, forgetSlot);
   }
 
@@ -605,19 +647,22 @@ export const mount: PortalModule["mount"] = (root, context) => {
       h("h1", { class: "bc-mobile-title" }, "Wi-Fi"),
       statusSlot,
       networkSlot,
+      addressSlot,
     );
     count.className = "bc-mono";
     list = h("ul", { class: "bc-list" });
     listAfter = null;
+    const current = h(
+      "section",
+      { class: "bc-mobile-header", "aria-label": t.phoneCurrent },
+      statusBox,
+      figure,
+    );
+    joinedAfter = current;
     return h(
       "div",
       { style: "display: flex; flex-direction: column" },
-      h(
-        "section",
-        { class: "bc-mobile-header", "aria-label": t.phoneCurrent },
-        statusBox,
-        figure,
-      ),
+      current,
       h(
         "div",
         { class: "bc-list-head" },
@@ -839,6 +884,64 @@ export const mount: PortalModule["mount"] = (root, context) => {
     );
   }
 
+  /** The result card of the last join: what was joined and where the portal is now. */
+  function renderJoined() {
+    joinedSlot.replaceChildren();
+    if (!joined) {
+      joinedSlot.remove();
+      return;
+    }
+    if (joinedSlot.previousElementSibling !== joinedAfter)
+      joinedAfter?.after(joinedSlot);
+    // a phone list is full-bleed, so the card takes the list inset
+    joinedSlot.style.padding = phone ? "16px" : "";
+    joinedSlot.append(
+      h(
+        "section",
+        { class: "bc-card", role: "status", "aria-labelledby": "wifi-joined" },
+        h(
+          "div",
+          {
+            class: "bc-card__body",
+            style: "display: flex; flex-direction: column; gap: 12px",
+          },
+          h(
+            "div",
+            { style: "display: flex; align-items: center; gap: 8px" },
+            icon(ICON_CHECK, undefined, "bc-success"),
+            h(
+              "h2",
+              {
+                id: "wifi-joined",
+                class: "bc-option-title",
+                style: "flex: 1 1 auto; min-width: 0",
+              },
+              t.joined(joined.ssid),
+            ),
+          ),
+          kv(
+            [
+              [
+                t.portal,
+                h(
+                  "a",
+                  {
+                    class: "bc-link bc-mono",
+                    href: joined.portal,
+                    style: "overflow-wrap: anywhere",
+                  },
+                  joined.portal,
+                ),
+              ],
+            ],
+            lang,
+          ),
+          h("span", { class: "bc-small bc-muted" }, t.joinedHint(joined.ssid)),
+        ),
+      ),
+    );
+  }
+
   function update() {
     statusSlot.replaceChildren(stateBadge());
     statusSlot.style.alignSelf = phone ? "flex-start" : "";
@@ -846,6 +949,13 @@ export const mount: PortalModule["mount"] = (root, context) => {
       status?.station.state === "connected" ? status.station.ssid : undefined;
     networkSlot.replaceChildren(
       ssid ? mono(ssid, phone ? "bc-small" : "") : phone ? "" : "—",
+    );
+    const address =
+      status?.station.state === "connected"
+        ? status.station.address
+        : undefined;
+    addressSlot.replaceChildren(
+      address ? mono(address, phone ? "bc-small" : "") : phone ? "" : "—",
     );
     hotspotSlot.replaceChildren(hotspotValue());
     count.textContent = networks ? twoDigits(networks.length) : "";
@@ -855,6 +965,7 @@ export const mount: PortalModule["mount"] = (root, context) => {
     for (const figure of figures) figure.setAttribute("scan", String(scanning));
     renderList();
     renderForget();
+    renderJoined();
   }
 
   // ---- lifetime
