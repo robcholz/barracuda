@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from "react";
 import type { Copy } from "@/content/en";
-import { EDITOR, docs, install } from "@/lib/links";
+import { docs, editor, install } from "@/lib/links";
 import { Icon } from "./Icon";
 
 const COMMAND = "cargo board select && cargo run";
@@ -135,7 +135,7 @@ export function Tour({ copy }: { copy: Copy }) {
         {steps[step].open && (
           <a
             className="bc-button bc-button--outline bc-button--sm"
-            href={EDITOR}
+            href={editor(copy.lang)}
             style={{ marginTop: 16 }}
           >
             {steps[step].open}

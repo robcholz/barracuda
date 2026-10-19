@@ -24,13 +24,13 @@ import {
   type Child,
 } from "./dom";
 import { markdown } from "./markdown";
+import { t } from "../i18n";
 
 const MAX_ATTACHMENT_BYTES = 512 * 1024;
 
 /** Reads a picked file as an attachment: text as text, images as base64. */
 export async function readAttachment(file: File): Promise<Attachment | string> {
-  if (file.size > MAX_ATTACHMENT_BYTES)
-    return `${file.name} is larger than 512 KB`;
+  if (file.size > MAX_ATTACHMENT_BYTES) return t.tooLarge(file.name);
   if (file.type.startsWith("image/")) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     let binary = "";
@@ -61,20 +61,6 @@ export function toolArgs(call: ToolCall): string {
   );
   return first === undefined ? "" : String(first);
 }
-
-/** A tool's name in the words the card shows. */
-const TOOL_NAMES: Record<string, string> = {
-  list_files: "List files",
-  read_file: "Read",
-  write_file: "Write",
-  edit_file: "Edit",
-  delete_file: "Delete",
-  build: "Build",
-  look: "Look at the preview",
-  tap: "Tap the preview",
-  read_console: "Read the console",
-  restart: "Restart the app",
-};
 
 export class ChatColumn {
   readonly el: HTMLElement;
@@ -120,8 +106,8 @@ export class ChatColumn {
 
     this.textarea = h("textarea", {
       rows: 1,
-      placeholder: "Ask Barracuda",
-      "aria-label": "Message",
+      placeholder: t.askBarracuda,
+      "aria-label": t.message,
       onInput: () => {
         this.grow();
         this.renderActions();
@@ -146,7 +132,7 @@ export class ChatColumn {
     );
     this.el = h(
       "section",
-      { class: "le-chat", "aria-label": "Chat" },
+      { class: "le-chat", "aria-label": t.chat },
       this.log,
       h(
         "div",
@@ -194,9 +180,9 @@ export class ChatColumn {
           "div",
           { class: "bc-composer__bar" },
           icon("reply", "bc-muted"),
-          h("span", { class: "bc-muted" }, "Reply to Barracuda"),
+          h("span", { class: "bc-muted" }, t.replyToBarracuda),
           h("span", { class: "bc-composer__text" }, this.replyTo.text),
-          iconButton("x", "Cancel reply", () => {
+          iconButton("x", t.cancelReply, () => {
             this.replyTo = null;
             this.renderComposer();
           }),
@@ -225,7 +211,7 @@ export class ChatColumn {
               ),
               iconButton(
                 "x",
-                "Remove attachment",
+                t.removeAttachment,
                 () => {
                   this.attachments.splice(index, 1);
                   this.renderComposer();
@@ -261,11 +247,11 @@ export class ChatColumn {
         "label",
         {
           class: "bc-button bc-button--ghost bc-button--icon",
-          "aria-label": "Add attachment",
+          "aria-label": t.addAttachment,
         },
         input,
         icon("paperclip"),
-        tooltip("Add attachment"),
+        tooltip(t.addAttachment),
       ),
       running
         ? h(
@@ -273,23 +259,23 @@ export class ChatColumn {
             {
               class: "bc-button bc-button--icon",
               type: "button",
-              "aria-label": "Stop",
+              "aria-label": t.stop,
               onClick: () => this.app.agent?.stop(),
             },
             icon("circle-stop"),
-            tooltip("Stop"),
+            tooltip(t.stop),
           )
         : h(
             "button",
             {
               class: "bc-button bc-button--icon",
               type: "button",
-              "aria-label": "Send",
+              "aria-label": t.send,
               disabled: !this.textarea.value.trim() || !this.app.agent,
               onClick: () => this.send(),
             },
             icon("arrow-up"),
-            tooltip("Send"),
+            tooltip(t.send),
           ),
     );
   }
@@ -325,11 +311,7 @@ export class ChatColumn {
       "div",
       { class: "bc-empty" },
       h("span", { class: "bc-title" }, name),
-      h(
-        "span",
-        { class: "bc-small bc-muted" },
-        "Say what to change. Barracuda edits the code, builds it and checks it in the preview.",
-      ),
+      h("span", { class: "bc-small bc-muted" }, t.chatEmpty),
     );
   }
 
@@ -342,7 +324,11 @@ export class ChatColumn {
 
   private item(item: ChatItem): Child {
     if (item.kind === "note")
-      return h("div", { role: "separator", class: "bc-separator" }, item.text);
+      return h(
+        "div",
+        { role: "separator", class: "bc-separator" },
+        t.stored(item.text),
+      );
     if (item.kind === "user")
       return h(
         "div",
@@ -370,7 +356,7 @@ export class ChatColumn {
             ),
           ),
         h("p", { class: "bc-bubble" }, item.text),
-        h("span", { class: "bc-meta" }, "Sent"),
+        h("span", { class: "bc-meta" }, t.sent),
       );
     const reply = item.steps
       .map((step) => step.text)
@@ -391,16 +377,16 @@ export class ChatColumn {
       item.steps.map((step, index) => this.step(item.id, index, step)),
       item.status === "running" &&
         empty &&
-        h("span", { class: "bc-shimmer bc-small" }, "Thinking"),
+        h("span", { class: "bc-shimmer bc-small" }, t.thinking),
       item.status === "running" &&
         !empty &&
-        h("span", { class: "bc-shimmer bc-small" }, "Working"),
+        h("span", { class: "bc-shimmer bc-small" }, t.working),
       item.status === "stopped" &&
         h(
           "span",
           { class: "bc-status bc-muted" },
           icon("circle-stop"),
-          "Stopped",
+          t.stopped,
         ),
       item.status === "error" &&
         h(
@@ -413,9 +399,9 @@ export class ChatColumn {
           h(
             "span",
             { class: "bc-small le-grow" },
-            item.error ?? "The model service failed",
+            item.error ?? t.serviceFailed,
           ),
-          button("Settings", () => (location.hash = "#/settings"), {
+          button(t.settings, () => (location.hash = "#/settings"), {
             kind: "outline",
             sm: true,
           }),
@@ -428,7 +414,7 @@ export class ChatColumn {
           { class: "bc-meta", style: { gap: "4px" } },
           iconButton(
             this.copied === item.id ? "check" : "copy",
-            this.copied === item.id ? "Copied" : "Copy",
+            this.copied === item.id ? t.copied : t.copy,
             () => {
               void navigator.clipboard?.writeText(reply);
               this.copied = item.id;
@@ -441,7 +427,7 @@ export class ChatColumn {
               }, 1500);
             },
           ),
-          iconButton("reply", "Reply", () => {
+          iconButton("reply", t.reply, () => {
             this.replyTo = { id: item.id, text: reply.slice(0, 120) };
             this.renderComposer();
             this.textarea.focus();
@@ -464,13 +450,13 @@ export class ChatColumn {
             "aria-expanded": String(open),
             onClick: () => this.toggle(id),
           },
-          "Thought for ",
-          h(
-            "span",
-            { class: "bc-mono" },
-            String(Math.max(1, Math.round(step.thinking.ms / 1000))),
+          t.thoughtFor(
+            h(
+              "span",
+              { class: "bc-mono" },
+              String(Math.max(1, Math.round(step.thinking.ms / 1000))),
+            ),
           ),
-          " s",
           icon("chevron-right"),
         ),
         open && step.thinking.text
@@ -491,20 +477,20 @@ export class ChatColumn {
             "span",
             { class: "bc-status bc-muted" },
             icon("loader-circle", "bc-spinner"),
-            "Running",
+            t.running,
           )
         : call.status === "error"
           ? h(
               "span",
               { class: "bc-status bc-destructive" },
               icon("circle-x"),
-              "Failed",
+              t.failed,
             )
           : h(
               "span",
               { class: "bc-status bc-success" },
               icon("check"),
-              "Succeeded",
+              t.succeeded,
             );
     const rows: [string, string][] = Object.entries(call.input)
       .filter(([key]) => key !== "content")
@@ -513,7 +499,7 @@ export class ChatColumn {
         typeof value === "string" ? value : JSON.stringify(value),
       ]);
     if (typeof call.input.content === "string")
-      rows.push(["content", `${call.input.content.split("\n").length} lines`]);
+      rows.push(["content", t.lines(call.input.content.split("\n").length)]);
     if (call.output)
       rows.push([
         "result",
@@ -533,11 +519,7 @@ export class ChatColumn {
           onClick: () => this.toggle(call.id),
         },
         icon("wrench", "bc-muted"),
-        h(
-          "span",
-          { class: "bc-tool__name" },
-          TOOL_NAMES[call.name] ?? call.name,
-        ),
+        h("span", { class: "bc-tool__name" }, t.tools[call.name] ?? call.name),
         h("span", { class: "bc-tool__args" }, toolArgs(call)),
         state,
         icon("chevron-right", "bc-muted"),
@@ -561,25 +543,21 @@ export class ChatColumn {
     const count = changes.files.length;
     const label =
       changes.state === "applied"
-        ? h("span", { class: "bc-status bc-success" }, icon("check"), "Applied")
+        ? h("span", { class: "bc-status bc-success" }, icon("check"), t.applied)
         : changes.state === "discarded"
-          ? h("span", { class: "bc-status bc-muted" }, "Discarded")
-          : h("span", { class: "bc-status bc-muted" }, "Waiting for review");
+          ? h("span", { class: "bc-status bc-muted" }, t.discarded)
+          : h("span", { class: "bc-status bc-muted" }, t.waitingForReview);
     const project = this.app.project();
     const reviewing =
       changes.state === "review" && project?.proposal?.turn === turn;
     return h(
       "section",
-      { class: "bc-card", "aria-label": "Changes" },
+      { class: "bc-card", "aria-label": t.views.changes },
       h(
         "div",
         { class: "bc-card__head" },
         icon("git-compare", "bc-muted"),
-        h(
-          "h3",
-          { class: "bc-title le-grow" },
-          `${count} file${count === 1 ? "" : "s"} changed`,
-        ),
+        h("h3", { class: "bc-title le-grow" }, t.filesChanged(count)),
         label,
       ),
       changes.files.map((file) =>
@@ -605,13 +583,13 @@ export class ChatColumn {
         "div",
         { class: "bc-card__foot" },
         reviewing
-          ? button("Review changes", () => this.app.show("changes"), {
+          ? button(t.reviewChanges, () => this.app.show("changes"), {
               kind: "outline",
               sm: true,
             })
           : changes.state === "applied" &&
               button(
-                "Open code",
+                t.openCode,
                 () => this.app.openFile(changes.files[0]?.name ?? "app.tsx"),
                 { kind: "outline", sm: true },
               ),

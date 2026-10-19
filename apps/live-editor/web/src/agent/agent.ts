@@ -26,6 +26,7 @@ import { anthropic } from "./anthropic";
 import { openai } from "./openai";
 import { SYSTEM } from "./prompt";
 import type { Service } from "./service";
+import { t } from "../i18n";
 import {
   TOOLS,
   checkInput,
@@ -53,15 +54,13 @@ type Transcripts = Record<string, Transcript>;
 export function serviceFor(app: App): Service | string {
   const s = app.settings;
   if (s.provider === "anthropic") {
-    if (!s.anthropicKey.trim())
-      return "Add your Anthropic API key in Settings to start.";
+    if (!s.anthropicKey.trim()) return t.needsAnthropicKey;
     return anthropic(
       s.anthropicKey.trim(),
       s.anthropicModel.trim() || "claude-opus-5-5",
     );
   }
-  if (!s.openaiBaseUrl.trim() || !s.openaiModel.trim())
-    return "Add the model service's base URL and model in Settings to start.";
+  if (!s.openaiBaseUrl.trim() || !s.openaiModel.trim()) return t.needsOpenai;
   return openai(
     s.openaiBaseUrl.trim(),
     s.openaiKey.trim(),
@@ -292,15 +291,14 @@ class Controller implements Agent {
         if (result.stop === "refused") {
           ended = {
             status: "error",
-            error: `The model declined this request${result.detail ? `: ${result.detail}` : "."}`,
+            error: t.declined(result.detail),
           };
           break;
         }
         if (result.stop === "truncated") {
           ended = {
             status: "error",
-            error:
-              "The response was cut off at its length limit. Ask for a smaller step.",
+            error: t.truncated,
           };
           break;
         }

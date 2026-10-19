@@ -34,6 +34,7 @@ import {
 import type { BuildReply, Problem } from "../workers/build";
 import type { RunReply } from "../workers/run";
 import { BLANK, examples } from "./templates";
+import { setLang, t, type Lang } from "../i18n";
 import { Builder, Runner } from "./workers";
 
 export type Provider = "anthropic" | "openai";
@@ -267,6 +268,11 @@ export class App extends EventTarget {
     this.emit();
   }
 
+  setLang(choice: Lang) {
+    setLang(choice);
+    this.emit();
+  }
+
   setSidebar(choice: "open" | "closed") {
     this.sidebar = choice;
     keep("le-sidebar", choice);
@@ -394,7 +400,7 @@ export class App extends EventTarget {
   /** Adds a file, or answers why it cannot be added. */
   addFile(name: string): string | null {
     const project = this.project();
-    if (!project) return "no app is open";
+    if (!project) return t.noAppOpen;
     const problem = fileNameProblem(name, project.files);
     if (problem) return problem;
     this.update(withFiles(project, { ...project.files, [name]: "" }));
@@ -404,7 +410,7 @@ export class App extends EventTarget {
 
   renameFile(from: string, to: string): string | null {
     const project = this.project();
-    if (!project) return "no app is open";
+    if (!project) return t.noAppOpen;
     if (from === to) return null;
     const problem = fileNameProblem(to, project.files);
     if (problem) return problem;
@@ -460,7 +466,7 @@ export class App extends EventTarget {
     this.update(restore(project, n));
     this.notify({
       tone: "success",
-      title: `Restored v${n} · ${version?.title ?? ""}`,
+      title: t.restored(n, t.stored(version?.title ?? "")),
     });
     this.scheduleBuild(0);
   }
@@ -483,7 +489,7 @@ export class App extends EventTarget {
     this.update(next);
     this.version = "after";
     this.views = this.views.filter((v) => v !== "changes");
-    this.notify({ tone: "success", title: "Changes applied" });
+    this.notify({ tone: "success", title: t.changesApplied });
     this.scheduleBuild(0);
   }
 
@@ -636,7 +642,7 @@ export class App extends EventTarget {
     if (!project) return;
     this.update({ ...project, storage: { kv: {}, files: {} } });
     this.restartApp();
-    this.notify({ tone: "success", title: "Storage reset" });
+    this.notify({ tone: "success", title: t.storageReset });
   }
 
   tap(x: number, y: number) {
@@ -716,7 +722,7 @@ export class App extends EventTarget {
 /** Why `name` cannot be a new file next to `files`, or `null`. */
 export function fileNameProblem(name: string, files: Files): string | null {
   if (!/^[A-Za-z0-9_.-]{1,64}$/.test(name) || name === "." || name === "..")
-    return "Use 1–64 letters, digits, dots, dashes or underscores";
-  if (name in files) return `${name} is already a file`;
+    return t.badFileName;
+  if (name in files) return t.alreadyFile(name);
   return null;
 }

@@ -3,15 +3,19 @@
 import type { App, Provider, Settings as SettingsData } from "../app/app";
 import { manifestOf } from "../state/project";
 import { button, fill, h, tooltip } from "./dom";
-import { phoneBack, themeToggle, topbar, type Page } from "./shell";
+import { lang, t } from "../i18n";
+import {
+  languageMenu,
+  phoneBack,
+  themeToggle,
+  topbar,
+  type Menus,
+  type Page,
+} from "./shell";
 
-const PROVIDERS: { id: Provider; title: string; hint: string }[] = [
-  { id: "anthropic", title: "Anthropic", hint: "Your Anthropic API key" },
-  {
-    id: "openai",
-    title: "OpenAI compatible",
-    hint: "Any service with the same API",
-  },
+const providers = (): { id: Provider; title: string; hint: string }[] => [
+  { id: "anthropic", title: "Anthropic", hint: t.anthropicHint },
+  { id: "openai", title: t.openaiTitle, hint: t.openaiHint },
 ];
 
 interface Draft extends SettingsData {
@@ -25,7 +29,7 @@ export class SettingsPage implements Page {
   private readonly bar = h("div", { style: { display: "contents" } });
   private readonly form = h("form", {
     class: "bc-form",
-    "aria-label": "Settings",
+    "aria-label": t.settings,
   });
   private draft: Draft;
   private saved: Draft;
@@ -34,7 +38,10 @@ export class SettingsPage implements Page {
     {};
   private barKey = "";
 
-  constructor(private readonly app: App) {
+  constructor(
+    private readonly app: App,
+    private readonly menus: Menus,
+  ) {
     this.saved = this.load();
     this.draft = { ...this.saved };
     this.form.addEventListener("submit", (event) => event.preventDefault());
@@ -54,12 +61,8 @@ export class SettingsPage implements Page {
             h(
               "div",
               { class: "bc-header__text" },
-              h("h1", { class: "bc-page-title" }, "Settings"),
-              h(
-                "p",
-                { class: "bc-lead" },
-                "The model Barracuda writes apps with, how its changes reach your code, and the open app's manifest.",
-              ),
+              h("h1", { class: "bc-page-title" }, t.settings),
+              h("p", { class: "bc-lead" }, t.settingsLead),
             ),
           ),
           this.form,
@@ -99,16 +102,14 @@ export class SettingsPage implements Page {
         const url = new URL(d.openaiBaseUrl);
         if (!/^https?:$/.test(url.protocol)) throw new Error();
       } catch {
-        errors.url =
-          "Enter the service's base URL, like https://api.example.com/v1";
+        errors.url = t.urlError;
       }
     }
     const project = this.app.project();
     if (project) {
-      if (!d.name.trim() || [...d.name].length > 64)
-        errors.name = "Use 1–64 characters";
+      if (!d.name.trim() || [...d.name].length > 64) errors.name = t.chars(64);
       if (!d.version.trim() || [...d.version].length > 32)
-        errors.version = "Use 1–32 characters";
+        errors.version = t.chars(32);
     }
     this.errors = errors;
     return Object.keys(errors).length === 0;
@@ -134,7 +135,7 @@ export class SettingsPage implements Page {
     }
     this.saved = { ...this.draft };
     this.renderForm();
-    this.app.notify({ tone: "success", title: "Settings saved" });
+    this.app.notify({ tone: "success", title: t.settingsSaved });
   }
 
   private field(
@@ -208,7 +209,7 @@ export class SettingsPage implements Page {
     fill(
       this.footer,
       button(
-        "Discard edits",
+        t.discardEdits,
         () => {
           this.draft = { ...this.saved };
           this.errors = {};
@@ -216,7 +217,7 @@ export class SettingsPage implements Page {
         },
         { kind: "outline", disabled: clean },
       ),
-      button("Save settings", () => void this.save(), { disabled: clean }),
+      button(t.saveSettings, () => void this.save(), { disabled: clean }),
     );
   }
 
@@ -245,16 +246,16 @@ export class SettingsPage implements Page {
     fill(
       this.form,
       row(
-        "Model service",
-        "Where the editor's agent runs",
+        t.modelService,
+        t.modelServiceText,
         h(
           "div",
           {
             class: "le-cards",
             role: "radiogroup",
-            "aria-label": "Model service",
+            "aria-label": t.modelService,
           },
-          PROVIDERS.map((provider) =>
+          providers().map((provider) =>
             h(
               "label",
               { class: "bc-radio-card" },
@@ -276,7 +277,7 @@ export class SettingsPage implements Page {
         openai &&
           this.field(
             "le-url",
-            "API Base URL",
+            t.baseUrl,
             this.input(
               "le-url",
               d.openaiBaseUrl,
@@ -292,7 +293,7 @@ export class SettingsPage implements Page {
           ),
         this.field(
           "le-key",
-          "API Key",
+          t.apiKey,
           h(
             "div",
             { class: "le-inline" },
@@ -304,11 +305,11 @@ export class SettingsPage implements Page {
                 class: "bc-input bc-input--mono",
                 type: this.showKey ? "text" : "password",
                 autocomplete: "new-password",
-                placeholder: "Paste your key",
+                placeholder: t.pasteKey,
               },
             ),
             button(
-              this.showKey ? "Hide" : "Show",
+              this.showKey ? t.hide : t.show,
               () => {
                 this.showKey = !this.showKey;
                 this.renderForm();
@@ -320,17 +321,17 @@ export class SettingsPage implements Page {
           h(
             "span",
             { class: "bc-term", tabindex: "0" },
-            "Kept in this browser",
+            t.keptHere,
             h(
               "span",
               { class: "bc-tooltip bc-tooltip--start", role: "tooltip" },
-              "Sent only to the model service",
+              t.sentOnlyTo,
             ),
           ),
         ),
         this.field(
           "le-model",
-          "Model",
+          t.model,
           this.input(
             "le-model",
             model,
@@ -338,36 +339,28 @@ export class SettingsPage implements Page {
               this.set(openai ? "openaiModel" : "anthropicModel", value),
             {
               class: "bc-input bc-input--mono",
-              placeholder: openai ? "Model ID" : "claude-opus-5-5",
+              placeholder: openai ? t.modelId : "claude-opus-5-5",
             },
           ),
         ),
       ),
       row(
-        "Changes",
-        "How Barracuda's edits reach your code",
-        this.switchRow(
-          "le-review",
-          "Review before applying",
-          "Proposed changes wait in Changes until you apply them",
-          d.review,
-          () => this.set("review", !d.review, true),
+        t.changes,
+        t.changesText,
+        this.switchRow("le-review", t.review, t.reviewText, d.review, () =>
+          this.set("review", !d.review, true),
         ),
-        this.switchRow(
-          "le-tap",
-          "Let Barracuda tap the preview",
-          "It checks its own changes on the preview device",
-          d.tap,
-          () => this.set("tap", !d.tap, true),
+        this.switchRow("le-tap", t.tap, t.tapText, d.tap, () =>
+          this.set("tap", !d.tap, true),
         ),
       ),
       project &&
         row(
           project.name,
-          "The open app's manifest",
+          t.manifest,
           this.field(
             "le-name",
-            "App name",
+            t.appName,
             this.input("le-name", d.name, (value) => this.set("name", value), {
               "aria-invalid": String(!!this.errors.name),
             }),
@@ -378,7 +371,7 @@ export class SettingsPage implements Page {
             { class: "le-pair" },
             this.field(
               "le-id",
-              "App ID",
+              t.appId,
               h("input", {
                 id: "le-id",
                 class: "bc-input bc-input--mono",
@@ -389,17 +382,17 @@ export class SettingsPage implements Page {
               h(
                 "span",
                 { class: "bc-term", tabindex: "0" },
-                "Fixed",
+                t.fixed,
                 h(
                   "span",
                   { class: "bc-tooltip bc-tooltip--start", role: "tooltip" },
-                  "Devices know the app by its ID",
+                  t.fixedText,
                 ),
               ),
             ),
             this.field(
               "le-version",
-              "Version",
+              t.version,
               this.input(
                 "le-version",
                 d.version,
@@ -416,7 +409,7 @@ export class SettingsPage implements Page {
             h(
               "div",
               { class: "bc-field" },
-              h("span", { class: "bc-label", id: "le-shape" }, "Display shape"),
+              h("span", { class: "bc-label", id: "le-shape" }, t.shape),
               h(
                 "div",
                 {
@@ -432,7 +425,7 @@ export class SettingsPage implements Page {
                     "aria-pressed": String(d.shape === "round"),
                     onClick: () => this.set("shape", "round", true),
                   },
-                  "Round",
+                  t.round,
                 ),
                 h(
                   "button",
@@ -441,15 +434,13 @@ export class SettingsPage implements Page {
                     "aria-pressed": String(d.shape === "rect"),
                     onClick: () => this.set("shape", "rect", true),
                   },
-                  "Rectangle",
+                  t.rectangle,
                 ),
               ),
               h(
                 "span",
                 { class: "bc-hint" },
-                d.shape === "round"
-                  ? "Keeps to the inscribed circle, so it fits every display"
-                  : "Uses the corners, so it needs a rectangular display",
+                d.shape === "round" ? t.roundText : t.rectText,
               ),
             ),
         ),
@@ -460,7 +451,7 @@ export class SettingsPage implements Page {
 
   update() {
     const app = this.app;
-    const key = JSON.stringify([app.theme, app.sidebar]);
+    const key = JSON.stringify([lang, app.theme, app.sidebar, this.menus.open]);
     if (key === this.barKey) return;
     this.barKey = key;
     fill(
@@ -468,10 +459,11 @@ export class SettingsPage implements Page {
       topbar(
         app,
         this,
-        phoneBack("Apps", "#/new"),
+        phoneBack(t.apps, "#/new"),
         h("span", { class: "bc-topbar__divider le-desk" }),
-        h("span", { class: "bc-crumb--current le-desk" }, "Settings"),
+        h("span", { class: "bc-crumb--current le-desk" }, t.settings),
         h("span", { class: "le-grow" }),
+        languageMenu(app, this.menus),
         themeToggle(app),
       ),
     );

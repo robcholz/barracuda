@@ -12,17 +12,8 @@ export interface Template {
   files: Files;
 }
 
-/** The examples New app offers, in the order it lists them, with what each shows. */
-export const EXAMPLES = [
-  { id: "counter", title: "Counter", text: "Buttons, a list, saved state" },
-  { id: "air", title: "Air quality", text: "Readings from a sensor" },
-  {
-    id: "lamp",
-    title: "Light strip",
-    text: "A color picker for a light strip",
-  },
-  { id: "camera", title: "Camera", text: "Take and show a picture" },
-] as const;
+/** The examples New app offers, in the order it lists them; `t.examples` says what each shows. */
+export const EXAMPLES = ["counter", "air", "lamp", "camera"] as const;
 
 const POCKET = (title: string) =>
   `${JSON.stringify(

@@ -8,6 +8,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Attachment } from "../state/project";
 import type { Service, StepEvents, StepResult } from "./service";
 import type { ToolSpec } from "./tools";
+import { t } from "../i18n";
 
 /** Models whose refusals the API can retry on another model (`fallbacks: "default"`). */
 const FALLBACK_MODELS = new Set([
@@ -187,19 +188,19 @@ export function anthropic(apiKey: string, model: string): Service {
 
     describe(error) {
       if (error instanceof Anthropic.AuthenticationError)
-        return "Anthropic did not accept the API key. Check it in Settings.";
+        return t.anthropic.auth;
       if (error instanceof Anthropic.PermissionDeniedError)
-        return "This API key may not use the model. Check the model in Settings.";
+        return t.anthropic.permission;
       if (error instanceof Anthropic.NotFoundError)
-        return `Anthropic does not know the model ${model}. Check it in Settings.`;
+        return t.anthropic.notFound(model);
       if (error instanceof Anthropic.RateLimitError)
-        return "Anthropic is rate limiting this key. Wait a moment and send again.";
+        return t.anthropic.rateLimit;
       if (error instanceof Anthropic.BadRequestError)
-        return `Anthropic refused the request: ${error.message}`;
+        return t.anthropic.badRequest(error.message);
       if (error instanceof Anthropic.APIConnectionError)
-        return "Could not reach Anthropic. Check the connection.";
+        return t.anthropic.connection;
       if (error instanceof Anthropic.APIError)
-        return `Anthropic failed (${error.status}): ${error.message}`;
+        return t.anthropic.failed(error.status, error.message);
       return error instanceof Error ? error.message : String(error);
     },
   };

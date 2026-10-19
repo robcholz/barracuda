@@ -5,6 +5,7 @@
 
 import { activeChat } from "../state/project";
 import type { App, ThemeChoice } from "../app/app";
+import { lang, STRINGS, t, type Lang } from "../i18n";
 import { MARK, SITE } from "./icons";
 import {
   append,
@@ -17,6 +18,11 @@ import {
   tooltip,
   type Children,
 } from "./dom";
+
+/** The website, in the language in use. */
+export function siteLink(): string {
+  return lang === "zh" ? `${SITE}zh/` : SITE;
+}
 
 /** The open menu: which one, and on which side of its trigger it opens. */
 export class Menus {
@@ -53,6 +59,11 @@ export interface Page {
   destroy?(): void;
   /** Whether the views crowd the window, so the sidebar folds to its rail. */
   crowded?(): boolean;
+  /**
+   * The page renders all its words in `update`, so a new language keeps it rather than mounting
+   * it again: what it holds, such as an open portal window, survives.
+   */
+  readonly relabels?: boolean;
 }
 
 export function resolvedTheme(choice: ThemeChoice): "light" | "dark" {
@@ -69,7 +80,7 @@ export function collapsed(app: App, page: Page | null): boolean {
 /** The trigger that folds and opens the sidebar. */
 export function sidebarTrigger(app: App, page: Page | null) {
   const folded = collapsed(app, page);
-  const label = folded ? "Expand sidebar" : "Collapse sidebar";
+  const label = folded ? t.expandSidebar : t.collapseSidebar;
   return h(
     "button",
     {
@@ -104,10 +115,61 @@ export function themeToggle(app: App) {
     );
   return h(
     "div",
-    { class: "bc-segmented", role: "group", "aria-label": "Theme" },
-    choice("light", "sun", "Light"),
-    choice("dark", "moon", "Dark"),
-    choice("system", "monitor", "System"),
+    { class: "bc-segmented", role: "group", "aria-label": t.theme },
+    choice("light", "sun", t.light),
+    choice("dark", "moon", t.dark),
+    choice("system", "monitor", t.system),
+  );
+}
+
+/** The language menu: each language by its own name, the one in use checked. */
+export function languageMenu(app: App, menus: Menus) {
+  const open = menus.open === "lang";
+  return h(
+    "span",
+    { class: "bc-menu-anchor" },
+    h(
+      "button",
+      {
+        class: "bc-button bc-button--ghost bc-button--sm",
+        type: "button",
+        "aria-label": `${t.language}: ${t.name}`,
+        "aria-haspopup": "menu",
+        "aria-expanded": String(open),
+        onClick: (event: Event) => menus.toggle("lang", event, 160),
+      },
+      icon("languages"),
+      h("span", { class: "le-wide" }, t.name),
+      icon("chevron-down"),
+    ),
+    open &&
+      h(
+        "div",
+        {
+          class: "bc-menu le-menu",
+          role: "menu",
+          "aria-label": t.language,
+          style: { ...menus.side(), minWidth: "160px" },
+        },
+        (["zh", "en"] as Lang[]).map((id) =>
+          h(
+            "button",
+            {
+              class: "bc-menu-item",
+              type: "button",
+              role: "menuitemradio",
+              "aria-checked": String(id === lang),
+              lang: STRINGS[id].tag,
+              onClick: () => {
+                menus.close();
+                app.setLang(id);
+              },
+            },
+            h("span", { class: "le-grow" }, STRINGS[id].name),
+            id === lang && icon("check"),
+          ),
+        ),
+      ),
   );
 }
 
@@ -185,8 +247,8 @@ function sidebar(app: App, folded: boolean) {
       "a",
       {
         class: "bc-brand",
-        href: SITE,
-        "aria-label": "Barracuda website",
+        href: siteLink(),
+        "aria-label": t.website,
       },
       svg(MARK),
       h(
@@ -199,13 +261,13 @@ function sidebar(app: App, folded: boolean) {
     h(
       "div",
       { class: "le-group" },
-      navItem("#/new", "plus", "New app", route.page === "new"),
+      navItem("#/new", "plus", t.newApp, route.page === "new"),
     ),
     apps.length > 0 &&
       h(
         "div",
         { class: "le-group" },
-        h("span", { class: "bc-nav-label" }, "Apps"),
+        h("span", { class: "bc-nav-label" }, t.apps),
         apps.map((item) =>
           navItem(
             `#/app/${item.id}`,
@@ -220,7 +282,7 @@ function sidebar(app: App, folded: boolean) {
       h(
         "div",
         { class: "le-group le-chats" },
-        h("span", { class: "bc-nav-label" }, `Chats · ${project.name}`),
+        h("span", { class: "bc-nav-label" }, t.chatsOf(project.name)),
         chats.map((chat) =>
           h(
             "a",
@@ -233,7 +295,7 @@ function sidebar(app: App, folded: boolean) {
                 app.pickChat(chat.id);
               },
             },
-            h("span", { class: "bc-nav-text" }, chat.title),
+            h("span", { class: "bc-nav-text" }, t.stored(chat.title)),
           ),
         ),
         // A chat that has not started yet is the new chat; there is no second empty one.
@@ -249,7 +311,7 @@ function sidebar(app: App, folded: boolean) {
               },
             },
             icon("plus"),
-            h("span", { class: "bc-nav-text" }, "New chat"),
+            h("span", { class: "bc-nav-text" }, t.newChat),
           ),
       ),
     h(
@@ -260,7 +322,7 @@ function sidebar(app: App, folded: boolean) {
         navItem(
           `#/app/${project.id}/install`,
           "cpu",
-          "Device",
+          t.device,
           route.page === "install",
           h(
             "span",
@@ -268,7 +330,7 @@ function sidebar(app: App, folded: boolean) {
             shortAddress(app.settings.portal),
           ),
         ),
-      navItem("#/settings", "settings", "Settings", route.page === "settings"),
+      navItem("#/settings", "settings", t.settings, route.page === "settings"),
     ),
   );
 }
@@ -301,7 +363,7 @@ function toaster(app: App) {
         {
           class: "bc-toast__close",
           type: "button",
-          "aria-label": "Close",
+          "aria-label": t.close,
           onClick: () => app.dismissToast(),
         },
         icon("x"),
@@ -315,6 +377,7 @@ export class Shell {
   readonly menus: Menus;
   private page: Page | null = null;
   private pageKey = "";
+  private pageLang = lang;
   private readonly frame = h("div", { class: "bc bc-app le-app" });
   private readonly side = h("div", { style: { display: "contents" } });
   private readonly main = h("div", { class: "bc-main le-main" });
@@ -357,10 +420,15 @@ export class Shell {
   private draw() {
     const app = this.app;
     const key = `${app.route.page}:${app.openId() ?? ""}`;
-    if (key !== this.pageKey) {
+    // A new language mounts the page again, in its words, unless it relabels itself.
+    if (
+      key !== this.pageKey ||
+      (lang !== this.pageLang && !this.page?.relabels)
+    ) {
       this.page?.destroy?.();
       this.menus.open = null;
       this.pageKey = key;
+      this.pageLang = lang;
       this.page = this.pages(this);
       fill(this.main, this.page.el);
     }
@@ -372,6 +440,7 @@ export class Shell {
     // The sidebar changes rarely; console lines and frames must not rebuild it under the pointer.
     const project = app.project();
     const sideKey = JSON.stringify([
+      lang,
       folded,
       app.route,
       app.apps().map((item) => [item.id, item.name]),
