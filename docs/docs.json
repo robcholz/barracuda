@@ -533,6 +533,26 @@
             "label": "Get started",
             "href": "/get-started/quickstart"
           }
+        },
+        "footer": {
+          "socials": {
+            "github": "https://github.com/robcholz/barracuda"
+          },
+          "links": [
+            {
+              "header": "Barracuda",
+              "items": [
+                {
+                  "label": "Quickstart",
+                  "href": "/get-started/quickstart"
+                },
+                {
+                  "label": "Changelog",
+                  "href": "https://github.com/robcholz/barracuda/releases"
+                }
+              ]
+            }
+          ]
         }
       },
       {
@@ -1019,31 +1039,27 @@
             "label": "开始使用",
             "href": "/zh/get-started/quickstart"
           }
+        },
+        "footer": {
+          "socials": {
+            "github": "https://github.com/robcholz/barracuda"
+          },
+          "links": [
+            {
+              "header": "Barracuda",
+              "items": [
+                {
+                  "label": "快速开始",
+                  "href": "/zh/get-started/quickstart"
+                },
+                {
+                  "label": "更新日志",
+                  "href": "https://github.com/robcholz/barracuda/releases"
+                }
+              ]
+            }
+          ]
         }
-      }
-    ]
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/robcholz/barracuda"
-    },
-    "links": [
-      {
-        "header": "Barracuda",
-        "items": [
-          {
-            "label": "GitHub",
-            "href": "https://github.com/robcholz/barracuda"
-          },
-          {
-            "label": "Changelog",
-            "href": "https://github.com/robcholz/barracuda/releases"
-          },
-          {
-            "label": "Quickstart",
-            "href": "/get-started/quickstart"
-          }
-        ]
       }
     ]
   },

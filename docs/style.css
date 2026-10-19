@@ -653,8 +653,16 @@ html.dark .code-block [data-component-part="code-block-root"],
 #pagination a:hover {
   border-color: var(--bc-border-active);
 }
+#pagination {
+  margin-bottom: 64px;
+}
 #footer {
   border-color: var(--bc-border);
+}
+/* The footer on the content column's gutters, with room at the bottom for
+   the floating Ask AI button. */
+#footer > div {
+  padding: 48px 24px 72px !important;
 }
 
 /* Banner: lime with ink text, as in the design. Sequoia forces the banner's
@@ -753,9 +761,10 @@ html.dark .code-block [data-component-part="code-block-root"],
 
 /* Content column as on bun.com: 32px from the sidebar and 46rem of text,
    instead of a 40.5rem column centered in the space between the sidebar
-   and the table of contents. */
+   and the table of contents. The footer sits on the same column. */
 @media (min-width: 1024px) {
-  #content-area {
+  #content-area,
+  #footer > div {
     --content-width: 46rem;
     max-width: min(calc(var(--content-width) + 3rem), calc(100% - 64px)) !important;
     margin-left: 32px !important;
