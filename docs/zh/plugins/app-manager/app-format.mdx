@@ -4,24 +4,23 @@ sidebarTitle: "应用格式"
 description: "打包一个应用：容器位置、清单、Lua 程序和视图。"
 ---
 
-本文描述应用容器的格式，版本 1。`app-manager` 插件会从它的每个位置加载符合此格式的任何容器，所以由镜像构建、门户或 Agent 写入的容器本质上是同一种东西；容器所在的位置决定了它属于哪种应用（参见[设备 UI](/zh/architecture/device-ui)）。`crates/appkit/resources/app-manifest.json` 是下文清单规则的机器可读版本。应用可以使用什么，以及设备如何判断应用是否适用，属于应用 API 的范畴，见[应用 API](/zh/plugins/app-manager/app-api)。
+本文描述应用容器的格式，版本 1。`app-manager` 插件会从它的每个位置加载符合此格式的任何容器，所以由镜像构建、门户的文件管理器或 Agent 写入的容器本质上是同一种东西；容器所在的位置决定了它属于哪种应用（参见[设备 UI](/zh/architecture/device-ui)）。`crates/appkit/resources/app-manifest.json` 是下文清单规则的机器可读版本。应用可以使用什么，以及设备如何判断应用是否适用，属于应用 API 的范畴，见[应用 API](/zh/plugins/app-manager/app-api)。
 
 ## 位置
 
 | 位置    | 目录                     | 写入者                            | 存放 |
 | ----------- | ----------------------------- | ------------------------------------- | ----- |
 | `builtin`   | 附带该应用的插件的 `/resources/app/` | 镜像构建（只读） | 系统应用 |
-| `installed` | `/media/apps/<id>/`           | 安装时由 `app-manager` 插件写入（私有） | 可安装应用 |
-| `workspace` | `/workspace/media/apps/<id>/` 或 `<id>.bapp` | 门户、Agent、其他插件（共享 Workspace） | 提供安装的应用 |
+| `workspace` | `/workspace/media/apps/<id>.bapp/` | 门户的文件管理器、Agent、其他插件（共享 Workspace） | 可安装应用 |
 
-内置应用插件把自己的文件系统交给 `app-manager` 插件，后者自己的作用域存放另外两个位置；它对 Workspace 只读。内置应用和已安装应用可以启动；Workspace 中的容器只是一份待安装的提供。安装时，会把清单及其列出的文件复制到 `/media/apps/<id>/`，替换已安装的其他版本。系统应用的 ID 归它所有：其他位置的容器都不能使用这个 ID，`app.list` 会把使用它的容器报告为无效。
+内置应用插件把自己的文件系统交给 `app-manager` 插件，后者自己的作用域包含 Workspace。两个位置的应用都可以启动：把容器放进 `/workspace/media/apps` 就是安装，覆盖其中的文件就是更新，删除它就是卸载。系统应用的 ID 归它所有：Workspace 中的容器都不能使用这个 ID，`app.list` 会把使用它的容器报告为无效。
 
 ## 容器
 
-容器是一个以应用 ID 命名的目录，里面并列存放清单及清单列出的文件：
+容器是一个目录，里面并列存放清单及清单列出的文件。可安装应用的目录以它的 ID 加上 `.bapp` 命名：
 
 ```text
-<id>/
+<id>.bapp/
   app.json          the manifest
   main.lua          the entry program (or the file `entry` names)
   view.bvir         optional view program        ┐
@@ -29,35 +28,7 @@ description: "打包一个应用：容器位置、清单、Lua 程序和视图�
   font-1.bin …      its baked font atlases       ┘
 ```
 
-其他文件会被忽略。名称以 `.` 开头的目录会被跳过。
-
-## 包
-
-在 Workspace 中，应用也可以以单个文件 `/workspace/media/apps/<id>.bapp` 的形式提供，其中包含同样的文件，并且可以签名。同一个 ID 既以目录又以包的形式提供，视为无效。`resources/pack-app.ts` 用来生成包：
-
-```sh
-bun resources/pack-app.ts --new-key key.jwk                 # once, and keep it
-bun resources/pack-app.ts <bundle> <id>.bapp --key key.jwk  # sign a built container
-bun resources/pack-app.ts <bundle> <id>.bapp                # or leave it unsigned
-```
-
-所有数字都是小端序：
-
-| 偏移 | 大小 | 内容 |
-| --- | --- | --- |
-| 0 | 4 | `BAPP` |
-| 4 | 1 | 格式版本，1 |
-| 5 | 1 | 文件数量，1 到 64 |
-| 6 | 1 | 标志：bit 0 表示后面跟有签名块 |
-| 7 | 1 | 0 |
-| 8 | 4 | 内容长度：本文件头、目录和文件 |
-| 12 | 每个文件 40 | 目录：文件名（用 NUL 填充到 32 字节），然后是它的偏移和长度（各 4 字节） |
-| … | | 各个文件，位于各自目录项所指的位置 |
-| 内容长度 | 133 | 签名时：`BSIG`、SEC1 非压缩格式的 P-256 公钥（65 字节），以及对内容做 SHA-256 后的 ECDSA 签名，格式为 `r ‖ s`（64 字节） |
-
-列出应用时只读取文件头和目录。请求安装时，设备会对内容计算 SHA-256 并验证签名：签名验证失败的包视为无效；安装界面会用签名者公钥 SHA-256 的前几个字节标识签名包的签名者，或者注明未签名。安装的内容和用户看到的完全一致：摘要被固定，此后发生变化的提供会返回 `Changed`。目录形式的提供也以同样方式固定，依据是其文件的 SHA-256。
-
-从签名包安装的应用会在容器旁保存签名者的公钥，此后只接受由该公钥签名的包：其他公钥签名的包、未签名的包或目录形式的提供都不会作为更新，并会说明原因。以未签名形式安装的应用接受任何更新。
+其他文件会被忽略。在 `/workspace/media/apps` 中，名称以 `.` 开头的条目和普通文件会被跳过，所以可以先把应用写进 `.<id>.bapp/`，所有文件就位后再改名为 `<id>.bapp/`；没有 `.bapp` 后缀的目录会被 `app.list` 报告为无效。
 
 ## 清单
 
@@ -83,7 +54,7 @@ bun resources/pack-app.ts <bundle> <id>.bapp                # or leave it unsign
 | 字段          | 必填 | 规则                                                        |
 | -------------- | -------- | ----------------------------------------------------------- |
 | `format`       | 是      | `1`                                                         |
-| `id`           | 是      | 1–32 个 `a-z`、`0-9`、`-` 字符；必须与目录名相同      |
+| `id`           | 是      | 1–32 个 `a-z`、`0-9`、`-` 字符；即目录名中 `.bapp` 之前的部分 |
 | `name`         | 是      | 显示名称，1–64 个字符                               |
 | `version`      | 是      | 作者自定的版本字符串，1–32 个字符                |
 | `icon`         | 否       | 系统图标的名称，例如 `lamp`，显示在启动器上；没有图标时显示名称的第一个字符 |
@@ -102,9 +73,9 @@ bun resources/pack-app.ts <bundle> <id>.bapp                # or leave it unsign
 
 清单中列出的每个文件都必须是容器中的普通文件名：由 1–64 个 `A-Z`、`a-z`、`0-9`、`_`、`.`、`-` 字符组成，不能是 `.` 或 `..`，并且必须存在。未知字段会被拒绝，这样拼写错误会被报告出来，而不是被悄悄忽略。清单最大 4 KiB，入口程序最大 64 KiB，视图文件合计最大 512 KiB。
 
-每个 Lua 包在 `requires`、`uses` 和 `permissions` 中只能出现一次：稳定的 Lua 包放在前两者中，其余的放在第三项中；每个应用都有的环境 Lua 包则不需要列出。开发板专用的 Lua 包如果没有配合 `boards`，就视为无效。一个 Lua 包是稳定的、环境的还是开发板专用的，取决于它在读取清单的设备上的声明（`LuaPackage::interface`），所以该设备上没有的 Lua 包，会由安装应用的设备来检查。
+每个 Lua 包在 `requires`、`uses` 和 `permissions` 中只能出现一次：稳定的 Lua 包放在前两者中，其余的放在第三项中；每个应用都有的环境 Lua 包则不需要列出。开发板专用的 Lua 包如果没有配合 `boards`，就视为无效。一个 Lua 包是稳定的、环境的还是开发板专用的，取决于它在读取清单的设备上的声明（`LuaPackage::interface`），所以该设备上没有的 Lua 包，只会让应用在该设备上不兼容。
 
-可安装应用的运行可以 `require` 环境 Lua 包和清单中列出的 Lua 包；未列出的 Lua 包不可用，`require` 会失败。在用户安装应用之前，安装界面会用每个 Lua 包所属插件声明的措辞列出应用请求的内容，或者说明本设备为什么无法运行它（[应用 API](/zh/plugins/app-manager/app-api)）。系统应用可以 `require` 任何已注册的 Lua 包，所以它的清单不需要列出任何 Lua 包。内置应用自己的 Lua 包（例如 `settings`）仅供内置应用使用：请求这类 Lua 包的可安装应用无效。
+可安装应用的运行可以 `require` 环境 Lua 包和清单中列出的 Lua 包；未列出的 Lua 包不可用，`require` 会失败。应用信息界面会用每个 Lua 包所属插件声明的措辞列出应用请求的内容；本设备无法运行的应用在启动器中变暗显示，它的信息界面会说明原因（[应用 API](/zh/plugins/app-manager/app-api)）。系统应用可以 `require` 任何已注册的 Lua 包，所以它的清单不需要列出任何 Lua 包。内置应用自己的 Lua 包（例如 `settings`）仅供内置应用使用：请求这类 Lua 包的可安装应用无效。
 
 违反任何规则的容器都不能启动。`app.list` 会把它列在 `invalid` 下，并给出位置、目录名和问题，例如 `app.json: JSON schema validation failed at $.view.program: Pattern`。
 
@@ -169,15 +140,15 @@ end
 
 `view.program`、`view.styles`、`view.fonts` 和 `view.size` 都是构建产物：MicroTS 编译器把 `app.tsx` 及其 `app.d.ts` 契约转换为 View IR，`ui-link` 把它链接为 BVIR，字体烘焙器生成字体图集。源清单中的 `view` 只包含 `shape`。无法运行这套工具链的 Agent 可以编写无头应用，或者把现有构建的视图文件复制到自己的入口程序旁边。
 
-## 示例：Agent 可以提供的无头应用
+## 示例：Agent 可以安装的无头应用
 
-`/workspace/media/apps/hello/app.json`：
+`/workspace/media/apps/hello.bapp/app.json`：
 
 ```json
 { "format": 1, "id": "hello", "name": "Hello", "version": "1" }
 ```
 
-`/workspace/media/apps/hello/main.lua`：
+`/workspace/media/apps/hello.bapp/main.lua`：
 
 ```lua
 local app = require("app")
@@ -186,4 +157,4 @@ assert(app.kv.set("runs", runs))
 print("hello from " .. app.id .. ", run " .. runs)
 ```
 
-用 `app.install` 和 `{"id":"hello"}` 提供它：设备会显示安装界面；用户安装后，用 `app.open` 和 `{"id":"hello"}` 打开它；之后 `app.status` 会显示 `last_exit.output` 为 `["hello from hello, run 1"]`。`crates/appkit/tests/fixtures/` 中存放着已构建好的带视图示例应用，每个都可以直接复制到 `/workspace/media/apps/<id>/`：`air`（空气质量应用，不需要 Lua 包）、`lamp`（灯带应用，依赖 `light`）、`camera`（摄像头应用，依赖 `camera`）和 `counter`（计数器，不需要 Lua 包）。
+两个文件都就位后，应用就已安装：用 `app.open` 和 `{"id":"hello"}` 打开它，之后 `app.status` 会显示 `last_exit.output` 为 `["hello from hello, run 1"]`。`crates/appkit/tests/fixtures/` 中存放着已构建好的带视图示例应用，每个都是一个 `<id>.bapp/` 目录，可以直接复制到 `/workspace/media/apps/`：`air`（空气质量应用，不需要 Lua 包）、`lamp`（灯带应用，依赖 `light`）、`camera`（摄像头应用，依赖 `camera`）和 `counter`（计数器，不需要 Lua 包）。

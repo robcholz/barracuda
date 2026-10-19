@@ -1,5 +1,5 @@
 //! Runs apps on a real VM through their lifecycle, the way the system UI
-//! drives it: install, open, tap, cover, go home, resume, terminate,
+//! drives it: list, open, tap, cover, go home, resume, terminate,
 //! uninstall.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic, missing_docs)]
@@ -26,7 +26,7 @@ macro_rules! counter_file {
     ($name:literal) => {
         (
             $name,
-            include_bytes!(concat!("fixtures/counter/", $name)).as_slice(),
+            include_bytes!(concat!("fixtures/counter.bapp/", $name)).as_slice(),
         )
     };
 }
@@ -127,11 +127,16 @@ async fn view_app(fs: &ScopedVfs, id: &str, program: &str) {
         .iter()
         .filter(|(name, _)| name.ends_with(".bin") || *name == "view.bvir")
     {
-        put(fs, &format!("/workspace/media/apps/{id}/{name}"), bytes).await;
+        put(
+            fs,
+            &format!("/workspace/media/apps/{id}.bapp/{name}"),
+            bytes,
+        )
+        .await;
     }
     put(
         fs,
-        &format!("/workspace/media/apps/{id}/app.json"),
+        &format!("/workspace/media/apps/{id}.bapp/app.json"),
         format!(
             r#"{{"format":1,"id":"{id}","name":"{id}","version":"1","entry":"app.lua",
                 "view":{{"program":"view.bvir","styles":"styles.bin","fonts":["font-1.bin"]}}}}"#
@@ -141,7 +146,7 @@ async fn view_app(fs: &ScopedVfs, id: &str, program: &str) {
     .await;
     put(
         fs,
-        &format!("/workspace/media/apps/{id}/app.lua"),
+        &format!("/workspace/media/apps/{id}.bapp/app.lua"),
         program.as_bytes(),
     )
     .await;
@@ -156,7 +161,12 @@ async fn filesystem() -> (ScopedVfs, ScopedVfs) {
     let fs = vfs.scoped("/app").unwrap();
     let builtin = vfs.scoped("/builtin").unwrap();
     for (name, bytes) in COUNTER {
-        put(&fs, &format!("/workspace/media/apps/counter/{name}"), bytes).await;
+        put(
+            &fs,
+            &format!("/workspace/media/apps/counter.bapp/{name}"),
+            bytes,
+        )
+        .await;
     }
     // A builtin app may require every package.
     put(
@@ -170,23 +180,28 @@ async fn filesystem() -> (ScopedVfs, ScopedVfs) {
     for (id, permissions) in [("nosy", "[]"), ("trusted", r#"["secret"]"#)] {
         put(
             &fs,
-            &format!("/workspace/media/apps/{id}/app.json"),
+            &format!("/workspace/media/apps/{id}.bapp/app.json"),
             format!(
                 r#"{{"format":1,"id":"{id}","name":"{id}","version":"1","permissions":{permissions}}}"#
             )
             .as_bytes(),
         )
         .await;
-        put(&fs, &format!("/workspace/media/apps/{id}/main.lua"), PROBE).await;
+        put(
+            &fs,
+            &format!("/workspace/media/apps/{id}.bapp/main.lua"),
+            PROBE,
+        )
+        .await;
     }
     // A builtin app's package is only for builtin apps.
     put(
         &fs,
-        "/workspace/media/apps/greedy/app.json",
+        "/workspace/media/apps/greedy.bapp/app.json",
         br#"{"format":1,"id":"greedy","name":"Greedy","version":"1","permissions":["probe"]}"#,
     )
     .await;
-    put(&fs, "/workspace/media/apps/greedy/main.lua", PROBE).await;
+    put(&fs, "/workspace/media/apps/greedy.bapp/main.lua", PROBE).await;
     // Fails while it is on the display.
     view_app(
         &fs,
@@ -199,25 +214,25 @@ async fn filesystem() -> (ScopedVfs, ScopedVfs) {
     .await;
     put(
         &fs,
-        "/media/apps/broken/app.json",
+        "/workspace/media/apps/broken.bapp/app.json",
         br#"{"format":1,"id":"broken","name":"Broken","version":"1"}"#,
     )
     .await;
     put(
         &fs,
-        "/media/apps/broken/main.lua",
+        "/workspace/media/apps/broken.bapp/main.lua",
         b"print('starting')\nlocal app = require('app')\nerror('boom: ' .. app.id .. ' ' .. tostring(app.view()))",
     )
     .await;
     put(
         &fs,
-        "/workspace/media/apps/notes/app.json",
+        "/workspace/media/apps/notes.bapp/app.json",
         br#"{"format":1,"id":"notes","name":"Notes","version":"2"}"#,
     )
     .await;
     put(
         &fs,
-        "/workspace/media/apps/notes/main.lua",
+        "/workspace/media/apps/notes.bapp/main.lua",
         NOTES.as_bytes(),
     )
     .await;
@@ -265,17 +280,22 @@ async fn filesystem() -> (ScopedVfs, ScopedVfs) {
         .await;
     }
 
-    // Workspace containers never take a system app's ID, and one at the
-    // installed version offers nothing new.
-    for id in ["broken", "system"] {
-        put(
-            &fs,
-            &format!("/workspace/media/apps/{id}/app.json"),
-            format!(r#"{{"format":1,"id":"{id}","name":"Impostor","version":"1"}}"#).as_bytes(),
-        )
-        .await;
-        put(&fs, &format!("/workspace/media/apps/{id}/main.lua"), b"").await;
-    }
+    // An installable app never takes a system app's ID.
+    put(
+        &fs,
+        "/workspace/media/apps/system.bapp/app.json",
+        br#"{"format":1,"id":"system","name":"Impostor","version":"1"}"#,
+    )
+    .await;
+    put(&fs, "/workspace/media/apps/system.bapp/main.lua", b"").await;
+    // An app's directory ends in `.bapp`; one being written starts with `.`.
+    put(
+        &fs,
+        "/workspace/media/apps/plain/app.json",
+        br#"{"format":1,"id":"plain","name":"x","version":"1"}"#,
+    )
+    .await;
+    put(&fs, "/workspace/media/apps/.partial.bapp/app.json", b"{").await;
 
     for (dir, manifest) in [
         (
@@ -302,12 +322,17 @@ async fn filesystem() -> (ScopedVfs, ScopedVfs) {
     ] {
         put(
             &fs,
-            &format!("/workspace/media/apps/{dir}/app.json"),
+            &format!("/workspace/media/apps/{dir}.bapp/app.json"),
             manifest.as_bytes(),
         )
         .await;
         if dir != "nomain" {
-            put(&fs, &format!("/workspace/media/apps/{dir}/main.lua"), b"").await;
+            put(
+                &fs,
+                &format!("/workspace/media/apps/{dir}.bapp/main.lua"),
+                b"",
+            )
+            .await;
         }
     }
     (fs, builtin)
@@ -359,7 +384,7 @@ fn first_text(manager: &AppManager) -> Option<String> {
     texts(manager).into_iter().next()
 }
 
-const OFFERED: [&str; 10] = [
+const INSTALLED: [&str; 10] = [
     "agent-counter",
     "busy",
     "counter",
@@ -380,7 +405,7 @@ async fn scenario(spawner: Spawner) {
     vm.start(spawner).unwrap();
     let (filesystem, builtin) = filesystem().await;
     let (manager, _registration) = AppManager::register(
-        filesystem,
+        filesystem.clone(),
         vm,
         Some(Rc::clone(&ui)),
         Device {
@@ -410,45 +435,37 @@ async fn scenario(spawner: Spawner) {
     assert_eq!(manager.opening("sound"), None);
     spawner.spawn(supervise(manager.clone()).unwrap());
 
-    // The container list: launchable apps, Workspace offers, and broken
+    // The container list: system and installable apps, and broken
     // containers with their reasons.
     let list = manager.list().await;
     let apps: Vec<_> = list
         .apps
         .iter()
-        .map(|app| (app.id.as_str(), app.location, app.kind, app.has_view))
+        .map(|app| (app.id.as_str(), app.location, app.kind))
         .collect();
-    assert_eq!(
-        apps,
-        [
-            (
-                "broken",
-                AppLocation::Installed,
-                AppKind::Installable,
-                false
-            ),
-            ("system", AppLocation::Builtin, AppKind::System, false),
-        ]
-    );
-    let offered: Vec<_> = list.installable.iter().map(|app| app.id.as_str()).collect();
-    let mut expected = OFFERED.to_vec();
-    expected.push("trusted");
-    expected.sort_unstable();
-    assert_eq!(offered, expected);
+    let mut expected: Vec<_> = INSTALLED
+        .iter()
+        .chain(&["broken", "trusted"])
+        .map(|id| (*id, AppLocation::Workspace, AppKind::Installable))
+        .chain([("system", AppLocation::Builtin, AppKind::System)])
+        .collect();
+    expected.sort_unstable_by_key(|(id, ..)| *id);
+    assert_eq!(apps, expected);
     let invalid: Vec<_> = list
         .invalid
         .iter()
         .map(|app| (app.dir.as_str(), app.problem.as_str()))
         .collect();
-    assert_eq!(invalid.len(), 7, "{invalid:#?}");
+    assert_eq!(invalid.len(), 8, "{invalid:#?}");
     for ((dir, problem), (expected_dir, expected)) in invalid.iter().zip([
-        ("Draft", "not an app ID"),
-        ("escape", "$.view.program"),
-        ("future", "$.format"),
-        ("greedy", "only for builtin apps"),
-        ("nomain", "main.lua is missing"),
-        ("stray", "does not match the container's name"),
-        ("system", "belongs to a system app"),
+        ("Draft.bapp", "not an app ID"),
+        ("escape.bapp", "$.view.program"),
+        ("future.bapp", "$.format"),
+        ("greedy.bapp", "only for builtin apps"),
+        ("nomain.bapp", "main.lua is missing"),
+        ("stray.bapp", "does not match the container's name"),
+        ("system.bapp", "belongs to a system app"),
+        ("plain", "named after its ID, as plain.bapp"),
     ]) {
         assert_eq!(*dir, expected_dir);
         assert!(problem.contains(expected), "{dir}: {problem}");
@@ -456,47 +473,14 @@ async fn scenario(spawner: Spawner) {
     for (id, error) in [
         ("missing", AppError::NotFound),
         ("../counter", AppError::NotFound),
-        ("counter", AppError::NotInstalled),
+        ("plain", AppError::NotFound),
+        ("escape", AppError::InvalidBundle),
+        ("greedy", AppError::InvalidBundle),
     ] {
         assert_eq!(manager.open(id).await.err(), Some(error), "{id}");
     }
-    for (id, error) in [
-        ("escape", AppError::InvalidBundle),
-        ("stray", AppError::InvalidBundle),
-        ("greedy", AppError::InvalidBundle),
-        ("system", AppError::SystemApp),
-        ("missing", AppError::NotFound),
-    ] {
-        assert_eq!(manager.install(id).await.err(), Some(error), "{id}");
-    }
     assert_eq!(manager.uninstall("system").await, Err(AppError::SystemApp));
-
-    // An install request waits for the person's answer in the system UI.
-    assert_eq!(
-        manager.request_install("system").await.err(),
-        Some(AppError::SystemApp)
-    );
-    assert_eq!(
-        manager
-            .request_install("trusted")
-            .await
-            .unwrap()
-            .permissions,
-        ["secret"]
-    );
-    assert_eq!(manager.install_request().unwrap().id, "trusted");
-    manager.decline_install("trusted");
-    assert_eq!(manager.install_request(), None);
-    manager.request_install("trusted").await.unwrap();
-    for id in OFFERED.iter().chain(&["trusted"]) {
-        let installed = manager.install(id).await.unwrap();
-        assert_eq!(
-            (installed.location, installed.kind),
-            (AppLocation::Installed, AppKind::Installable)
-        );
-    }
-    assert_eq!(manager.install_request(), None);
-    assert!(manager.list().await.installable.is_empty());
+    assert_eq!(manager.uninstall("missing").await, Err(AppError::NotFound));
 
     // Packages: a system app requires any, an installable app only those it
     // asked for.
@@ -755,8 +739,7 @@ async fn scenario(spawner: Spawner) {
         ]
     );
 
-    // Uninstalling ends the app and deletes its container and data; the
-    // Workspace offer remains.
+    // Uninstalling ends the app and deletes its directory and data.
     manager.uninstall("counter").await.unwrap();
     assert_eq!(state_of(&manager, "counter"), Some(AppState::Terminating));
     until("the uninstalled counter's exit", || {
@@ -765,9 +748,23 @@ async fn scenario(spawner: Spawner) {
     .await;
     assert_eq!(
         manager.open("counter").await.err(),
-        Some(AppError::NotInstalled)
+        Some(AppError::NotFound)
     );
-    manager.install("counter").await.unwrap();
+    assert!(
+        !filesystem
+            .exists("/workspace/media/apps/counter.bapp")
+            .await
+            .unwrap()
+    );
+    // Putting its directory back installs it again.
+    for (name, bytes) in COUNTER {
+        put(
+            &filesystem,
+            &format!("/workspace/media/apps/counter.bapp/{name}"),
+            bytes,
+        )
+        .await;
+    }
     // A run cancelled after its grace period may still hold its VM slot.
     for _ in 0..100 {
         match manager.open("counter").await {

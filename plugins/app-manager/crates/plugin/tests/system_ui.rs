@@ -45,7 +45,7 @@ macro_rules! counter_file {
     ($name:literal) => {
         (
             $name,
-            include_bytes!(concat!("../../appkit/tests/fixtures/counter/", $name)).as_slice(),
+            include_bytes!(concat!("../../appkit/tests/fixtures/counter.bapp/", $name)).as_slice(),
         )
     };
 }
@@ -88,30 +88,35 @@ async fn app_filesystem() -> (ScopedVfs, ScopedVfs) {
     )
     .await;
     put(&builtin, "/resources/app/main.lua", b"").await;
-    // An offered app, one that asks for capabilities, and one this device
-    // lacks a capability for.
+    // An app, one that asks for capabilities, and one this device lacks a
+    // capability for.
     for (name, bytes) in COUNTER {
-        put(&fs, &format!("/workspace/media/apps/counter/{name}"), bytes).await;
+        put(
+            &fs,
+            &format!("/workspace/media/apps/counter.bapp/{name}"),
+            bytes,
+        )
+        .await;
     }
     put(
         &fs,
-        "/workspace/media/apps/lamp/app.json",
+        "/workspace/media/apps/lamp.bapp/app.json",
         br#"{"format":1,"id":"lamp","name":"Lamp","version":"1","requires":["light"],"uses":["http"]}"#,
     )
     .await;
-    put(&fs, "/workspace/media/apps/lamp/main.lua", b"").await;
+    put(&fs, "/workspace/media/apps/lamp.bapp/main.lua", b"").await;
     put(
         &fs,
-        "/workspace/media/apps/photo/app.json",
+        "/workspace/media/apps/photo.bapp/app.json",
         br#"{"format":1,"id":"photo","name":"Photo","version":"1","requires":["camera"]}"#,
     )
     .await;
-    put(&fs, "/workspace/media/apps/photo/main.lua", b"").await;
-    // More offers than one launcher page holds.
+    put(&fs, "/workspace/media/apps/photo.bapp/main.lua", b"").await;
+    // More apps than one launcher page holds.
     for id in ["x1", "x2", "x3"] {
         put(
             &fs,
-            &format!("/workspace/media/apps/{id}/app.json"),
+            &format!("/workspace/media/apps/{id}.bapp/app.json"),
             format!(
                 r#"{{"format":1,"id":"{id}","name":"{}","version":"1"}}"#,
                 id.to_uppercase()
@@ -119,25 +124,35 @@ async fn app_filesystem() -> (ScopedVfs, ScopedVfs) {
             .as_bytes(),
         )
         .await;
-        put(&fs, &format!("/workspace/media/apps/{id}/main.lua"), b"").await;
+        put(
+            &fs,
+            &format!("/workspace/media/apps/{id}.bapp/main.lua"),
+            b"",
+        )
+        .await;
     }
-    // An installed app that fails once it is on the display.
+    // An app that fails once it is on the display.
     for (name, bytes) in COUNTER
         .iter()
         .filter(|(name, _)| name.ends_with(".bin") || *name == "view.bvir")
     {
-        put(&fs, &format!("/media/apps/crash/{name}"), bytes).await;
+        put(
+            &fs,
+            &format!("/workspace/media/apps/crash.bapp/{name}"),
+            bytes,
+        )
+        .await;
     }
     put(
         &fs,
-        "/media/apps/crash/app.json",
+        "/workspace/media/apps/crash.bapp/app.json",
         br#"{"format":1,"id":"crash","name":"Crash","version":"1",
             "view":{"program":"view.bvir","styles":"styles.bin","fonts":["font-1.bin"]}}"#,
     )
     .await;
     put(
         &fs,
-        "/media/apps/crash/main.lua",
+        "/workspace/media/apps/crash.bapp/main.lua",
         b"local app = require('app') for event in app.events() do \
           if event == 'app:active' then error('crashed') end end",
     )
@@ -387,28 +402,39 @@ async fn scenario(spawner: Spawner) {
     let home = texts(&system);
     assert!(home.contains("10:42") && home.contains("待命"), "{home}");
 
-    // Left to the launcher: the system app and the offered apps.
+    // Left to the launcher: the system app, then the installable apps, and
+    // last the one this device cannot run.
     system.gesture(swipe(Direction::Left, None)).await;
     assert_eq!(system.screen(), Some(Screen::Apps));
     let launcher = texts(&system);
-    for name in ["Crash", "System", "计数器", "Lamp", "Photo"] {
+    for name in ["Crash", "System", "计数器", "Lamp", "X3"] {
         assert!(launcher.contains(name), "{launcher}");
     }
     // The round display's page holds 2-3-2 tiles; the eighth app is on the
     // next page, an upward swipe away.
-    assert!(!launcher.contains("X3"), "{launcher}");
+    assert!(!launcher.contains("Photo"), "{launcher}");
     system.gesture(swipe(Direction::Up, None)).await;
     let second = texts(&system);
     assert!(
-        second.contains("X3") && !second.contains("Photo"),
+        second.contains("Photo") && !second.contains("X3"),
         "{second}"
     );
-    let (_, x3) = icon(&system, "X3");
-    assert_eq!(x3, 7);
+    let (_, photo) = icon(&system, "Photo");
+    assert_eq!(photo, 7);
+    // An app that cannot run here says why instead of opening.
+    system.call(press("openApp", Some(photo))).await;
+    assert_eq!(system.screen(), Some(Screen::Info));
+    let info = texts(&system);
+    assert!(
+        info.contains("无法在此设备运行：此设备没有 camera") && info.contains("卸载"),
+        "{info}"
+    );
+    system.gesture(swipe(Direction::Right, None)).await;
+    assert_eq!(system.screen(), Some(Screen::Apps));
     system.gesture(swipe(Direction::Up, None)).await;
-    assert!(texts(&system).contains("X3"), "the last page stays");
+    assert!(texts(&system).contains("Photo"), "the last page stays");
     system.gesture(swipe(Direction::Down, None)).await;
-    assert!(texts(&system).contains("Photo"));
+    assert!(texts(&system).contains("X3"));
 
     // A long press opens a system app's menu; its info offers no
     // uninstall.
@@ -428,47 +454,25 @@ async fn scenario(spawner: Spawner) {
     system.gesture(swipe(Direction::Right, None)).await;
     assert_eq!(system.screen(), Some(Screen::Apps));
 
-    // Tapping an offered app asks to install it, with its permissions.
-    let (_, lamp) = icon(&system, "Lamp");
-    system.call(press("openApp", Some(lamp))).await;
-    assert_eq!(system.screen(), Some(Screen::Install));
-    let install = texts(&system);
+    // An installable app's info lists what it asks for.
+    let (at, _) = icon(&system, "Lamp");
+    system
+        .gesture(Gesture::LongPress { x: at.0, y: at.1 })
+        .await;
+    system.call(press("info", None)).await;
+    assert_eq!(system.screen(), Some(Screen::Info));
+    let info = texts(&system);
     assert!(
-        install.contains("安装“Lamp”？")
-            && install.contains("控制灯光")
-            && install.contains("使用 http（可选）"),
-        "{install}"
+        info.contains("版本 1 · 已安装")
+            && info.contains("控制灯光")
+            && info.contains("使用 http（可选）")
+            && info.contains("卸载"),
+        "{info}"
     );
-    system.call(press("cancel", None)).await;
+    system.gesture(swipe(Direction::Right, None)).await;
     assert_eq!(system.screen(), Some(Screen::Apps));
 
-    // An app this device cannot run says why and cannot be installed.
-    let (_, photo) = icon(&system, "Photo");
-    system.call(press("openApp", Some(photo))).await;
-    assert_eq!(system.screen(), Some(Screen::Install));
-    let install = texts(&system);
-    assert!(
-        install.contains("无法安装“Photo”") && install.contains("此设备没有 camera"),
-        "{install}"
-    );
-    system.call(press("confirm", None)).await;
-    assert_eq!(system.screen(), Some(Screen::Install));
-    system.call(press("cancel", None)).await;
-    assert_eq!(system.screen(), Some(Screen::Apps));
-    assert!(
-        apps.list()
-            .await
-            .installable
-            .iter()
-            .any(|app| app.id == "photo")
-    );
-
-    // Installing the counter, then opening it: the app's view shows.
-    let (_, counter) = icon(&system, "计数器");
-    system.call(press("openApp", Some(counter))).await;
-    assert!(texts(&system).contains("不需要额外权限"));
-    system.call(press("confirm", None)).await;
-    assert_eq!(system.screen(), Some(Screen::Apps));
+    // Tapping the counter opens it: the app's view shows.
     let (_, counter) = icon(&system, "计数器");
     system.call(press("openApp", Some(counter))).await;
     assert_eq!(system.screen(), None);
@@ -606,12 +610,7 @@ async fn scenario(spawner: Spawner) {
     system.gesture(swipe(Direction::Up, None)).await;
     assert_eq!(system.screen(), Some(Screen::Home));
 
-    // Install requests and apps opened by Workflows move the screens too.
-    apps.request_install("lamp").await.unwrap();
-    system.reconcile().await;
-    assert_eq!(system.screen(), Some(Screen::Install));
-    system.call(press("cancel", None)).await;
-    assert_eq!(apps.install_request(), None);
+    // Apps opened by Workflows move the screens too.
     apps.open("counter").await.unwrap();
     system.reconcile().await;
     assert_eq!(system.screen(), None);
@@ -633,13 +632,8 @@ async fn scenario(spawner: Spawner) {
         state_of(&apps, "counter").is_none()
     })
     .await;
-    assert!(
-        apps.list()
-            .await
-            .installable
-            .iter()
-            .any(|app| app.id == "counter")
-    );
+    assert!(!apps.list().await.apps.iter().any(|app| app.id == "counter"));
+    assert!(!system.launcher().contains(&"计数器"));
 }
 
 #[embassy_executor::task]

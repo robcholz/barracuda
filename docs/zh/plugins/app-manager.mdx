@@ -17,14 +17,14 @@ tag: "NEW"
 - 所需能力：来自 `vm` 的 `Vm` 和 `LuaPackageRegistry`，
   来自 `workflow` 的 `WorkflowActionRegistry`，来自 `time` 的 `UtcClock`，
   来自 `power` 的 `Power`，来自 `sound` 的 `Volume`
-- Workflow：Action `app.list`、`app.open`、`app.install`、`app.home`、
+- Workflow：Action `app.list`、`app.open`、`app.home`、
   `app.interactive`、`app.terminate`、`app.status`、`app.tap`、`app.notify`、
   `app.confirm` 和 `app.agent`，参见 [Action](/zh/plugins/app-manager/action)；Event 无
 - Agent 工具：无
 - Lua 包：`app`（环境）和 `notify`（稳定，版本 2），以及每个内置应用的 Lua 包
 - Web：无
 - 任务：一个任务，监管最多 `MAX_APP_RUNS`（3）个应用运行，响应内置应用的 Lua 包调用；有显示屏时，还负责绘制视图、读取触摸并运行系统 UI
-- 存储：已安装应用位于私有的 `/media/apps` 下，提供的应用位于共享的 `/workspace/media/apps` 下（只读）；每个应用的键值存储和文件位于私有的 `/media/data/<id>/` 下；系统视图位于
+- 存储：可安装应用是共享的 `/workspace/media/apps` 下的 `<id>.bapp` 目录；每个应用的键值存储和文件位于私有的 `/media/data/<id>/` 下；系统视图位于
   `/resources/view`；偏好设置位于 `/data/preferences.json`
 
 ## 结构
@@ -33,7 +33,7 @@ tag: "NEW"
 
 | Crate | 负责 | 了解 |
 | --- | --- | --- |
-| `crates/appkit` | 应用：容器、安装、生命周期、`app` Lua 包、存储、内置应用及其 Lua 包、`app.*` 应用 Action | 对显示屏一无所知：没有 UI 时，它运行无头应用，并对带视图的应用返回 `NoDisplay` |
+| `crates/appkit` | 应用：容器、生命周期、`app` Lua 包、存储、内置应用及其 Lua 包、`app.*` 应用 Action | 对显示屏一无所知：没有 UI 时，它运行无头应用，并对带视图的应用返回 `NoDisplay` |
 | `crates/uikit` | 视图：BVIR 运行时、图层、显示与触摸循环、手势、系统字体和图标 | 对应用一无所知 |
 | `crates/plugin` | 入口：连接两者，以及系统 UI | 两者都了解 |
 
@@ -46,10 +46,8 @@ tag: "NEW"
 
 容器所在的位置决定了它的 `AppKind`，定义见[设备 UI](/zh/architecture/device-ui)：
 
-- **系统应用**是其他插件提供的内置应用，各自位于自己文件系统的 `/resources/app`；插件通过 `AppManager::add_builtin` 把自己加入，见下文。它们的运行可以 `require` 每个已注册的 Lua 包，`uninstall` 会拒绝它们，任何已安装应用都不能占用它们的 ID。
-- **可安装应用**安装在私有的 `/media/apps` 下。它们的运行通过 `Vm::run_scoped` 获得 `LuaPackageScope::Only`，只包含环境 Lua 包和清单中列出的 Lua 包。
-- **提供的应用**是位于共享的 `/workspace/media/apps` 下的容器，由门户、Agent 或其他插件写入。它们不能启动；`open` 会返回 `NotInstalled`。`AppManager::install` 把一个提供的应用（目录或 `.bapp` 包）复制到 `/media/apps`，替换已安装的其他版本；它只接受待处理请求所固定的内容（否则返回 `Changed`），而对于从签名包安装的应用，只接受同一签名者的包。`AppManager::install_offer` 按安装时的样子描述一个提供的应用，包括它的 `digest`、`signer`，以及在无法安装时的原因。格式见[应用格式](/zh/plugins/app-manager/app-format)，
-  `AppManager::uninstall` 删除已安装的应用及其数据。只有系统 UI 会在询问用户之后调用它们；`AppManager::request_install`（即 `app.install` Action）请求系统 UI 显示一个提供的应用，而 `AppManager::install_request` 和 `AppManager::decline_install` 是该请求在系统 UI 一侧的接口。
+- **系统应用**是其他插件提供的内置应用，各自位于自己文件系统的 `/resources/app`；插件通过 `AppManager::add_builtin` 把自己加入，见下文。它们的运行可以 `require` 每个已注册的 Lua 包，`uninstall` 会拒绝它们，任何可安装应用都不能占用它们的 ID。
+- **可安装应用**是共享的 `/workspace/media/apps` 下的 `<id>.bapp` 目录，由门户的文件管理器、Agent 或其他插件写入。目录放在那里就算已安装，并且直接在原地运行；不复制、不确认、不签名。名称以 `.` 开头的目录会被跳过，所以正在写入的应用在改名之前不会出现。它们的运行通过 `Vm::run_scoped` 获得 `LuaPackageScope::Only`，只包含环境 Lua 包和清单中列出的 Lua 包。格式见[应用格式](/zh/plugins/app-manager/app-format)；`AppManager::uninstall` 只由系统 UI 调用，删除应用的目录及其数据。
 
 每个应用的数据按 ID 存放在私有的 `/media/data/<id>/` 下，所以更新后依然保留。
 
@@ -62,15 +60,14 @@ tag: "NEW"
 
 ## 应用 API
 
-[应用 API](/zh/plugins/app-manager/app-api) 是可安装应用与设备之间的契约。本插件把用来检查应用的 `Device` 交给 `AppManager::register`：开发板的稳定名称、来自 UI 工具包的显示屏尺寸和形状（`DisplayFeatures::ROUND` 标记圆形屏幕），以及它是否读取触摸。每次列出应用时都会从 `LuaPackageRegistry::packages` 读取各 Lua 包的接口类型，所以在本插件之后注册的 Lua 包插件也会被计入，并填写每个可安装应用的 `incompatible`；`request_install`、
-`install` 和 `open` 会以 `Incompatible` 拒绝带有该字段的应用。
-`AppManager::purpose` 是安装界面上某个 Lua 包的那一行说明，由该 Lua 包所属插件在 `LuaPackage::interface` 中声明；本插件不指名任何其他插件的 Lua 包，而是从注册表中了解所有 Lua 包。
+[应用 API](/zh/plugins/app-manager/app-api) 是可安装应用与设备之间的契约。本插件把用来检查应用的 `Device` 交给 `AppManager::register`：开发板的稳定名称、来自 UI 工具包的显示屏尺寸和形状（`DisplayFeatures::ROUND` 标记圆形屏幕），以及它是否读取触摸。每次列出应用时都会从 `LuaPackageRegistry::packages` 读取各 Lua 包的接口类型，所以在本插件之后注册的 Lua 包插件也会被计入，并填写每个可安装应用的 `incompatible`；`open` 会以 `Incompatible` 拒绝带有该字段的应用。
+`AppManager::purpose` 是应用信息界面上某个 Lua 包的那一行说明，由该 Lua 包所属插件在 `LuaPackage::interface` 中声明；本插件不指名任何其他插件的 Lua 包，而是从注册表中了解所有 Lua 包。
 
 `notify` Lua 包属于本插件：`AppManager::add_package` 用内置应用 Lua 包所用的同一座桥注册它，它的后端把通知发到 `Notifications`。
 
 ## 生命周期
 
-系统 UI 负责手势并调用 `AppManager`；本插件负责状态、预算，以及告诉程序什么。程序只做响应。`AppManager::changed` 在每次状态转换、退出、安装和安装请求之后唤醒系统 UI，所以由 Workflow 打开或关闭的应用也会让界面随之变化。
+系统 UI 负责手势并调用 `AppManager`；本插件负责状态、预算，以及告诉程序什么。程序只做响应。`AppManager::changed` 在每次状态转换、退出和卸载之后唤醒系统 UI，所以由 Workflow 打开或关闭的应用也会让界面随之变化。
 
 ```text
                open                     home / open another app
@@ -173,22 +170,21 @@ UI 工具包运行编译后的 MicroTS 视图。视图由 BVIR 程序（`view.bv
 
 ## 系统 UI
 
-系统 UI 在系统层上打开一个视图。当有应用在前台且没有系统界面覆盖它时，该视图隐藏，显示应用的视图。每个系统界面都会覆盖前台应用并停止它的输入（`AppManager::set_interactive(false)`），直到界面关闭。它是设备上唯一替用户安装、卸载和切换应用的部分。
+系统 UI 在系统层上打开一个视图。当有应用在前台且没有系统界面覆盖它时，该视图隐藏，显示应用的视图。每个系统界面都会覆盖前台应用并停止它的输入（`AppManager::set_interactive(false)`），直到界面关闭。它是设备上唯一替用户卸载和切换应用的部分。
 
 ### 界面和手势
 
 | 界面          | 显示内容                                                      | 进入方式                                    |
 | ------------- | ------------------------------------------------------------- | ------------------------------------------- |
 | 主屏幕        | 时钟和状态图标、处于当前状态的 Agent，以及一张卡片：离线提示，否则为待回答的问题，否则为刚完成的事项 | 启动时、没有应用在前台时，以及在启动器中向右滑动 |
-| 应用          | 蜂巢式启动器：先是内置应用，然后是已安装应用，然后是工作区中提供安装的应用（变暗显示）；正在运行的应用带一个圆点。每页容纳显示屏放得下的行数（360 px 圆形屏幕上为 2-3-2）；更多页面向上滑动即可到达，每页对应一个圆点 | 在主屏幕上向左滑动，或在应用首页内向右滑动 |
+| 应用          | 蜂巢式启动器：先是内置应用，然后是可安装应用，最后是本设备无法运行的应用（变暗显示）；正在运行的应用带一个圆点。每次打开时都会重新读取应用。每页容纳显示屏放得下的行数（360 px 圆形屏幕上为 2-3-2）；更多页面向上滑动即可到达，每页对应一个圆点 | 在主屏幕上向左滑动，或在应用首页内向右滑动 |
 | 菜单          | 变暗的启动器上方显示应用名称：应用信息，可安装应用还有卸载     | 在启动器中长按某个应用                      |
 | 运行中        | 应用切换器：每个正在运行的应用、它的状态和一个关闭按钮        | 在启动器中向左滑动                          |
 | 通知          | 通知中心：问题在前，带允许和拒绝；然后是通知，最新的在前；可逐条关闭或全部清除 | 在任意位置从顶部边缘向下滑动；向上滑动关闭 |
 | 控制          | Wi-Fi、麦克风、静音、勿扰、亮度和门户的磁贴；亮度滑块；门户地址 | 在任意位置从底部边缘向上滑动；向下滑动关闭 |
 | 启动中        | 应用启动期间显示它的图标和名称                                | 点击某个应用                                |
 | 已退出        | 显示屏上的应用意外结束；可重新打开或回到主屏幕                | 前台应用失败或被取消                        |
-| 安装          | 提供的应用，以及用其所依赖插件的措辞说明它请求的内容；安装或取消；对于本设备无法运行的应用，说明原因并禁用安装 | 点击某个提供的应用，或收到 `app.install` 请求 |
-| 信息          | 应用的版本和类型；可安装应用还列出它的权限                    | 菜单中的应用信息                            |
+| 信息          | 应用的版本和类型，或本设备无法运行它的原因；可安装应用还用其所依赖插件的措辞列出它的权限 | 菜单中的应用信息，或点击本设备无法运行的应用 |
 
 主屏幕显示 Agent 的 `AgentStatus`：待机；聆听，带音量电平和听到的内容；思考，带问题；回答，带问题和答案，九秒后或点击后回到待机。已回答的问题会短暂显示为已完成，并在主屏幕卡片上保留 30 秒。
 
@@ -206,16 +202,14 @@ UI 工具包运行编译后的 MicroTS 视图。视图由 BVIR 程序（`view.bv
 | 向左 / 向右滑动             | 主屏幕、应用、运行中 | 在它们之间切换                       |
 | 向上 / 向下滑动             | 应用               | 启动器的下一页 / 上一页                |
 | 向右滑动                    | 应用内             | 返回（`AppManager::back`）：应用的上一页，在首页时回到启动器 |
-| 向右滑动                    | 菜单、安装、信息、已退出 | 取消                             |
+| 向右滑动                    | 菜单、信息、已退出 | 取消                                   |
 
 ### 应用及其生命周期
 
-点击可启动的应用会调用 `AppManager::open`。点击提供的应用会显示安装界面；安装调用 `AppManager::install`，拒绝调用
-`AppManager::decline_install`。菜单中的卸载调用
+点击应用会调用 `AppManager::open`；点击本设备无法运行的应用会显示它的信息界面，说明原因。菜单中的卸载调用
 `AppManager::uninstall`，它会拒绝系统应用，所以系统应用的菜单不提供卸载。切换器中的关闭调用 `AppManager::terminate`。
 
 系统 UI 跟随 `AppManager::changed`，所以由 Workflow 打开或关闭的应用（`app.open`、`app.home`、`app.terminate`）会以同样的方式切换界面。在显示屏上失败的应用会显示已退出界面；在后台失败的应用或无头应用则改为收到一条通知。
-`app.install` 请求会在当前任何界面之上显示安装界面。
 
 ### 通知和问题
 
@@ -245,7 +239,7 @@ UI 工具包运行编译后的 MicroTS 视图。视图由 BVIR 程序（`view.bv
 | --- | --- |
 | `icons` | 从 `resources/icons/svg` 构建图标字体和码位表 |
 | `view` | 从 `resources/view/app.tsx` 及其 `app.d.ts` 契约构建系统视图；它不带图集 |
-| `examples` | 把 `resources/examples/` 中的示例可安装应用构建到 `crates/appkit/tests/fixtures/` |
+| `examples` | 把 `resources/examples/` 中的示例可安装应用构建到 `crates/appkit/tests/fixtures/<id>.bapp/` |
 
 `resources/build-app.ts` 从源码构建应用容器；内置应用插件对自己的 `resources/app` 运行它。内置应用不带字体，使用系统字体绘制。示例则像来自其他地方的应用那样烘焙自己的字体：用 Noto Sans SC 覆盖 ASCII 以外的字符，用图标字体中的 `\uE0xx` 转义来指定系统图标，并且只烘焙 24 px 及以上字号的数字和图标。视图中的图标是 `"\uE008"` 这样的转义，其码位固定在 `resources/icons/codepoints.json` 中。
 

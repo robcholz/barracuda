@@ -18,7 +18,7 @@ macro_rules! counter_file {
     ($name:literal) => {
         (
             $name,
-            include_bytes!(concat!("fixtures/counter/", $name)).as_slice(),
+            include_bytes!(concat!("fixtures/counter.bapp/", $name)).as_slice(),
         )
     };
 }
@@ -40,19 +40,22 @@ async fn filesystem() -> ScopedVfs {
         .unwrap();
     let fs = vfs.scoped("/app").unwrap();
     for (name, bytes) in COUNTER {
-        fs.write(&format!("/media/apps/counter/{name}"), bytes)
+        fs.write(&format!("/workspace/media/apps/counter.bapp/{name}"), bytes)
             .await
             .unwrap();
     }
     fs.write(
-        "/media/apps/beacon/app.json",
+        "/workspace/media/apps/beacon.bapp/app.json",
         br#"{"format":1,"id":"beacon","name":"Beacon","version":"1"}"#,
     )
     .await
     .unwrap();
-    fs.write("/media/apps/beacon/main.lua", b"print('beacon')")
-        .await
-        .unwrap();
+    fs.write(
+        "/workspace/media/apps/beacon.bapp/main.lua",
+        b"print('beacon')",
+    )
+    .await
+    .unwrap();
     fs
 }
 

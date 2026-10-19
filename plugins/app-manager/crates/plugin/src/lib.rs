@@ -1,6 +1,6 @@
 //! Runs Lua apps and, on a Board with a display, shows them and the system UI.
 //!
-//! This Plugin assembles two kits. The app kit (`barracuda-appkit`) installs,
+//! This Plugin assembles two kits. The app kit (`barracuda-appkit`) lists,
 //! launches, and supervises apps and needs no display; the UI kit
 //! (`barracuda-uikit`) draws views on a display and turns touch into
 //! gestures and knows nothing about apps. Here they meet: on a Board with a
