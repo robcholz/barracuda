@@ -17,6 +17,8 @@ log.workspace = true
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
 barracuda-board-hal.workspace = true
+barracuda-driver-esp-hosted.workspace = true
+barracuda-driver-pi4ioe5v6408.workspace = true
 barracuda-peripheral.workspace = true
 embassy-executor.workspace = true
 embassy-futures.workspace = true

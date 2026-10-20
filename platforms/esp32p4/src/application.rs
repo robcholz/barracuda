@@ -32,6 +32,40 @@ extern "C" fn rust_eh_personality() {}
 // `build.rs` from the selected Board's network links.
 include!(concat!(env!("OUT_DIR"), "/esp32p4_network.rs"));
 
+/// Powers a Board's Wi-Fi co-processor through one output of a PI4IOE5V6408
+/// I2C expander, driving it high.
+///
+/// It runs before the Board composition takes the I2C bus, on a borrowed
+/// controller and pins, and leaves the expander's other outputs as they are.
+/// A failure is printed and left to the co-processor's start-up to report.
+#[doc(hidden)]
+pub fn power_coprocessor_through_pi4ioe5v6408<'d>(
+    i2c: impl esp_hal::i2c::master::Instance + 'd,
+    scl: impl esp_hal::gpio::interconnect::PeripheralInput<'d>
+        + esp_hal::gpio::interconnect::PeripheralOutput<'d>
+        + 'd,
+    sda: impl esp_hal::gpio::interconnect::PeripheralInput<'d>
+        + esp_hal::gpio::interconnect::PeripheralOutput<'d>
+        + 'd,
+    address: u8,
+    pin: u8,
+) {
+    let config =
+        esp_hal::i2c::master::Config::default().with_frequency(esp_hal::time::Rate::from_khz(100));
+    let mut bus = match esp_hal::i2c::master::I2c::new(i2c, config) {
+        Ok(bus) => bus.with_scl(scl).with_sda(sda),
+        Err(error) => {
+            esp_println::println!("Wi-Fi co-processor power switch: I2C {error:?}");
+            return;
+        }
+    };
+    let powered = barracuda_driver_pi4ioe5v6408::Pi4ioe5v6408::new(&mut bus, address)
+        .and_then(|mut expander| expander.configure_output(pin, true));
+    if let Err(error) = powered {
+        esp_println::println!("Wi-Fi co-processor power switch at {address:#04x}: {error:?}");
+    }
+}
+
 /// Installs the internal-memory regions in the global allocator.
 #[doc(hidden)]
 pub fn initialize_allocator() {
@@ -80,11 +114,11 @@ pub fn bindings(
         Mutex<CriticalSectionRawMutex, RefCell<crate::Esp32P4Flash<'static>>>,
     > = StaticCell::new();
 
-    // The ESP32-P4 has no radio; the IP stack runs over the link the Board
+    // The ESP32-P4 has no radio; the IP stack runs over the links the Board
     // declares, or stays down without one.
-    let ip_stack = crate::network::start(spawner, network)?;
+    let links = crate::network::start(spawner, network)?;
     let flash = FLASH.init(Mutex::new(RefCell::new(crate::flash(flash_token))));
-    Esp32P4PlatformBindings::from_initialized_services(board, ip_stack, flash)
+    Esp32P4PlatformBindings::from_initialized_services(board, links, flash)
 }
 
 /// Generates the ESP32-P4 async entry around one selected application.
@@ -139,8 +173,12 @@ macro_rules! platform_entry {
         #[$crate::application::__hal::__macro_implementation::__entry]
         fn main() -> ! {
             $crate::application::initialize_allocator();
-            let peripherals =
+            #[allow(unused_mut)]
+            let mut peripherals =
                 $crate::application::__hal::init($crate::application::__hal::Config::default());
+            // A Board whose Wi-Fi co-processor sits behind a power switch on
+            // a shared bus turns it on before the Board takes the bus.
+            $crate::__barracuda_esp32p4_network_power!(peripherals);
             $crate::application::initialize_bulk_memory($board, peripherals.PSRAM);
             let $board_bindings_value = $board_bindings!(peripherals);
             let network = $crate::__barracuda_esp32p4_network_tokens!(peripherals);

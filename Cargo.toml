@@ -167,6 +167,7 @@ barracuda-driver-bq27220 = { path = "drivers/chips/bq27220" }
 barracuda-driver-co5300 = { path = "drivers/chips/co5300" }
 barracuda-driver-cst816t = { path = "drivers/chips/cst816t" }
 barracuda-driver-es8311 = { path = "drivers/chips/es8311" }
+barracuda-driver-esp-hosted = { path = "drivers/chips/esp-hosted" }
 barracuda-driver-es7210 = { path = "drivers/chips/es7210" }
 barracuda-driver-es8388 = { path = "drivers/chips/es8388" }
 barracuda-driver-es8389 = { path = "drivers/chips/es8389" }

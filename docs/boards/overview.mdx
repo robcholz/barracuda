@@ -157,6 +157,44 @@ hardware:
       rxd1: GPIO30
 ```
 
+`wifi-coprocessor` records a Wi-Fi radio on a second chip that the main chip
+reaches over SDIO, as on ESP32-P4 Boards, whose chip has no radio. It names
+the co-processor `chip`, the `firmware` it ships with (`esp-hosted-mcu`,
+Espressif's ESP-Hosted-MCU), the SD host `slot` with its clock, command and
+four data pins and the bus clock, the pin wired to the co-processor's
+active-low reset, and, when the Board switches the co-processor's power
+through an I/O expander, that expander's part, I2C bus, address and output.
+Like `ethernet`, it is a fact from the schematic. A Platform without the
+`wifi-coprocessor-sdio` binding rejects the Board at `cargo board select`, and
+its pins are never also peripheral bindings or exposed pins.
+
+```yaml
+hardware:
+  chip: esp32p4
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO12
+      cmd: GPIO13
+      d0: GPIO11
+      d1: GPIO10
+      d2: GPIO9
+      d3: GPIO8
+      frequency-hz: 40000000
+    reset: GPIO15
+    power-enable:          # optional
+      expander: pi4ioe5v6408
+      i2c: { peripheral: I2C0, scl: GPIO32, sda: GPIO31 }
+      address: 68          # 44h
+      pin: 0
+```
+
+A Board may declare both `ethernet` and `wifi-coprocessor`. It still has one
+IP stack: the Platform runs it on Ethernet while the cable is up and on the
+Wi-Fi station otherwise, and restarts DHCP when it switches.
+
 Select a concrete Board once, then use the ordinary build command:
 
 ```bash
@@ -246,7 +284,9 @@ The M5Stack CoreP4X selects `m5stack-corep4x`; its 480x480 ST7102 DSI panel is
 composed by `corep4x-dsi-display`, which privately drives the M5IOE1 expander
 for the panel's power, reset, and backlight and the M5PM1 for the 5 V boost.
 The ESP32-P4-Function-EV-Board and the M5Stack Unit PoE-P4 declare their
-IP101GRI Ethernet PHYs under `hardware.ethernet`.
+IP101GRI Ethernet PHYs under `hardware.ethernet`. The Tab5, the Tab5X and the
+ESP32-P4-Function-EV-Board declare their ESP32-C6 Wi-Fi co-processors under
+`hardware.wifi-coprocessor`.
 
 The fitted SC202CS camera remains absent from the Board peripheral set because
 `esp-hal` does not currently expose the ESP32-P4 MIPI-CSI/ISP data plane. It

@@ -1223,6 +1223,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-esp-hosted"
+version = "0.1.0"
+dependencies = [
+ "aligned",
+ "critical-section",
+ "embassy-futures",
+ "embassy-net-driver-channel",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "log",
+ "sdio",
+]
+
+[[package]]
 name = "barracuda-driver-gt911"
 version = "0.1.0"
 dependencies = [
@@ -2110,6 +2126,8 @@ dependencies = [
  "barracuda-board-config",
  "barracuda-board-hal",
  "barracuda-bulk-memory",
+ "barracuda-driver-esp-hosted",
+ "barracuda-driver-pi4ioe5v6408",
  "barracuda-peripheral",
  "barracuda-platform",
  "embassy-embedded-hal 0.6.0",

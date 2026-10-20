@@ -7,6 +7,25 @@ hardware:
     technology: psram
     interface: hex
     size-bytes: 33554432
+  # ESP32-C6-MINI-1 with Espressif's factory ESP-Hosted-MCU slave firmware
+  # (0.0.6 per ESP-Hosted's "ESP-Hosted on the ESP32-P4-Function-EV-Board")
+  # on SDIO slot 1: CLK GPIO18, CMD GPIO19, D0-D3 GPIO14-17, and the C6's
+  # enable on GPIO54 (Espressif's esp32_p4_function_ev_board
+  # `CONFIG_ESP_HOSTED_PRIV_SDIO_*` defaults and ESP-Hosted's log of the
+  # board). 40 MHz is ESP-Hosted's SDIO clock for an ESP32-P4 host.
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO18
+      cmd: GPIO19
+      d0: GPIO14
+      d1: GPIO15
+      d2: GPIO16
+      d3: GPIO17
+      frequency-hz: 40000000
+    reset: GPIO54
   # IP101GRI 10/100 PHY on the EMAC's RMII pads. The PHY drives the 50 MHz
   # reference clock into GPIO50. Pins, reset and PHY address 1: ESP-IDF's
   # ethernet_init Kconfig defaults for the ESP32-P4 and espp's

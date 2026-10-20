@@ -250,6 +250,9 @@ impl BoardDefinition {
         if let Some(ethernet) = &self.hardware.ethernet {
             ethernet.validate()?;
         }
+        if let Some(coprocessor) = &self.hardware.wifi_coprocessor {
+            coprocessor.validate()?;
+        }
         if let Some(toolchain) = &self.toolchain {
             if toolchain.target.trim().is_empty() {
                 return Err(ConfigError::EmptyToolchainTarget);
@@ -1566,6 +1569,8 @@ pub struct HardwareDefinition {
     external_memory: Option<ExternalMemoryDefinition>,
     #[serde(default)]
     ethernet: Option<EthernetDefinition>,
+    #[serde(default, rename = "wifi-coprocessor")]
+    wifi_coprocessor: Option<WifiCoprocessorDefinition>,
 }
 
 impl HardwareDefinition {
@@ -1593,6 +1598,13 @@ impl HardwareDefinition {
     #[must_use]
     pub const fn ethernet(&self) -> Option<&EthernetDefinition> {
         self.ethernet.as_ref()
+    }
+
+    /// Returns the Wi-Fi co-processor wired to the chip, when the Board has
+    /// one.
+    #[must_use]
+    pub const fn wifi_coprocessor(&self) -> Option<&WifiCoprocessorDefinition> {
+        self.wifi_coprocessor.as_ref()
     }
 }
 
@@ -1831,6 +1843,247 @@ pub enum RmiiReferenceClockSource {
     Internal,
 }
 
+/// A Wi-Fi radio on a separate co-processor chip, wired to this chip over
+/// SDIO.
+///
+/// Every field is a hardware fact read from the Board schematic and the
+/// firmware the co-processor ships with. The selected Platform drives the
+/// co-processor as a network link and rejects a Board whose wiring or
+/// firmware it cannot drive.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct WifiCoprocessorDefinition {
+    chip: String,
+    firmware: WifiCoprocessorFirmware,
+    sdio: CoprocessorSdioDefinition,
+    reset: String,
+    #[serde(default, rename = "power-enable")]
+    power_enable: Option<CoprocessorPowerEnableDefinition>,
+}
+
+impl WifiCoprocessorDefinition {
+    /// Returns the co-processor chip, such as `esp32c6`.
+    #[must_use]
+    pub fn chip(&self) -> &str {
+        &self.chip
+    }
+
+    /// Returns the protocol the co-processor's firmware speaks.
+    #[must_use]
+    pub const fn firmware(&self) -> WifiCoprocessorFirmware {
+        self.firmware
+    }
+
+    /// Returns the SDIO wiring between this chip and the co-processor.
+    #[must_use]
+    pub const fn sdio(&self) -> &CoprocessorSdioDefinition {
+        &self.sdio
+    }
+
+    /// Returns the chip pin wired to the co-processor's active-low enable.
+    #[must_use]
+    pub fn reset(&self) -> &str {
+        &self.reset
+    }
+
+    /// Returns the switch that powers the co-processor, when the Board has
+    /// one.
+    #[must_use]
+    pub const fn power_enable(&self) -> Option<&CoprocessorPowerEnableDefinition> {
+        self.power_enable.as_ref()
+    }
+
+    /// Iterates every chip pin the co-processor wiring uses, with its signal
+    /// name.
+    pub fn pins(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        let sdio = &self.sdio;
+        let power = self.power_enable.as_ref();
+        [
+            ("sdio clk", Some(sdio.clk.as_str())),
+            ("sdio cmd", Some(sdio.cmd.as_str())),
+            ("sdio d0", Some(sdio.d0.as_str())),
+            ("sdio d1", Some(sdio.d1.as_str())),
+            ("sdio d2", Some(sdio.d2.as_str())),
+            ("sdio d3", Some(sdio.d3.as_str())),
+            ("reset", Some(self.reset.as_str())),
+            (
+                "power-enable scl",
+                power.map(|power| power.i2c.scl.as_str()),
+            ),
+            (
+                "power-enable sda",
+                power.map(|power| power.i2c.sda.as_str()),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(field, pin)| pin.map(|pin| (field, pin)))
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        let resource = "wifi-coprocessor";
+        validate_identifier(resource, "chip", &self.chip)?;
+        if self.sdio.slot > 1 {
+            return Err(ConfigError::InvalidWifiCoprocessor {
+                reason: "the SDIO slot must be 0 or 1",
+            });
+        }
+        // SDIO high-speed mode tops out at 50 MHz.
+        if self.sdio.frequency_hz == 0 || self.sdio.frequency_hz > 50_000_000 {
+            return Err(ConfigError::InvalidWifiCoprocessor {
+                reason: "the SDIO clock must be between 1 Hz and 50 MHz",
+            });
+        }
+        if let Some(power) = &self.power_enable {
+            validate_identifier(
+                resource,
+                "power-enable i2c peripheral",
+                &power.i2c.peripheral,
+            )?;
+            if power.address > 0x7f {
+                return Err(ConfigError::InvalidWifiCoprocessor {
+                    reason: "the power-enable expander address must be a 7-bit I2C address",
+                });
+            }
+            if power.pin > 7 {
+                return Err(ConfigError::InvalidWifiCoprocessor {
+                    reason: "the power-enable expander pin must be 0 through 7",
+                });
+            }
+        }
+        let mut pins = Vec::new();
+        for (field, pin) in self.pins() {
+            validate_identifier(resource, field, pin)?;
+            if pins.contains(&pin) {
+                return Err(ConfigError::InvalidWifiCoprocessor {
+                    reason: "one chip pin is wired to two co-processor signals",
+                });
+            }
+            pins.push(pin);
+        }
+        Ok(())
+    }
+}
+
+/// The protocol a Wi-Fi co-processor's firmware speaks.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum WifiCoprocessorFirmware {
+    /// Espressif's ESP-Hosted-MCU slave firmware.
+    EspHostedMcu,
+}
+
+/// The 4-bit SDIO bus between the chip's SD host and the co-processor.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CoprocessorSdioDefinition {
+    slot: u8,
+    clk: String,
+    cmd: String,
+    d0: String,
+    d1: String,
+    d2: String,
+    d3: String,
+    #[serde(rename = "frequency-hz")]
+    frequency_hz: u32,
+}
+
+impl CoprocessorSdioDefinition {
+    /// Returns the chip's SD host slot the bus is wired to.
+    #[must_use]
+    pub const fn slot(&self) -> u8 {
+        self.slot
+    }
+
+    /// Returns the clock pin.
+    #[must_use]
+    pub fn clk(&self) -> &str {
+        &self.clk
+    }
+
+    /// Returns the command pin.
+    #[must_use]
+    pub fn cmd(&self) -> &str {
+        &self.cmd
+    }
+
+    /// Returns the four data pins, D0 first.
+    #[must_use]
+    pub fn data(&self) -> [&str; 4] {
+        [&self.d0, &self.d1, &self.d2, &self.d3]
+    }
+
+    /// Returns the bus clock once the card is set up.
+    #[must_use]
+    pub const fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+}
+
+/// An I/O-expander output that switches the co-processor's supply.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CoprocessorPowerEnableDefinition {
+    expander: CoprocessorPowerExpander,
+    i2c: CoprocessorPowerBusDefinition,
+    address: u8,
+    pin: u8,
+}
+
+impl CoprocessorPowerEnableDefinition {
+    /// Returns the expander part.
+    #[must_use]
+    pub const fn expander(&self) -> CoprocessorPowerExpander {
+        self.expander
+    }
+
+    /// Returns the chip's I2C controller the expander is on.
+    #[must_use]
+    pub fn i2c_peripheral(&self) -> &str {
+        &self.i2c.peripheral
+    }
+
+    /// Returns the I2C clock pin.
+    #[must_use]
+    pub fn scl(&self) -> &str {
+        &self.i2c.scl
+    }
+
+    /// Returns the I2C data pin.
+    #[must_use]
+    pub fn sda(&self) -> &str {
+        &self.i2c.sda
+    }
+
+    /// Returns the expander's 7-bit I2C address.
+    #[must_use]
+    pub const fn address(&self) -> u8 {
+        self.address
+    }
+
+    /// Returns the expander output driven high to power the co-processor.
+    #[must_use]
+    pub const fn pin(&self) -> u8 {
+        self.pin
+    }
+}
+
+/// I/O expanders a co-processor's power switch may hang off.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CoprocessorPowerExpander {
+    /// Diodes PI4IOE5V6408 eight-bit I2C expander.
+    Pi4ioe5v6408,
+}
+
+/// The I2C bus an expander is on, by chip-native names.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct CoprocessorPowerBusDefinition {
+    peripheral: String,
+    scl: String,
+    sda: String,
+}
+
 /// Directly addressable external memory installed on a Board.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -1978,6 +2231,12 @@ pub enum ConfigError {
     /// The Board's wired Ethernet declaration is inconsistent.
     #[error("Board Ethernet is invalid: {reason}")]
     InvalidEthernet {
+        /// What is wrong with the declaration.
+        reason: &'static str,
+    },
+    /// The Board's Wi-Fi co-processor declaration is inconsistent.
+    #[error("Board Wi-Fi co-processor is invalid: {reason}")]
+    InvalidWifiCoprocessor {
         /// What is wrong with the declaration.
         reason: &'static str,
     },

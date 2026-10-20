@@ -44,6 +44,9 @@ pub enum HalBinding {
     /// Platform IP link over a Board-declared RMII Ethernet PHY
     /// (`hardware.ethernet` in `board.yml`).
     EthernetRmii,
+    /// Platform Wi-Fi and IP link over a Board-declared ESP-Hosted
+    /// co-processor on SDIO (`hardware.wifi-coprocessor` in `board.yml`).
+    WifiCoprocessorSdio,
 }
 
 /// One ADC channel route owned by a Platform ADC controller pool.
