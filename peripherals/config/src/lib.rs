@@ -2070,6 +2070,24 @@ fn render_binding(
                 variant.clone(),
                 String::from("::barracuda_platform_selected::__platform::hal::SpiConfigError"),
             ));
+            if spi.three_wire() {
+                let (Some(data), None) = (mosi_field, miso_field) else {
+                    return Err(GenerateError::UnsupportedResolvedValue {
+                        peripheral: peripheral.name().to_owned(),
+                        parameter: format!("{role}.three-wire"),
+                    });
+                };
+                return Ok((
+                    String::from(
+                        "::barracuda_platform_selected::__platform::hal::ThreeWireSpiDevice",
+                    ),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::spi_device_three_wire(bindings.{controller}, bindings.{sck}, bindings.{data}, bindings.{chip_select}, {}, {}).map_err(GeneratedBoardError::{variant})?",
+                        spi.frequency_hz(),
+                        spi.read_frequency_hz()
+                    ),
+                ));
+            }
             let value = match (mosi_field, miso_field) {
                 (Some(mosi), Some(miso)) => format!(
                     "::barracuda_platform_selected::__platform::hal::spi_device_full_duplex(bindings.{controller}, bindings.{sck}, bindings.{mosi}, bindings.{miso}, bindings.{chip_select}, {}).map_err(GeneratedBoardError::{variant})?",

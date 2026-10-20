@@ -77,6 +77,63 @@ pub type DigitalInput = Input<'static>;
 pub type SpiBus = Spi<'static, Blocking>;
 /// Standards-compliant single-owner SPI device.
 pub type SpiDevice = ExclusiveDevice<SpiBus, DigitalOutput, Delay>;
+/// Single-owner SPI device whose one data line carries writes and reads.
+pub type ThreeWireSpiDevice = ExclusiveDevice<ThreeWireSpiBus, DigitalOutput, Delay>;
+
+/// Blocking SPI bus with one bidirectional data line (three-wire SPI).
+///
+/// Writes drive the line as MOSI. Reads release it and sample the device's
+/// answer on the same line through the controller's half-duplex SIO mode, so
+/// a device such as a display controller can be identified by reading its ID
+/// registers. Full-duplex transfers cannot exist on one line and are rejected.
+pub struct ThreeWireSpiBus {
+    spi: SpiBus,
+    write_config: SpiConfig,
+    read_config: SpiConfig,
+}
+
+impl embedded_hal::spi::ErrorType for ThreeWireSpiBus {
+    type Error = esp_hal::spi::Error;
+}
+
+impl embedded_hal::spi::SpiBus for ThreeWireSpiBus {
+    fn read(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        if words.is_empty() {
+            return Ok(());
+        }
+        // Both clocks were validated when the device was constructed.
+        self.spi
+            .apply_config(&self.read_config)
+            .map_err(|_| esp_hal::spi::Error::Unsupported)?;
+        let result = self.spi.half_duplex_read(
+            esp_hal::spi::master::DataMode::Single,
+            esp_hal::spi::master::Command::None,
+            esp_hal::spi::master::Address::None,
+            0,
+            words,
+        );
+        self.spi
+            .apply_config(&self.write_config)
+            .map_err(|_| esp_hal::spi::Error::Unsupported)?;
+        result
+    }
+
+    fn write(&mut self, words: &[u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::write(&mut self.spi, words)
+    }
+
+    fn transfer(&mut self, _read: &mut [u8], _write: &[u8]) -> Result<(), Self::Error> {
+        Err(esp_hal::spi::Error::Unsupported)
+    }
+
+    fn transfer_in_place(&mut self, _words: &mut [u8]) -> Result<(), Self::Error> {
+        Err(esp_hal::spi::Error::Unsupported)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::flush(&mut self.spi)
+    }
+}
 /// Blocking I2C controller passed to a peripheral implementation.
 pub type I2cBus = I2c<'static, Blocking>;
 /// Static owner of one I2C bus shared by peripheral implementations.
@@ -1137,6 +1194,36 @@ pub fn spi_device_full_duplex(
     .with_mosi(mosi)
     .with_miso(miso);
     Ok(exclusive_spi_device(bus, chip_select))
+}
+
+/// Constructs one three-wire SPI device whose `data` line carries both
+/// directions; reads run at `read_frequency_hz`.
+///
+/// # Errors
+///
+/// Returns [`SpiConfigError`] when either requested frequency is unsupported.
+pub fn spi_device_three_wire(
+    spi: impl SpiInstance + 'static,
+    sck: impl PeripheralOutput<'static> + 'static,
+    data: impl PeripheralInput<'static> + PeripheralOutput<'static> + 'static,
+    chip_select: impl OutputPin + 'static,
+    frequency_hz: u32,
+    read_frequency_hz: u32,
+) -> Result<ThreeWireSpiDevice, SpiConfigError> {
+    let write_config = SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz));
+    let read_config = SpiConfig::default().with_frequency(Rate::from_hz(read_frequency_hz));
+    let mut spi = Spi::new(spi, read_config)?.with_sck(sck).with_sio0(data);
+    spi.apply_config(&write_config)?;
+    let chip_select = digital_output(chip_select, DigitalLevel::High);
+    let bus = ThreeWireSpiBus {
+        spi,
+        write_config,
+        read_config,
+    };
+    match ExclusiveDevice::new(bus, chip_select, Delay::new()) {
+        Ok(device) => Ok(device),
+        Err(never) => match never {},
+    }
 }
 
 fn exclusive_spi_device(bus: SpiBus, chip_select: impl OutputPin + 'static) -> SpiDevice {

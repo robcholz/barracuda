@@ -532,6 +532,19 @@ impl PeripheralIoDefinition {
                 validate_identifier(name, "miso", miso)?;
             }
             validate_spi_data_pin(name, spi.mosi.as_deref(), spi.miso.as_deref())?;
+            if spi.three_wire && (spi.mosi.is_none() || spi.miso.is_some()) {
+                return Err(ConfigError::InvalidThreeWireSpi {
+                    resource: name.clone(),
+                });
+            }
+            if let Some(read_frequency_hz) = spi.read_frequency_hz {
+                if !spi.three_wire {
+                    return Err(ConfigError::InvalidThreeWireSpi {
+                        resource: name.clone(),
+                    });
+                }
+                validate_frequency(name, read_frequency_hz)?;
+            }
             validate_frequency(name, spi.frequency_hz)?;
         }
         for (name, spi) in &self.quad_spi_devices {
@@ -1139,6 +1152,10 @@ pub struct SpiDeviceDefinition {
     mosi: Option<String>,
     #[serde(default)]
     miso: Option<String>,
+    #[serde(default, rename = "three-wire")]
+    three_wire: bool,
+    #[serde(default, rename = "read-frequency-hz")]
+    read_frequency_hz: Option<u32>,
     #[serde(rename = "chip-select")]
     chip_select: String,
     #[serde(rename = "frequency-hz")]
@@ -1229,6 +1246,20 @@ impl SpiDeviceDefinition {
     #[must_use]
     pub fn chip_select(&self) -> &str {
         &self.chip_select
+    }
+
+    /// Returns whether `mosi` is one bidirectional data line (three-wire SPI)
+    /// on which the device also answers reads.
+    #[must_use]
+    pub const fn three_wire(&self) -> bool {
+        self.three_wire
+    }
+
+    /// Returns the clock used for reads on a three-wire device, which
+    /// defaults to the write clock.
+    #[must_use]
+    pub fn read_frequency_hz(&self) -> u32 {
+        self.read_frequency_hz.unwrap_or(self.frequency_hz)
     }
 
     /// Returns the initial bus frequency for this device.
@@ -1558,6 +1589,14 @@ pub enum ConfigError {
     /// An SPI declaration has neither a controller-output nor controller-input pin.
     #[error("Board SPI resource `{resource}` must declare `mosi`, `miso`, or both")]
     MissingSpiDataPin {
+        /// Board-level SPI resource name.
+        resource: String,
+    },
+    /// A three-wire SPI device must name its one bidirectional line as `mosi`.
+    #[error(
+        "Board SPI resource `{resource}` must declare `three-wire` with its shared data line as `mosi`, no `miso`, and `read-frequency-hz` only when three-wire"
+    )]
+    InvalidThreeWireSpi {
         /// Board-level SPI resource name.
         resource: String,
     },

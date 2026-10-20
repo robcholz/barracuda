@@ -372,6 +372,38 @@ peripherals:
     assert!(rust.contains("pin_binding_type!(GPIO3)"));
     assert!(rust.contains("hal::spi_device_full_duplex"));
 
+    let three_wire = parse(
+        r#"
+name: display-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    spi-device:
+      display:
+        peripheral: SPI3
+        sck: GPIO17
+        mosi: GPIO21
+        three-wire: true
+        chip-select: GPIO15
+        frequency-hz: 40000000
+  devices:
+    display:
+      implementation: test-display
+      bindings:
+        spi: display
+        dc: GPIO33
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&three_wire, &catalog).expect("resolved three-wire device");
+    let rust = render_board_hal(&three_wire, &resolved).expect("generated three-wire device");
+    assert!(rust.contains("hal::spi_device_three_wire"));
+    assert!(rust.contains("hal::ThreeWireSpiDevice"));
+    assert_valid_rust(&rust);
+
     let invalid = parse(
         r#"
 name: display-board
