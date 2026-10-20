@@ -1016,9 +1016,9 @@ Platform services -> { IP, entropy, partitions } ------------------------+-> Sys
 
 Platform crates do not own peripheral implementations or Board
 composition. They do own their vendor-HAL token vocabulary and GPIO, I2C, SPI,
-camera, I2S, and delay constructors. DMA-backed media resources are composed
-statically: `camera-capture` and `i2s-stream` declarations size storage with
-`dma-buffer-bytes`, and the selected Platform allocates it at the concrete Board
+camera, parallel display, I2S, and delay constructors. DMA-backed media
+resources are composed statically: `camera-capture`, `parallel-output`, and
+`i2s-stream` declarations size storage with `dma-buffer-bytes`, and the selected Platform allocates it at the concrete Board
 call site. Semantic adaptation remains under `peripherals/impl`; reusable
 register and protocol behavior belongs under `drivers/chips`. Board-related
 crates remain under `boards/`; the selected Target composition root remains

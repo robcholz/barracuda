@@ -23,12 +23,7 @@ use barracuda_driver_axp192::{Axp192, Error as Axp192Error, Gpio as Axp192Gpio, 
 use barracuda_driver_axp2101::{Axp2101, Error as Axp2101Error, Ldo};
 use barracuda_mipi_dbi_display::{MipiDbiDisplay, MipiDbiInitError, PanelBacklight};
 use barracuda_peripheral::PeripheralImplementation;
-use embedded_hal::{
-    delay::DelayNs,
-    digital::{ErrorType, OutputPin},
-    i2c::I2c,
-    spi::SpiDevice,
-};
+use embedded_hal::{delay::DelayNs, digital::OutputPin, i2c::I2c, spi::SpiDevice};
 use mipidsi::{
     interface::{InterfacePixelFormat, SpiError, SpiInterface},
     models::Model,
@@ -36,8 +31,8 @@ use mipidsi::{
 
 /// Portable panel options and controller models used by generated configuration.
 pub use barracuda_mipi_dbi_display::{
-    ILI9342CRgb565, MipiDbiColorOrder, MipiDbiDisplayConfig, MipiDbiDriverConfig, ST7735s, ST7789,
-    Size,
+    ILI9342CRgb565, MipiDbiColorOrder, MipiDbiDisplayConfig, MipiDbiDriverConfig, PanelReset,
+    ST7735s, ST7789, Size,
 };
 
 /// Seven-bit address shared by the AXP192 and AXP2101 on every supported layout.
@@ -199,30 +194,6 @@ impl<I2C: I2c> PanelBacklight for PmicBacklight<I2C> {
     }
 }
 
-/// Reset output handed to `mipidsi`: the Board's GPIO when the layout has
-/// one, otherwise nothing, because the helper chip already reset the panel.
-pub struct PanelReset<RST>(Option<RST>);
-
-impl<RST: OutputPin> ErrorType for PanelReset<RST> {
-    type Error = RST::Error;
-}
-
-impl<RST: OutputPin> OutputPin for PanelReset<RST> {
-    fn set_low(&mut self) -> Result<(), Self::Error> {
-        match &mut self.0 {
-            Some(reset) => reset.set_low(),
-            None => Ok(()),
-        }
-    }
-
-    fn set_high(&mut self) -> Result<(), Self::Error> {
-        match &mut self.0 {
-            Some(reset) => reset.set_high(),
-            None => Ok(()),
-        }
-    }
-}
-
 /// Power layout and panel options used by the implementation factory.
 pub struct PmicDisplayConfig<M> {
     layout: PowerLayout,
@@ -336,14 +307,15 @@ where
             return Err(PmicDisplayInitError::ResetWiring);
         }
         let rail = power_up(&mut i2c, config.layout, &mut delay)?;
-        barracuda_mipi_dbi_display::initialize_panel(
-            spi,
-            dc,
-            PanelReset(reset),
+        // The helper chip already reset the panel when the layout has no GPIO
+        // reset: an always-present line that does nothing then keeps
+        // `initialize_on` from adding a DCS software reset.
+        barracuda_mipi_dbi_display::initialize_on(
+            SpiInterface::new(spi, dc, buffer),
+            Some(PanelReset::new(reset, false)),
             Some(PmicBacklight { i2c, rail }),
             (),
             delay,
-            buffer,
             config.panel,
         )
         .map_err(PmicDisplayInitError::Panel)

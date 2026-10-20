@@ -344,6 +344,8 @@ pub struct PeripheralIoDefinition {
     i2c_devices: BTreeMap<String, I2cDefinition>,
     #[serde(default, rename = "camera-capture")]
     camera_captures: BTreeMap<String, CameraCaptureDefinition>,
+    #[serde(default, rename = "parallel-output")]
+    parallel_outputs: BTreeMap<String, ParallelOutputDefinition>,
     #[serde(default, rename = "i2s-stream")]
     i2s_streams: BTreeMap<String, I2sStreamDefinition>,
     #[serde(default, rename = "capacitive-touch")]
@@ -363,6 +365,7 @@ impl PeripheralIoDefinition {
             && self.quad_spi_devices.is_empty()
             && self.i2c_devices.is_empty()
             && self.camera_captures.is_empty()
+            && self.parallel_outputs.is_empty()
             && self.i2s_streams.is_empty()
             && self.capacitive_touch.is_empty()
     }
@@ -421,6 +424,13 @@ impl PeripheralIoDefinition {
         self.camera_captures.get(name)
     }
 
+    /// Finds one parallel display write bus reserved by a peripheral
+    /// implementation.
+    #[must_use]
+    pub fn parallel_output(&self, name: &str) -> Option<&ParallelOutputDefinition> {
+        self.parallel_outputs.get(name)
+    }
+
     /// Finds one I2S stream reserved by a peripheral implementation.
     #[must_use]
     pub fn i2s_stream(&self, name: &str) -> Option<&I2sStreamDefinition> {
@@ -471,6 +481,10 @@ impl PeripheralIoDefinition {
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
             || self
+                .parallel_outputs
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
                 .i2s_streams
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
@@ -483,12 +497,16 @@ impl PeripheralIoDefinition {
     /// Returns whether a fixed built-in declaration consumes this DMA channel.
     ///
     /// Platform-owned runtime DMA pools use this to remove channels already
-    /// moved into camera or I2S peripheral bindings.
+    /// moved into camera, parallel-output, or I2S peripheral bindings.
     #[must_use]
     pub fn uses_dma(&self, dma: &str) -> bool {
         self.camera_captures
             .values()
             .any(|binding| binding.dma == dma)
+            || self
+                .parallel_outputs
+                .values()
+                .any(|binding| binding.dma == dma)
             || self.i2s_streams.values().any(|binding| binding.dma == dma)
     }
 
@@ -535,6 +553,19 @@ impl PeripheralIoDefinition {
                 validate_identifier(name, "miso", miso)?;
             }
             validate_spi_data_pin(name, spi.mosi.as_deref(), spi.miso.as_deref())?;
+            if spi.three_wire && (spi.mosi.is_none() || spi.miso.is_some()) {
+                return Err(ConfigError::InvalidThreeWireSpi {
+                    resource: name.clone(),
+                });
+            }
+            if let Some(read_frequency_hz) = spi.read_frequency_hz {
+                if !spi.three_wire {
+                    return Err(ConfigError::InvalidThreeWireSpi {
+                        resource: name.clone(),
+                    });
+                }
+                validate_frequency(name, read_frequency_hz)?;
+            }
             validate_frequency(name, spi.frequency_hz)?;
         }
         for (name, spi) in &self.quad_spi_devices {
@@ -548,6 +579,10 @@ impl PeripheralIoDefinition {
         for (name, camera) in &self.camera_captures {
             validate_resource_name("internal camera-capture", name)?;
             camera.validate(name)?;
+        }
+        for (name, output) in &self.parallel_outputs {
+            validate_resource_name("internal parallel-output", name)?;
+            output.validate(name)?;
         }
         for (name, stream) in &self.i2s_streams {
             validate_resource_name("internal i2s-stream", name)?;
@@ -800,6 +835,88 @@ impl SdmmcDeviceDefinition {
             || (self.bus_width == 4 && self.power_channel.is_none())
         {
             return Err(ConfigError::InvalidSdmmcDevice {
+                resource: name.to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// One Intel 8080-style parallel display write bus and its fixed Board wiring.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ParallelOutputDefinition {
+    peripheral: String,
+    dma: String,
+    wr: String,
+    dc: String,
+    #[serde(rename = "chip-select")]
+    chip_select: String,
+    data: [String; 8],
+    #[serde(rename = "frequency-hz")]
+    frequency_hz: u32,
+    #[serde(rename = "dma-buffer-bytes")]
+    dma_buffer_bytes: usize,
+}
+
+impl ParallelOutputDefinition {
+    /// Returns the chip-native parallel-output controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+    /// Returns the chip-native DMA channel.
+    #[must_use]
+    pub fn dma(&self) -> &str {
+        &self.dma
+    }
+    /// Returns the write-strobe pin.
+    #[must_use]
+    pub fn wr(&self) -> &str {
+        &self.wr
+    }
+    /// Returns the data/command pin.
+    #[must_use]
+    pub fn dc(&self) -> &str {
+        &self.dc
+    }
+    /// Returns the chip-select pin.
+    #[must_use]
+    pub fn chip_select(&self) -> &str {
+        &self.chip_select
+    }
+    /// Returns the eight data pins in least-significant-bit order.
+    #[must_use]
+    pub fn data(&self) -> &[String; 8] {
+        &self.data
+    }
+    /// Returns the write-strobe frequency.
+    #[must_use]
+    pub const fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+    /// Returns the statically allocated DMA transfer-buffer capacity.
+    #[must_use]
+    pub const fn dma_buffer_bytes(&self) -> usize {
+        self.dma_buffer_bytes
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        for (field, value) in [
+            ("peripheral", self.peripheral.as_str()),
+            ("dma", self.dma.as_str()),
+            ("wr", self.wr.as_str()),
+            ("dc", self.dc.as_str()),
+            ("chip-select", self.chip_select.as_str()),
+        ] {
+            validate_identifier(name, field, value)?;
+        }
+        for pin in &self.data {
+            validate_identifier(name, "data", pin)?;
+        }
+        validate_frequency(name, self.frequency_hz)?;
+        if self.dma_buffer_bytes == 0 {
+            return Err(ConfigError::ZeroDmaBuffer {
                 resource: name.to_owned(),
             });
         }
@@ -1149,6 +1266,10 @@ pub struct SpiDeviceDefinition {
     mosi: Option<String>,
     #[serde(default)]
     miso: Option<String>,
+    #[serde(default, rename = "three-wire")]
+    three_wire: bool,
+    #[serde(default, rename = "read-frequency-hz")]
+    read_frequency_hz: Option<u32>,
     #[serde(rename = "chip-select")]
     chip_select: String,
     #[serde(rename = "frequency-hz")]
@@ -1239,6 +1360,20 @@ impl SpiDeviceDefinition {
     #[must_use]
     pub fn chip_select(&self) -> &str {
         &self.chip_select
+    }
+
+    /// Returns whether `mosi` is one bidirectional data line (three-wire SPI)
+    /// on which the device also answers reads.
+    #[must_use]
+    pub const fn three_wire(&self) -> bool {
+        self.three_wire
+    }
+
+    /// Returns the clock used for reads on a three-wire device, which
+    /// defaults to the write clock.
+    #[must_use]
+    pub fn read_frequency_hz(&self) -> u32 {
+        self.read_frequency_hz.unwrap_or(self.frequency_hz)
     }
 
     /// Returns the initial bus frequency for this device.
@@ -1812,6 +1947,14 @@ pub enum ConfigError {
     /// An SPI declaration has neither a controller-output nor controller-input pin.
     #[error("Board SPI resource `{resource}` must declare `mosi`, `miso`, or both")]
     MissingSpiDataPin {
+        /// Board-level SPI resource name.
+        resource: String,
+    },
+    /// A three-wire SPI device must name its one bidirectional line as `mosi`.
+    #[error(
+        "Board SPI resource `{resource}` must declare `three-wire` with its shared data line as `mosi`, no `miso`, and `read-frequency-hz` only when three-wire"
+    )]
+    InvalidThreeWireSpi {
         /// Board-level SPI resource name.
         resource: String,
     },

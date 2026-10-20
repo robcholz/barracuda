@@ -1,4 +1,5 @@
 name: m5stack-unit-c6l
+profile: screen
 hardware:
   chip: esp32c6
   # Stamp C6LoRa (ESP32-C6 with 16 MB flash).
@@ -7,3 +8,28 @@ toolchain:
   target: riscv32imac-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    spi-device:
+      display-spi:
+        # M5GFX `board_M5UnitC6L`: SCLK G20, MOSI G21, OLED CS G6 at 40 MHz.
+        # The bus is shared with the SX1262 LoRa modem, which is not declared.
+        peripheral: SPI2
+        sck: GPIO20
+        mosi: GPIO21
+        chip-select: GPIO6
+        frequency-hz: 40000000
+  devices:
+    display:
+      # 0.66-inch 64 x 48 SSD1306 OLED at GDDRAM column 32 (M5GFX
+      # `Panel_SSD1306` with `offset_x = 32`); D/C G18, reset G15.
+      implementation: ssd1306-spi-display
+      bindings:
+        spi: display-spi
+        dc: GPIO18
+        reset: GPIO15
+      parameters:
+        width: 64
+        height: 48
+        column-offset: 32
+        com-pins: 18

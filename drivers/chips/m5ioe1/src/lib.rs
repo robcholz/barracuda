@@ -1,62 +1,94 @@
 //! Low-level Driver for one M5Stack M5IOE1 I2C I/O expander.
 //!
 //! The M5IOE1 is M5Stack's microcontroller-based expander with fourteen
-//! pins, G1 to G14, four of which can also output PWM. Register addresses and
-//! bit layout follow M5Unified's `M5IOE1_Class` (src/utility/M5IOE1_Class.inl,
-//! MIT license): every per-pin register is a low/high pair, G1 to G8 in the
-//! low byte and G9 to G14 in the high byte.
+//! GPIOs (`IO1`..`IO14`) and four 12-bit PWM channels. Its registers, taken
+//! from M5Stack's M5Unified `M5IOE1_Class` (src/utility/M5IOE1_Class.inl,
+//! MIT license), keep the low eight pins in a `_L` register and the rest in
+//! the following `_H` register:
+//!
+//! | Register | Address |
+//! | --- | --- |
+//! | `UID_L`/`UID_H` | `00h`/`01h` |
+//! | `GPIO_MODE` (1 = output) | `03h`/`04h` |
+//! | `GPIO_OUT` | `05h`/`06h` |
+//! | `GPIO_IN` | `07h`/`08h` |
+//! | `GPIO_DRV` (1 = open drain) | `13h`/`14h` |
+//! | `PWMn_DUTY` (12-bit, bit 15 enable, bit 14 inverted) | `1Bh` + 2(n-1) |
+//! | `I2C_CFG` | `23h` |
+//! | `PWM_FREQ` (Hz, shared) | `25h`/`26h` |
+//!
+//! The chip enters an I2C idle sleep that can survive a battery-powered
+//! shutdown; [`M5ioe1::wake`] clears it as M5Unified's `begin` does.
 
 #![no_std]
 
 use embedded_hal::i2c::I2c;
 
 /// Factory I2C address.
-pub const DEFAULT_ADDRESS: u8 = 0x4F;
+pub const DEFAULT_ADDRESS: u8 = 0x4f;
 
+const UID: u8 = 0x00;
 const GPIO_MODE: u8 = 0x03;
-const GPIO_OUTPUT: u8 = 0x05;
-const GPIO_INPUT: u8 = 0x07;
+const GPIO_OUT: u8 = 0x05;
+const GPIO_IN: u8 = 0x07;
 const GPIO_DRIVE: u8 = 0x13;
-const PWM1_DUTY: u8 = 0x1B;
+const PWM1_DUTY: u8 = 0x1b;
 const I2C_CONFIG: u8 = 0x23;
 const PWM_FREQUENCY: u8 = 0x25;
+
+/// `I2C_CFG` value with the idle sleep disabled and the bus at its default
+/// 100 kHz.
+const I2C_CONFIG_AWAKE: u8 = 0x00;
+/// Highest 12-bit PWM duty.
+pub const MAX_DUTY: u16 = 0x0fff;
 const PWM_ENABLE: u8 = 1 << 7;
-const PWM_DUTY_MAX: u16 = 0x0FFF;
+const PWM_INVERTED: u8 = 1 << 6;
 const PIN_COUNT: u8 = 14;
 
-/// One of the four PWM outputs and the pin it drives.
+/// One of the four PWM channels and the pin it drives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PwmChannel {
-    /// PWM on G9.
-    G9,
-    /// PWM on G8.
-    G8,
-    /// PWM on G11.
-    G11,
-    /// PWM on G10.
-    G10,
+    /// Channel 1 on `IO9`.
+    Ch1,
+    /// Channel 2 on `IO8`.
+    Ch2,
+    /// Channel 3 on `IO11`.
+    Ch3,
+    /// Channel 4 on `IO10`.
+    Ch4,
 }
 
 impl PwmChannel {
     const fn duty_register(self) -> u8 {
         // Each channel's duty is a low/high byte pair after PWM1's.
         match self {
-            Self::G9 => PWM1_DUTY,
-            Self::G8 => 0x1D,
-            Self::G11 => 0x1F,
-            Self::G10 => 0x21,
+            Self::Ch1 => PWM1_DUTY,
+            Self::Ch2 => 0x1d,
+            Self::Ch3 => 0x1f,
+            Self::Ch4 => 0x21,
+        }
+    }
+
+    /// Returns the `IO` pin number the channel drives.
+    #[must_use]
+    pub const fn pin(self) -> u8 {
+        match self {
+            Self::Ch1 => 9,
+            Self::Ch2 => 8,
+            Self::Ch3 => 11,
+            Self::Ch4 => 10,
         }
     }
 }
 
 /// M5IOE1 register or configuration failure.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error<BusError> {
     /// The address is outside the seven-bit I2C range.
     InvalidAddress,
-    /// The pin is not one of G1 to G14.
+    /// The pin is outside `IO1`..`IO14`.
     InvalidPin,
-    /// A PWM duty is above the 12-bit maximum.
+    /// The duty exceeds [`MAX_DUTY`].
     InvalidDuty,
     /// An I2C register operation failed.
     Bus(BusError),
@@ -84,88 +116,109 @@ where
         Ok(Self { i2c, address })
     }
 
-    /// Keeps the expander's I2C interface awake at its default 100 kHz, as
-    /// M5Unified does before using it.
+    /// Reads the chip's unique ID, proving it answers, and disables its I2C
+    /// idle sleep at the default 100 kHz, as M5Unified does before using it.
     ///
     /// # Errors
     ///
     /// Returns an I2C register error.
-    pub fn disable_i2c_sleep(&mut self) -> Result<(), Error<I2C::Error>> {
-        self.write(&[I2C_CONFIG, 0x00])
+    pub fn wake(&mut self) -> Result<u16, Error<I2C::Error>> {
+        let mut uid = [0; 2];
+        self.i2c
+            .write_read(self.address, &[UID], &mut uid)
+            .map_err(Error::Bus)?;
+        self.write(I2C_CONFIG, I2C_CONFIG_AWAKE)?;
+        Ok(u16::from_le_bytes(uid))
     }
 
-    /// Makes pin `g` (1 to 14) a push-pull output. Its level is the output
-    /// latch, which [`M5ioe1::set_output`] writes.
+    /// Configures `IO<pin>` (1 to 14) as a push-pull output driving
+    /// `initial_high`. The level is latched before the pin starts driving.
     ///
     /// # Errors
     ///
     /// Returns an invalid-pin or I2C register error.
-    pub fn configure_output(&mut self, g: u8) -> Result<(), Error<I2C::Error>> {
-        let (offset, mask) = pin_bit(g)?;
-        self.update(GPIO_DRIVE.wrapping_add(offset), |value| value & !mask)?;
-        self.update(GPIO_MODE.wrapping_add(offset), |value| value | mask)
+    pub fn configure_output(
+        &mut self,
+        pin: u8,
+        initial_high: bool,
+    ) -> Result<(), Error<I2C::Error>> {
+        let (offset, mask) = pin_bit(pin)?;
+        self.update(GPIO_OUT, offset, |value| {
+            set_bits(value, mask, initial_high)
+        })?;
+        self.update(GPIO_DRIVE, offset, |value| value & !mask)?;
+        self.update(GPIO_MODE, offset, |value| value | mask)
     }
 
-    /// Drives output pin `g` (1 to 14) high or low.
+    /// Drives a previously configured `IO<pin>` output.
     ///
     /// # Errors
     ///
     /// Returns an invalid-pin or I2C register error.
-    pub fn set_output(&mut self, g: u8, high: bool) -> Result<(), Error<I2C::Error>> {
-        let (offset, mask) = pin_bit(g)?;
-        self.update(GPIO_OUTPUT.wrapping_add(offset), |value| {
-            if high { value | mask } else { value & !mask }
-        })
+    pub fn set_output(&mut self, pin: u8, high: bool) -> Result<(), Error<I2C::Error>> {
+        let (offset, mask) = pin_bit(pin)?;
+        self.update(GPIO_OUT, offset, |value| set_bits(value, mask, high))
     }
 
-    /// Reads input pin `g` (1 to 14).
+    /// Reads the level of `IO<pin>`.
     ///
     /// # Errors
     ///
     /// Returns an invalid-pin or I2C register error.
-    pub fn input_is_high(&mut self, g: u8) -> Result<bool, Error<I2C::Error>> {
-        let (offset, mask) = pin_bit(g)?;
-        Ok(self.read(GPIO_INPUT.wrapping_add(offset))? & mask != 0)
+    pub fn input_is_high(&mut self, pin: u8) -> Result<bool, Error<I2C::Error>> {
+        let (offset, mask) = pin_bit(pin)?;
+        Ok(self.read(GPIO_IN.wrapping_add(offset))? & mask != 0)
     }
 
-    /// Sets the frequency shared by all four PWM outputs.
+    /// Sets the PWM frequency shared by all four channels.
     ///
     /// # Errors
     ///
     /// Returns an I2C register error.
     pub fn set_pwm_frequency(&mut self, hertz: u16) -> Result<(), Error<I2C::Error>> {
         let [low, high] = hertz.to_le_bytes();
-        self.write(&[PWM_FREQUENCY, low, high])
+        self.i2c
+            .write(self.address, &[PWM_FREQUENCY, low, high])
+            .map_err(Error::Bus)
     }
 
-    /// Sets one PWM output's 12-bit duty (0 to 4095) and whether it runs.
+    /// Sets one channel's 12-bit duty, its polarity, and whether it runs.
+    /// The channel's pin must be a push-pull output.
     ///
     /// # Errors
     ///
-    /// Returns an invalid-duty or I2C register error.
+    /// Returns [`Error::InvalidDuty`] above [`MAX_DUTY`], or an I2C error.
     pub fn set_pwm_duty(
         &mut self,
         channel: PwmChannel,
         duty: u16,
+        inverted: bool,
         enabled: bool,
     ) -> Result<(), Error<I2C::Error>> {
-        if duty > PWM_DUTY_MAX {
+        if duty > MAX_DUTY {
             return Err(Error::InvalidDuty);
         }
         let [low, mut high] = duty.to_le_bytes();
         if enabled {
             high |= PWM_ENABLE;
         }
-        self.write(&[channel.duty_register(), low, high])
+        if inverted {
+            high |= PWM_INVERTED;
+        }
+        self.i2c
+            .write(self.address, &[channel.duty_register(), low, high])
+            .map_err(Error::Bus)
     }
 
     fn update(
         &mut self,
-        register: u8,
+        register_low: u8,
+        offset: u8,
         update: impl FnOnce(u8) -> u8,
     ) -> Result<(), Error<I2C::Error>> {
+        let register = register_low.wrapping_add(offset);
         let value = self.read(register)?;
-        self.write(&[register, update(value)])
+        self.write(register, update(value))
     }
 
     fn read(&mut self, register: u8) -> Result<u8, Error<I2C::Error>> {
@@ -176,23 +229,25 @@ where
         Ok(value[0])
     }
 
-    fn write(&mut self, bytes: &[u8]) -> Result<(), Error<I2C::Error>> {
-        self.i2c.write(self.address, bytes).map_err(Error::Bus)
+    fn write(&mut self, register: u8, value: u8) -> Result<(), Error<I2C::Error>> {
+        self.i2c
+            .write(self.address, &[register, value])
+            .map_err(Error::Bus)
     }
 }
 
-/// Returns which register of a pair holds pin `g` (`0` for G1 to G8, `1` for
-/// G9 to G14) and its bit there.
-fn pin_bit<BusError>(g: u8) -> Result<(u8, u8), Error<BusError>> {
-    if !(1..=PIN_COUNT).contains(&g) {
-        return Err(Error::InvalidPin);
-    }
-    let index = g.saturating_sub(1);
-    let offset = u8::from(index >= 8);
-    let bit = 1_u8
-        .checked_shl(u32::from(index & 7))
+/// Returns which register of a pair holds `IO<pin>` (`0` for `IO1`..`IO8`,
+/// `1` for `IO9`..`IO14`) and its bit mask there.
+fn pin_bit<BusError>(pin: u8) -> Result<(u8, u8), Error<BusError>> {
+    let index = pin
+        .checked_sub(1)
+        .filter(|index| *index < PIN_COUNT)
         .ok_or(Error::InvalidPin)?;
-    Ok((offset, bit))
+    Ok((index >> 3, 1 << (index & 7)))
+}
+
+const fn set_bits(value: u8, mask: u8, high: bool) -> u8 {
+    if high { value | mask } else { value & !mask }
 }
 
 #[cfg(test)]
@@ -200,61 +255,93 @@ fn pin_bit<BusError>(g: u8) -> Result<(u8, u8), Error<BusError>> {
 mod tests {
     extern crate std;
 
-    use core::convert::Infallible;
+    use std::vec::Vec;
 
     use embedded_hal::i2c::{ErrorType, I2c, Operation};
 
-    use super::{Error, GPIO_DRIVE, GPIO_MODE, GPIO_OUTPUT, M5ioe1, PwmChannel};
+    use super::{Error, GPIO_DRIVE, GPIO_MODE, GPIO_OUT, M5ioe1, PwmChannel};
 
+    /// Register file that records register writes.
     struct Bus {
         registers: [u8; 0x30],
+        writes: Vec<Vec<u8>>,
     }
 
     impl Default for Bus {
         fn default() -> Self {
             Self {
                 registers: [0; 0x30],
+                writes: Vec::new(),
             }
         }
     }
 
     impl ErrorType for Bus {
-        type Error = Infallible;
+        type Error = core::convert::Infallible;
     }
 
     impl I2c for Bus {
-        fn read(&mut self, _address: u8, bytes: &mut [u8]) -> Result<(), Self::Error> {
-            bytes.fill(0);
-            Ok(())
-        }
-
-        fn write(&mut self, _address: u8, bytes: &[u8]) -> Result<(), Self::Error> {
-            if let [register, values @ ..] = bytes {
-                let start = usize::from(*register);
-                self.registers[start..start + values.len()].copy_from_slice(values);
-            }
-            Ok(())
-        }
-
-        fn write_read(
-            &mut self,
-            _address: u8,
-            bytes: &[u8],
-            read: &mut [u8],
-        ) -> Result<(), Self::Error> {
-            if let ([register], [value]) = (bytes, read) {
-                *value = self.registers[usize::from(*register)];
-            }
-            Ok(())
-        }
-
         fn transaction(
             &mut self,
-            _address: u8,
-            _operations: &mut [Operation<'_>],
+            address: u8,
+            operations: &mut [Operation<'_>],
         ) -> Result<(), Self::Error> {
+            assert_eq!(address, 0x4f);
+            let mut selected = 0;
+            for operation in operations {
+                match operation {
+                    Operation::Write([register]) => selected = usize::from(*register),
+                    Operation::Write(bytes) => {
+                        let start = usize::from(bytes[0]);
+                        for (offset, value) in bytes[1..].iter().enumerate() {
+                            self.registers[start + offset] = *value;
+                        }
+                        self.writes.push(bytes.to_vec());
+                    }
+                    Operation::Read(buffer) => {
+                        for (offset, value) in buffer.iter_mut().enumerate() {
+                            *value = self.registers[selected + offset];
+                        }
+                    }
+                }
+            }
             Ok(())
         }
+    }
+
+    #[test]
+    fn wake_reads_the_uid_and_disables_idle_sleep() {
+        let mut bus = Bus::default();
+        bus.registers[0] = 0x34;
+        bus.registers[1] = 0x12;
+        bus.registers[0x23] = 0x80;
+        let uid = M5ioe1::new(&mut bus, 0x4f)
+            .expect("valid address")
+            .wake()
+            .expect("wake");
+        assert_eq!(uid, 0x1234);
+        assert_eq!(bus.registers[0x23], 0);
+    }
+
+    #[test]
+    fn outputs_latch_their_level_before_driving() {
+        let mut bus = Bus::default();
+        bus.registers[0x13] = 0xff;
+        bus.registers[0x14] = 0xff;
+        {
+            let mut expander = M5ioe1::new(&mut bus, 0x4f).expect("valid address");
+            // IO1: low register, bit 0.
+            expander.configure_output(1, true).expect("IO1");
+            // IO12: high register, bit 3.
+            expander.configure_output(12, false).expect("IO12");
+            expander.set_output(12, true).expect("IO12 high");
+        }
+        assert_eq!(bus.writes[0], [0x05, 0x01]);
+        assert_eq!(bus.writes[1], [0x13, 0xfe]);
+        assert_eq!(bus.writes[2], [0x03, 0x01]);
+        assert_eq!(bus.registers[0x04], 0x08);
+        assert_eq!(bus.registers[0x14], 0xf7);
+        assert_eq!(bus.registers[0x06], 0x08);
     }
 
     #[test]
@@ -263,12 +350,11 @@ mod tests {
         bus.registers[usize::from(GPIO_DRIVE)] = 0xff;
         bus.registers[usize::from(GPIO_DRIVE + 1)] = 0xff;
         {
-            let mut expander = M5ioe1::new(&mut bus, 0x4f).expect("expander");
-            // M5GFX's CoreP4X bring-up: G8 is bit 7 of the low registers,
-            // G9 to G12 are bits 0 to 3 of the high ones.
-            for g in [8, 9, 12] {
-                expander.configure_output(g).expect("output");
-                expander.set_output(g, true).expect("high");
+            let mut expander = M5ioe1::new(&mut bus, 0x4f).expect("valid address");
+            // M5GFX's CoreP4X bring-up: IO8 is bit 7 of the low registers,
+            // IO9 to IO12 are bits 0 to 3 of the high ones.
+            for pin in [8, 9, 12] {
+                expander.configure_output(pin, true).expect("output");
             }
             expander.set_output(9, false).expect("low");
         }
@@ -276,50 +362,54 @@ mod tests {
         assert_eq!(bus.registers[usize::from(GPIO_DRIVE + 1)], 0xf6);
         assert_eq!(bus.registers[usize::from(GPIO_MODE)], 0x80);
         assert_eq!(bus.registers[usize::from(GPIO_MODE + 1)], 0x09);
-        assert_eq!(bus.registers[usize::from(GPIO_OUTPUT)], 0x80);
-        assert_eq!(bus.registers[usize::from(GPIO_OUTPUT + 1)], 0x08);
+        assert_eq!(bus.registers[usize::from(GPIO_OUT)], 0x80);
+        assert_eq!(bus.registers[usize::from(GPIO_OUT + 1)], 0x08);
     }
 
     #[test]
-    fn pwm_writes_frequency_and_enabled_twelve_bit_duty() {
+    fn pwm_writes_frequency_and_flagged_duty() {
         let mut bus = Bus::default();
         {
-            let mut expander = M5ioe1::new(&mut bus, 0x4f).expect("expander");
-            expander.set_pwm_frequency(1_000).expect("frequency");
+            let mut expander = M5ioe1::new(&mut bus, 0x4f).expect("valid address");
+            expander.set_pwm_frequency(1000).expect("frequency");
             expander
-                .set_pwm_duty(PwmChannel::G9, 0x0abc, true)
+                .set_pwm_duty(PwmChannel::Ch3, 0x0abc, false, true)
                 .expect("duty");
             expander
-                .set_pwm_duty(PwmChannel::G10, 0x0123, false)
+                .set_pwm_duty(PwmChannel::Ch1, 0x0001, true, false)
                 .expect("duty");
+            expander
+                .set_pwm_duty(PwmChannel::Ch4, 0x0123, false, false)
+                .expect("duty");
+            assert_eq!(
+                expander.set_pwm_duty(PwmChannel::Ch1, 0x1000, false, true),
+                Err(Error::InvalidDuty)
+            );
         }
         // Frequency register 0x25, little-endian.
-        assert_eq!(bus.registers[0x25..0x27], [0xe8, 0x03]);
-        // PWM1 duty at 0x1B with the enable bit 7 of its high byte.
-        assert_eq!(bus.registers[0x1b..0x1d], [0xbc, 0x8a]);
-        // PWM4 (G10) three channels later.
-        assert_eq!(bus.registers[0x21..0x23], [0x23, 0x01]);
+        assert_eq!(bus.writes[0], [0x25, 0xe8, 0x03]);
+        // PWM3 duty at 0x1F with the enable bit 7 of its high byte.
+        assert_eq!(bus.writes[1], [0x1f, 0xbc, 0x8a]);
+        // PWM1 at 0x1B with the polarity bit 6.
+        assert_eq!(bus.writes[2], [0x1b, 0x01, 0x40]);
+        // PWM4 three channels after PWM1.
+        assert_eq!(bus.writes[3], [0x21, 0x23, 0x01]);
+        assert_eq!(PwmChannel::Ch1.pin(), 9);
+        assert_eq!(PwmChannel::Ch2.pin(), 8);
+        assert_eq!(PwmChannel::Ch3.pin(), 11);
+        assert_eq!(PwmChannel::Ch4.pin(), 10);
     }
 
     #[test]
-    fn rejects_invalid_addresses_pins_and_duties() {
+    fn rejects_invalid_addresses_and_pins() {
         let mut bus = Bus::default();
         assert!(matches!(
             M5ioe1::new(&mut bus, 0x80),
             Err(Error::InvalidAddress)
         ));
-        let mut expander = M5ioe1::new(&mut bus, 0x4f).expect("expander");
-        assert!(matches!(
-            expander.configure_output(0),
-            Err(Error::InvalidPin)
-        ));
-        assert!(matches!(
-            expander.set_output(15, true),
-            Err(Error::InvalidPin)
-        ));
-        assert!(matches!(
-            expander.set_pwm_duty(PwmChannel::G8, 0x1000, true),
-            Err(Error::InvalidDuty)
-        ));
+        let mut expander = M5ioe1::new(&mut bus, 0x4f).expect("valid address");
+        assert_eq!(expander.configure_output(0, true), Err(Error::InvalidPin));
+        assert_eq!(expander.set_output(15, true), Err(Error::InvalidPin));
+        assert_eq!(expander.input_is_high(15), Err(Error::InvalidPin));
     }
 }

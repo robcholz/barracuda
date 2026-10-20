@@ -1,4 +1,5 @@
 name: m5stack-stamp-plc
+profile: screen
 hardware:
   chip: esp32s3
   # Stamp-S3A (ESP32-S3FN8).
@@ -7,3 +8,42 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified internal bus: SCL G15, SDA G13.
+        peripheral: I2C0
+        scl: GPIO15
+        sda: GPIO13
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        # M5GFX `board_M5StampPLC`: SCLK G7, MOSI G8, CS G12 at 40 MHz. The
+        # bus's MISO (G9) belongs to the microSD slot, which is not declared.
+        peripheral: SPI2
+        sck: GPIO7
+        mosi: GPIO8
+        chip-select: GPIO12
+        frequency-hz: 40000000
+  devices:
+    display:
+      # 1.14-inch ST7789V2; M5GFX `Light_M5StackStampPLC` switches its
+      # backlight with PI4IOE5V6408 (0x43) output 7, lit while low.
+      implementation: mipi-dbi-pi4ioe5v6408-display
+      bindings:
+        spi: display-spi
+        dc: GPIO6
+        reset: GPIO3
+        expander: internal-i2c
+      parameters:
+        controller: st7789
+        width: 135
+        height: 240
+        offset-x: 52
+        offset-y: 40
+        invert-colors: true
+        orientation: deg90
+        expander-address: 67
+        backlight-pin: 7
+        backlight-active-high: false

@@ -464,6 +464,66 @@ peripherals:
 }
 
 #[test]
+fn parses_three_wire_spi_device() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    spi-device:
+      panel:
+        peripheral: SPI3
+        sck: GPIO17
+        mosi: GPIO21
+        three-wire: true
+        read-frequency-hz: 100000
+        chip-select: GPIO15
+        frequency-hz: 40000000
+"#;
+
+    let board = parse(yaml).expect("valid three-wire SPI device");
+    let spi = board
+        .peripheral_io()
+        .spi_device("panel")
+        .expect("panel SPI device");
+    assert!(spi.three_wire());
+    assert_eq!(spi.mosi(), Some("GPIO21"));
+    assert_eq!(spi.read_frequency_hz(), 100_000);
+}
+
+#[test]
+fn rejects_three_wire_spi_device_with_separate_input() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    spi-device:
+      panel:
+        peripheral: SPI3
+        sck: GPIO17
+        mosi: GPIO21
+        miso: GPIO22
+        three-wire: true
+        chip-select: GPIO15
+        frequency-hz: 40000000
+"#;
+
+    assert_eq!(
+        parse(yaml).unwrap_err(),
+        ConfigError::InvalidThreeWireSpi {
+            resource: String::from("panel"),
+        }
+    );
+}
+
+#[test]
 fn rejects_multiple_yaml_documents() {
     let yaml = format!("{VALID}\n---\n{VALID}");
     assert_eq!(parse(&yaml).unwrap_err(), ConfigError::DocumentCount(2));

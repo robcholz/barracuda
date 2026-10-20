@@ -72,6 +72,41 @@ exposed-io:
 only runtime-configurable Board I/O surface. A chip-native token cannot be both
 private peripheral wiring and exposed I/O.
 
+Some panels answer reads on the same line the host writes on. Such an
+`spi-device` names that line as `mosi` and sets `three-wire: true`; its reads
+then come back on `mosi`, at `read-frequency-hz` when the device answers only
+at a slower clock than it is written:
+
+~~~yaml
+spi-device:
+  display-spi:
+    peripheral: SPI3
+    sck: GPIO17
+    mosi: GPIO21
+    three-wire: true
+    read-frequency-hz: 8000000
+    chip-select: GPIO15
+    frequency-hz: 40000000
+~~~
+
+A panel on an eight-bit Intel 8080 bus is a `parallel-output`: its write
+strobe, data/command and chip-select lines, eight data lines in bit order, the
+strobe clock, and the DMA staging buffer. The Platform hands it to the display
+implementation as a `ParallelBus`:
+
+~~~yaml
+parallel-output:
+  display-bus:
+    peripheral: LCD_CAM
+    dma: DMA_CH1
+    wr: GPIO11
+    dc: GPIO12
+    chip-select: GPIO14
+    data: [GPIO13, GPIO9, GPIO8, GPIO7, GPIO6, GPIO5, GPIO4, GPIO3]
+    frequency-hz: 10000000
+    dma-buffer-bytes: 4096
+~~~
+
 Every generated semantic slot is optional. A Board with no real-time clock has
 no `RealTimeClock` value; a Board with one has `Some(concrete_clock)`. Absence
 does not require fake hardware, and presence does not expose helper chips.

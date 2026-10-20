@@ -587,7 +587,7 @@ Platform adaptation + peripheral implementations + Board matrix -> Board HAL ---
 Platform services -> { IP, entropy, partitions } ------------------------+-> System -> Plugins
 ~~~
 
-平台 crate 不拥有外设实现或开发板组合。它们拥有的是自己的厂商 HAL 令牌词汇，以及 GPIO、I2C、SPI、摄像头、I2S 和延时的构造函数。由 DMA 支撑的媒体资源是静态组合的：`camera-capture` 和 `i2s-stream` 声明用 `dma-buffer-bytes` 确定存储大小，所选平台在具体开发板的调用处分配它。语义化适配留在 `peripherals/impl` 下；可复用的寄存器和协议行为属于 `drivers/chips`。与开发板相关的 crate 留在 `boards/` 下；所选 Target 的组合根留在单个平台实现之外。
+平台 crate 不拥有外设实现或开发板组合。它们拥有的是自己的厂商 HAL 令牌词汇，以及 GPIO、I2C、SPI、摄像头、并行显示、I2S 和延时的构造函数。由 DMA 支撑的媒体资源是静态组合的：`camera-capture`、`parallel-output` 和 `i2s-stream` 声明用 `dma-buffer-bytes` 确定存储大小，所选平台在具体开发板的调用处分配它。语义化适配留在 `peripherals/impl` 下；可复用的寄存器和协议行为属于 `drivers/chips`。与开发板相关的 crate 留在 `boards/` 下；所选 Target 的组合根留在单个平台实现之外。
 
 生成的组合调用所选平台的 `hal` 模块，并把得到的 `embedded-hal` 资源交给由其清单选择的外设实现。复用现有实现的新开发板只需要开发板 YAML。新的实现添加它的 crate 和 `peripheral.yml`；它可以复用现有的芯片驱动，并且不需要在中央渲染器中添加分支。
 

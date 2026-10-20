@@ -53,9 +53,12 @@ barracuda-platform-stm32 = { path = "platforms/stm32" }
 # END GENERATED PLATFORM WORKSPACE DEPENDENCIES
 # BEGIN GENERATED PERIPHERAL IMPLEMENTATION WORKSPACE DEPENDENCIES
 barracuda-apa102-led-strip = { path = "peripherals/impl/led-strip/apa102-led-strip" }
+barracuda-atom-s3-display = { path = "peripherals/impl/display/atom-s3-display" }
+barracuda-atom-s3r-display = { path = "peripherals/impl/display/atom-s3r-display" }
 barracuda-bmi270-imu = { path = "peripherals/impl/inertial-measurement/bmi270-imu" }
 barracuda-bq27220-power-monitor = { path = "peripherals/impl/power-monitor/bq27220-power-monitor" }
 barracuda-capacitive-touch-buttons = { path = "peripherals/impl/buttons/capacitive-touch-buttons" }
+barracuda-chain-captain-display = { path = "peripherals/impl/display/chain-captain-display" }
 barracuda-corep4x-dsi-display = { path = "peripherals/impl/display/corep4x-dsi-display" }
 barracuda-cst816t-touch = { path = "peripherals/impl/touch/cst816t-touch" }
 barracuda-es8311-audio-codec = { path = "peripherals/impl/audio-codec/es8311-audio-codec" }
@@ -67,11 +70,15 @@ barracuda-ina226-power-monitor = { path = "peripherals/impl/power-monitor/ina226
 barracuda-indicator-led = { path = "peripherals/impl/indicator/indicator-led" }
 barracuda-m5stack-pmic-display = { path = "peripherals/impl/display/m5stack-pmic-display" }
 barracuda-mipi-dbi-display = { path = "peripherals/impl/display/mipi-dbi-display" }
+barracuda-mipi-dbi-parallel-display = { path = "peripherals/impl/display/mipi-dbi-parallel-display" }
+barracuda-mipi-dbi-pi4ioe5v6408-display = { path = "peripherals/impl/display/mipi-dbi-pi4ioe5v6408-display" }
 barracuda-ov2640-camera = { path = "peripherals/impl/camera/ov2640-camera" }
 barracuda-ov3660-camera = { path = "peripherals/impl/camera/ov3660-camera" }
 barracuda-rx8130ce-rtc = { path = "peripherals/impl/real-time-clock/rx8130ce-rtc" }
 barracuda-sdmmc-fat-removable-storage = { path = "peripherals/impl/removable-storage/sdmmc-fat-removable-storage" }
+barracuda-ssd1306-spi-display = { path = "peripherals/impl/display/ssd1306-spi-display" }
 barracuda-st77916-qspi-display = { path = "peripherals/impl/display/st77916-qspi-display" }
+barracuda-stopwatch-co5300-display = { path = "peripherals/impl/display/stopwatch-co5300-display" }
 barracuda-tab5-dsi-display = { path = "peripherals/impl/display/tab5-dsi-display" }
 barracuda-tab5-sc202cs-camera = { path = "peripherals/impl/camera/tab5-sc202cs-camera" }
 barracuda-tab5-touch = { path = "peripherals/impl/touch/tab5-touch" }
@@ -149,6 +156,7 @@ barracuda-driver-aw9523 = { path = "drivers/chips/aw9523" }
 barracuda-driver-axp192 = { path = "drivers/chips/axp192" }
 barracuda-driver-axp2101 = { path = "drivers/chips/axp2101" }
 barracuda-driver-bq27220 = { path = "drivers/chips/bq27220" }
+barracuda-driver-co5300 = { path = "drivers/chips/co5300" }
 barracuda-driver-cst816t = { path = "drivers/chips/cst816t" }
 barracuda-driver-es8311 = { path = "drivers/chips/es8311" }
 barracuda-driver-es7210 = { path = "drivers/chips/es7210" }
@@ -157,12 +165,15 @@ barracuda-driver-es8389 = { path = "drivers/chips/es8389" }
 barracuda-driver-gt911 = { path = "drivers/chips/gt911" }
 barracuda-driver-ili9881c = { path = "drivers/chips/ili9881c" }
 barracuda-driver-ina226 = { path = "drivers/chips/ina226" }
+barracuda-driver-jd9853 = { path = "drivers/chips/jd9853" }
+barracuda-driver-lp5562 = { path = "drivers/chips/lp5562" }
 barracuda-driver-m5ioe1 = { path = "drivers/chips/m5ioe1" }
 barracuda-driver-m5pm1 = { path = "drivers/chips/m5pm1" }
 barracuda-driver-ov2640 = { path = "drivers/chips/ov2640" }
 barracuda-driver-ov3660 = { path = "drivers/chips/ov3660" }
 barracuda-driver-pi4ioe5v6408 = { path = "drivers/chips/pi4ioe5v6408" }
 barracuda-driver-rx8130ce = { path = "drivers/chips/rx8130ce" }
+barracuda-driver-ssd1306 = { path = "drivers/chips/ssd1306" }
 barracuda-driver-st712x = { path = "drivers/chips/st712x" }
 barracuda-driver-st77916 = { path = "drivers/chips/st77916" }
 barracuda-driver-ws2812-spi = { path = "drivers/chips/ws2812-spi" }

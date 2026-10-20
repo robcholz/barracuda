@@ -6,7 +6,7 @@ implementation:
   crate: barracuda_mipi_dbi_display
   factory: "::{{crate}}::MipiDbiDisplayImplementation<{{binding.spi.type}}, {{binding.dc.type}}, {{parameter.controller}}, {{binding.reset.type}}, {{binding.backlight.type}}, {{binding.power-hold.type}}, {{hal.delay.type}}, 512>"
   bindings-expression: "::{{crate}}::MipiDbiDisplayBindings::new({{binding.spi.value}}, {{binding.dc.value}}, {{binding.reset.value}}, Some({{binding.backlight.value}}), {{binding.power-hold.value}}, {{hal.delay.value}}, ::{{crate}}::take_transfer_buffer())"
-  config-expression: "::{{crate}}::MipiDbiDriverConfig::new({{parameter.controller}}, ::{{crate}}::MipiDbiDisplayConfig::new(::{{crate}}::Size::new({{parameter.width}}, {{parameter.height}}), ::barracuda_peripheral::display::PixelFormat::Rgb565, {{parameter.orientation}}).with_offset({{parameter.offset-x}}, {{parameter.offset-y}}).with_color_order({{parameter.color-order}}).with_inverted_colors({{parameter.invert-colors}}).with_digital_backlight({{parameter.backlight-active-high}}))"
+  config-expression: "::{{crate}}::MipiDbiDriverConfig::new({{parameter.controller}}, ::{{crate}}::MipiDbiDisplayConfig::new(::{{crate}}::Size::new({{parameter.width}}, {{parameter.height}}), ::barracuda_peripheral::display::PixelFormat::Rgb565, {{parameter.orientation}}).with_offset({{parameter.offset-x}}, {{parameter.offset-y}}).with_color_order({{parameter.color-order}}).with_inverted_colors({{parameter.invert-colors}}).with_digital_backlight({{parameter.backlight-active-high}}).with_reset_active_high({{parameter.reset-active-high}}))"
 bindings:
   spi:
     kind: spi-device
@@ -15,7 +15,11 @@ bindings:
     initial: low
   reset:
     kind: digital-output
-    initial: high
+    # A panel without a reset line is reset with the DCS software reset.
+    required: false
+    initial-from:
+      parameter: reset-active-high
+      values: { "true": low, "false": high }
   backlight:
     kind: digital-output
     initial-from:
@@ -73,3 +77,6 @@ parameters:
   backlight-active-high:
     type: boolean
     default: true
+  reset-active-high:
+    type: boolean
+    default: false

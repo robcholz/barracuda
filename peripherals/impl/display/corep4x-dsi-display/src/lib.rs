@@ -38,12 +38,13 @@ const HEIGHT: u16 = 480;
 /// G10 panel power, G11 panel reset, and G12 the shared 3.3 V rail (M5-Bus,
 /// microSD, IMU, infrared, Ethernet) that M5GFX enables in the same step.
 const TOUCH_RESET: u8 = 8;
-const BACKLIGHT: u8 = 9;
+const BACKLIGHT: u8 = BACKLIGHT_CHANNEL.pin();
 const PANEL_POWER: u8 = 10;
 const PANEL_RESET: u8 = 11;
 const SHARED_3V3: u8 = 12;
 /// `Light_M5CoreP4X`: 1 kHz PWM on M5IOE1 PWM channel 1 (G9).
 const BACKLIGHT_PWM_HZ: u16 = 1_000;
+const BACKLIGHT_CHANNEL: PwmChannel = PwmChannel::Ch1;
 /// M5GFX waits 150 ms after powering the panel before starting the link.
 const POWER_SETTLE_MS: u32 = 150;
 /// M5GFX waits 50 ms after the link comes up.
@@ -212,25 +213,19 @@ fn power_panel<I2C: I2c>(
         .map_err(BringUpError::Power)?;
 
     let mut expander = M5ioe1::new(i2c, config.expander_address).map_err(BringUpError::Expander)?;
-    expander
-        .disable_i2c_sleep()
-        .map_err(BringUpError::Expander)?;
-    let pins = [TOUCH_RESET, BACKLIGHT, PANEL_POWER, PANEL_RESET, SHARED_3V3];
-    for pin in pins {
+    expander.wake().map_err(BringUpError::Expander)?;
+    // M5GFX makes the pins push-pull outputs and then drives them high; the
+    // driver latches the high level first so no pin glitches low.
+    for pin in [TOUCH_RESET, BACKLIGHT, PANEL_POWER, PANEL_RESET, SHARED_3V3] {
         expander
-            .configure_output(pin)
-            .map_err(BringUpError::Expander)?;
-    }
-    for pin in pins {
-        expander
-            .set_output(pin, true)
+            .configure_output(pin, true)
             .map_err(BringUpError::Expander)?;
     }
     expander
         .set_pwm_frequency(BACKLIGHT_PWM_HZ)
         .map_err(BringUpError::Expander)?;
     expander
-        .set_pwm_duty(PwmChannel::G9, 0, true)
+        .set_pwm_duty(BACKLIGHT_CHANNEL, 0, false, true)
         .map_err(BringUpError::Expander)
 }
 
@@ -257,8 +252,9 @@ where
 {
     fn apply_brightness(&mut self, brightness: u8) -> Result<(), ExpanderError<I2C::Error>> {
         M5ioe1::new(&mut self.i2c, self.expander_address)?.set_pwm_duty(
-            PwmChannel::G9,
+            BACKLIGHT_CHANNEL,
             backlight_duty(brightness),
+            false,
             true,
         )
     }

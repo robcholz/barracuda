@@ -2,7 +2,7 @@
 name = "barracuda-driver-m5ioe1"
 version = "0.1.0"
 edition = "2024"
-description = "Low-level M5Stack M5IOE1 I2C I/O expander and PWM Driver"
+description = "Low-level M5Stack M5IOE1 I2C I/O expander and PWM controller driver"
 license = "AGPL-3.0-only"
 
 [dependencies]

@@ -149,6 +149,33 @@ pub trait QuadSpiBus {
 
     /// Writes one opcode, one 24-bit address, and an optional payload.
     fn write(&mut self, opcode: u8, address: u32, data: &[u8]) -> Result<(), Self::Error>;
+
+    /// Writes one opcode, one 24-bit address, and an optional payload, the
+    /// payload also on one data line. Display controllers take register
+    /// parameters this way and only pixel data on four lines.
+    fn write_single_line(
+        &mut self,
+        opcode: u8,
+        address: u32,
+        data: &[u8],
+    ) -> Result<(), Self::Error>;
+}
+
+/// One selected Intel 8080-style parallel write bus to a display controller.
+///
+/// The bus drives a data/command line, a write strobe, a chip select, and
+/// eight data lines. A command byte goes out with data/command low and its
+/// payload follows with it high; the Platform splits long payloads into
+/// transfers its controller can make without changing their meaning.
+pub trait ParallelBus {
+    /// Transport failure returned by the Platform adapter.
+    type Error: core::fmt::Debug;
+
+    /// Writes one command byte followed by its payload.
+    fn write_command(&mut self, command: u8, data: &[u8]) -> Result<(), Self::Error>;
+
+    /// Writes payload bytes continuing the previous command.
+    fn write_data(&mut self, data: &[u8]) -> Result<(), Self::Error>;
 }
 
 /// Two-channel capacitive-touch sampling transport supplied by a Platform.

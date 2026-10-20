@@ -1,4 +1,5 @@
 name: m5stack-stopwatch
+profile: screen
 hardware:
   chip: esp32s3
   # ESP32-S3R8 with 16 MB flash.
@@ -11,3 +12,32 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5GFX/M5Unified internal bus: SCL G48, SDA G47, at the M5IOE1's
+        # 100 kHz.
+        peripheral: I2C0
+        scl: GPIO48
+        sda: GPIO47
+        frequency-hz: 100000
+    quad-spi-device:
+      display-link:
+        # M5GFX `board_M5StopWatch`: SPI2, SCLK G40, IO0..IO3 G41/G42/G46/G45,
+        # CS G39, written at 80 MHz.
+        peripheral: SPI2
+        sck: GPIO40
+        data: [GPIO41, GPIO42, GPIO46, GPIO45]
+        chip-select: GPIO39
+        frequency-hz: 80000000
+  devices:
+    display:
+      # 1.75-inch 466 x 466 round AMOLED on a CO5300; reset and supply
+      # enables on the M5IOE1 at 0x4F.
+      implementation: stopwatch-co5300-display
+      bindings:
+        bus: display-link
+        expander: internal-i2c
+      parameters:
+        expander-address: 79
