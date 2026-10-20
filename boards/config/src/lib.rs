@@ -1477,6 +1477,8 @@ pub enum ExternalMemoryInterfaceDefinition {
     QuadSpi,
     /// Eight-data-line SPI.
     OctalSpi,
+    /// Sixteen-data-line DDR bus, as in the ESP32-P4's in-package PSRAM.
+    Hex,
 }
 
 /// Toolchain policy a Board carries so selection can configure Cargo's target.
@@ -1692,6 +1694,9 @@ pub fn render_rust(board: &BoardDefinition) -> String {
             }
             ExternalMemoryInterfaceDefinition::OctalSpi => {
                 "::barracuda_board::ExternalMemoryInterface::OctalSpi"
+            }
+            ExternalMemoryInterfaceDefinition::Hex => {
+                "::barracuda_board::ExternalMemoryInterface::Hex"
             }
         };
         format!(
