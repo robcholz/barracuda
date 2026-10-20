@@ -2,7 +2,7 @@
 name = "barracuda-driver-st712x"
 version = "0.1.0"
 edition = "2024"
-description = "Low-level Sitronix ST7121/ST7123 display-touch controller driver"
+description = "Low-level Sitronix ST7102/ST7121/ST7123 display and display-touch controller driver"
 license = "AGPL-3.0-only"
 
 [dependencies]
