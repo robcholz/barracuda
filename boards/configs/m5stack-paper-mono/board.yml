@@ -1,4 +1,5 @@
 name: m5stack-paper-mono
+profile: screen
 hardware:
   chip: esp32s3
   # ESP32-S3R8 with 16 MB flash.
@@ -11,3 +12,30 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal:
+        # M5GFX board_M5PaperMono / M5Unified internal I2C: M5PM1 (0x6E),
+        # M5IOE1 (0x4F), RX8130 RTC, BMI270, FT5x06 touch, NFC. M5GFX talks
+        # to the M5PM1 and M5IOE1 at 100 kHz.
+        peripheral: I2C0
+        scl: GPIO48
+        sda: GPIO47
+        frequency-hz: 100000
+    spi-device:
+      epd-spi:
+        # M5GFX board_M5PaperMono: SSD1677 on SPI2, write clock 40 MHz.
+        peripheral: SPI2
+        sck: GPIO15
+        mosi: GPIO14
+        chip-select: GPIO16
+        frequency-hz: 40000000
+  devices:
+    display:
+      implementation: paper-mono-display
+      bindings:
+        spi: epd-spi
+        dc: GPIO17
+        busy: GPIO18
+        i2c: internal
