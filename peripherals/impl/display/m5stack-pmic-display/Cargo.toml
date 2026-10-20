@@ -1,0 +1,32 @@
+[package]
+name = "barracuda-m5stack-pmic-display"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda display implementation for M5Stack SPI LCDs powered, reset, and lit through an AXP192 or AXP2101 PMIC and AW9523B expander"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-driver-aw9523.workspace = true
+barracuda-driver-axp192.workspace = true
+barracuda-driver-axp2101.workspace = true
+barracuda-mipi-dbi-display.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+mipidsi.workspace = true
+static_cell.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+embedded-graphics-core.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

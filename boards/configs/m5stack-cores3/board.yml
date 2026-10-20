@@ -1,4 +1,5 @@
 name: m5stack-cores3
+profile: screen
 hardware:
   chip: esp32s3
   # ESP32-S3 with 16 MB flash and 8 MB quad PSRAM.
@@ -11,3 +12,33 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5GFX/M5Unified: the internal bus (I2C_NUM_1, 400 kHz) of the AXP2101
+        # at 34h and the AW9523B at 58h.
+        peripheral: I2C1
+        scl: GPIO11
+        sda: GPIO12
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        # M5GFX CoreS3: SPI2_HOST at 40 MHz. GPIO35 is both MISO and LCD D/C;
+        # the display only writes, so it is the D/C output here.
+        peripheral: SPI2
+        sck: GPIO36
+        mosi: GPIO37
+        chip-select: GPIO3
+        frequency-hz: 40000000
+  devices:
+    display:
+      # ILI9342C 320x240. AW9523B P1_1 resets it and AXP2101 DLDO1 lights it.
+      implementation: m5stack-pmic-display
+      bindings: { dc: GPIO35, i2c: internal-i2c, spi: display-spi }
+      parameters:
+        power-layout: cores3
+        controller: ili9342c
+        width: 320
+        height: 240
+        invert-colors: true

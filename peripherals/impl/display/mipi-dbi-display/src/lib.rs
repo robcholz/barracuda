@@ -48,6 +48,55 @@ pub enum MipiDbiColorOrder {
     Bgr,
 }
 
+/// Backlight beside a MIPI DBI controller, switched or dimmed by the Board.
+///
+/// [`MipiDbiDisplayImplementation`] drives a digital output through
+/// [`DigitalBacklight`]. An implementation whose backlight is a regulator or
+/// another helper chip supplies its own control and builds the panel with
+/// [`initialize_panel`].
+pub trait PanelBacklight {
+    /// Failure reported by the backlight control.
+    type Error: core::fmt::Debug;
+
+    /// Applies a brightness level on the portable `0..=255` scale, where zero
+    /// turns the backlight off.
+    ///
+    /// # Errors
+    ///
+    /// Returns the control's failure.
+    fn set_brightness(&mut self, brightness: u8) -> Result<(), Self::Error>;
+}
+
+/// Digital backlight output with a fixed active level: any non-zero
+/// brightness turns it on.
+pub struct DigitalBacklight<BL> {
+    output: BL,
+    active_high: bool,
+}
+
+impl<BL> DigitalBacklight<BL> {
+    /// Wraps a backlight output that lights when driven high (`true`) or low.
+    #[must_use]
+    pub const fn new(output: BL, active_high: bool) -> Self {
+        Self {
+            output,
+            active_high,
+        }
+    }
+}
+
+impl<BL: OutputPin> PanelBacklight for DigitalBacklight<BL> {
+    type Error = BL::Error;
+
+    fn set_brightness(&mut self, brightness: u8) -> Result<(), Self::Error> {
+        if self.active_high == (brightness != 0) {
+            self.output.set_high()
+        } else {
+            self.output.set_low()
+        }
+    }
+}
+
 /// Portable configuration shared by all supported MIPI DBI controllers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MipiDbiDisplayConfig {
@@ -111,8 +160,12 @@ impl MipiDbiDisplayConfig {
     /// Returns the stable peripheral descriptor.
     #[must_use]
     pub fn descriptor(self) -> DisplayDescriptor {
+        self.descriptor_with_brightness(self.backlight_active_high.is_some())
+    }
+
+    fn descriptor_with_brightness(self, brightness: bool) -> DisplayDescriptor {
         let mut features = DisplayFeatures::ORIENTATION | DisplayFeatures::SLEEP;
-        if self.backlight_active_high.is_some() {
+        if brightness {
             features = features | DisplayFeatures::BRIGHTNESS;
         }
         let logical_size = match self.orientation {
@@ -131,26 +184,32 @@ impl MipiDbiDisplayConfig {
 }
 
 /// Concrete resources consumed during controller initialization.
-pub struct MipiDbiDisplayBindings<SPI, DC, RST, BL, DELAY, const BUFFER_SIZE: usize> {
+pub struct MipiDbiDisplayBindings<SPI, DC, RST, BL, HOLD, DELAY, const BUFFER_SIZE: usize> {
     spi: SPI,
     dc: DC,
     reset: RST,
     backlight: Option<BL>,
+    power_hold: Option<HOLD>,
     delay: DELAY,
     buffer: &'static mut [u8; BUFFER_SIZE],
 }
 
-impl<SPI, DC, RST, BL, DELAY, const BUFFER_SIZE: usize>
-    MipiDbiDisplayBindings<SPI, DC, RST, BL, DELAY, BUFFER_SIZE>
+impl<SPI, DC, RST, BL, HOLD, DELAY, const BUFFER_SIZE: usize>
+    MipiDbiDisplayBindings<SPI, DC, RST, BL, HOLD, DELAY, BUFFER_SIZE>
 {
     /// Combines a selected SPI device, control outputs, delay source, and
     /// statically owned transfer buffer.
+    ///
+    /// `power_hold` is a Board power-latch output that its binding already
+    /// drives high. The display keeps it for its whole lifetime so the product
+    /// stays powered on battery.
     #[must_use]
     pub const fn new(
         spi: SPI,
         dc: DC,
         reset: RST,
         backlight: Option<BL>,
+        power_hold: Option<HOLD>,
         delay: DELAY,
         buffer: &'static mut [u8; BUFFER_SIZE],
     ) -> Self {
@@ -159,6 +218,7 @@ impl<SPI, DC, RST, BL, DELAY, const BUFFER_SIZE: usize>
             dc,
             reset,
             backlight,
+            power_hold,
             delay,
             buffer,
         }
@@ -184,7 +244,7 @@ impl<M> MipiDbiDriverConfig<M> {
 pub enum MipiDbiControlError<E, B> {
     /// The transport interface rejected a controller command.
     Interface(E),
-    /// The Board's backlight output rejected the requested state.
+    /// The Board's backlight control rejected the requested state.
     Backlight(B),
     /// The direct panel has no standard brightness control.
     BrightnessUnsupported,
@@ -195,12 +255,15 @@ pub enum MipiDbiControlError<E, B> {
 pub enum MipiDbiInitError<I, R, B> {
     /// MIPI controller initialization failed.
     Display(InitError<I, R>),
-    /// Backlight output rejected its initial on state.
+    /// Backlight control rejected its initial on state.
     Backlight(B),
 }
 
 /// Initialized direct panel implementing Barracuda's stable display API.
-pub struct MipiDbiDisplay<DI, M, RST, BL, DELAY>
+///
+/// `HOLD` is a Board resource the panel keeps alive with it, such as a
+/// power-latch output, or `()` when there is none.
+pub struct MipiDbiDisplay<DI, M, RST, BL, DELAY, HOLD = ()>
 where
     DI: Interface,
     M: Model,
@@ -210,21 +273,91 @@ where
     inner: MipidsiDisplay<DI, M, RST>,
     delay: DELAY,
     backlight: Option<BL>,
+    brightness: u8,
     config: MipiDbiDisplayConfig,
+    _hold: HOLD,
+}
+
+/// Initializes one SPI MIPI DBI controller and lights its backlight.
+///
+/// An implementation that powers the panel or releases its reset through a
+/// helper chip does that first, then calls this with the reset output
+/// `mipidsi` should pulse (one that does nothing when the reset was already
+/// applied) and its own [`PanelBacklight`].
+///
+/// # Errors
+///
+/// Returns a controller initialization or backlight failure.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn initialize_panel<SPI, DC, M, RST, BL, DELAY, HOLD, const BUFFER_SIZE: usize>(
+    spi: SPI,
+    dc: DC,
+    reset: RST,
+    backlight: Option<BL>,
+    hold: HOLD,
+    mut delay: DELAY,
+    buffer: &'static mut [u8; BUFFER_SIZE],
+    config: MipiDbiDriverConfig<M>,
+) -> Result<
+    MipiDbiDisplay<SpiInterface<'static, SPI, DC>, M, RST, BL, DELAY, HOLD>,
+    MipiDbiInitError<SpiError<SPI::Error, DC::Error>, RST::Error, BL::Error>,
+>
+where
+    SPI: SpiDevice,
+    DC: OutputPin,
+    M: Model,
+    M::ColorFormat: InterfacePixelFormat<u8>,
+    RST: OutputPin,
+    BL: PanelBacklight,
+    DELAY: DelayNs,
+{
+    let interface = SpiInterface::new(spi, dc, buffer);
+    let size = config.display.size;
+    let color_order = match config.display.color_order {
+        MipiDbiColorOrder::Rgb => ColorOrder::Rgb,
+        MipiDbiColorOrder::Bgr => ColorOrder::Bgr,
+    };
+    let inversion = if config.display.invert_colors {
+        ColorInversion::Inverted
+    } else {
+        ColorInversion::Normal
+    };
+    let inner = Builder::new(config.model, interface)
+        .reset_pin(reset)
+        .display_size(size.width as u16, size.height as u16)
+        .display_offset(config.display.offset.0, config.display.offset.1)
+        .color_order(color_order)
+        .invert_colors(inversion)
+        .orientation(mipidsi_orientation(config.display.orientation))
+        .init(&mut delay)
+        .map_err(MipiDbiInitError::Display)?;
+    let mut display = MipiDbiDisplay {
+        inner,
+        delay,
+        backlight,
+        brightness: u8::MAX,
+        config: config.display,
+        _hold: hold,
+    };
+    display
+        .apply_backlight(u8::MAX)
+        .map_err(MipiDbiInitError::Backlight)?;
+    Ok(display)
 }
 
 /// Static factory for all controller models supported by `mipidsi`.
-pub struct MipiDbiDisplayImplementation<SPI, DC, M, RST, BL, DELAY, const BUFFER_SIZE: usize>(
+pub struct MipiDbiDisplayImplementation<SPI, DC, M, RST, BL, HOLD, DELAY, const BUFFER_SIZE: usize>(
     PhantomData<SPI>,
     PhantomData<DC>,
     PhantomData<M>,
     PhantomData<RST>,
     PhantomData<BL>,
+    PhantomData<HOLD>,
     PhantomData<DELAY>,
 );
 
-impl<SPI, DC, M, RST, BL, DELAY, const BUFFER_SIZE: usize> PeripheralImplementation
-    for MipiDbiDisplayImplementation<SPI, DC, M, RST, BL, DELAY, BUFFER_SIZE>
+impl<SPI, DC, M, RST, BL, HOLD, DELAY, const BUFFER_SIZE: usize> PeripheralImplementation
+    for MipiDbiDisplayImplementation<SPI, DC, M, RST, BL, HOLD, DELAY, BUFFER_SIZE>
 where
     SPI: SpiDevice + 'static,
     DC: OutputPin + 'static,
@@ -232,15 +365,23 @@ where
     M::ColorFormat: InterfacePixelFormat<u8>,
     RST: OutputPin + 'static,
     BL: OutputPin + 'static,
+    HOLD: 'static,
     DELAY: DelayNs + 'static,
     SPI::Error: 'static,
     DC::Error: 'static,
     RST::Error: 'static,
     BL::Error: 'static,
 {
-    type Bindings = MipiDbiDisplayBindings<SPI, DC, RST, BL, DELAY, BUFFER_SIZE>;
+    type Bindings = MipiDbiDisplayBindings<SPI, DC, RST, BL, HOLD, DELAY, BUFFER_SIZE>;
     type Config = MipiDbiDriverConfig<M>;
-    type Peripheral = MipiDbiDisplay<SpiInterface<'static, SPI, DC>, M, RST, BL, DELAY>;
+    type Peripheral = MipiDbiDisplay<
+        SpiInterface<'static, SPI, DC>,
+        M,
+        RST,
+        DigitalBacklight<BL>,
+        DELAY,
+        Option<HOLD>,
+    >;
     type Error = MipiDbiInitError<SpiError<SPI::Error, DC::Error>, RST::Error, BL::Error>;
 
     async fn initialize(
@@ -251,45 +392,20 @@ where
             spi,
             dc,
             reset,
-            mut backlight,
-            mut delay,
+            backlight,
+            power_hold,
+            delay,
             buffer,
         } = bindings;
-        let interface = SpiInterface::new(spi, dc, buffer);
-        let size = config.display.size;
-        let color_order = match config.display.color_order {
-            MipiDbiColorOrder::Rgb => ColorOrder::Rgb,
-            MipiDbiColorOrder::Bgr => ColorOrder::Bgr,
+        let backlight = match (backlight, config.display.backlight_active_high) {
+            (Some(output), Some(active_high)) => Some(DigitalBacklight::new(output, active_high)),
+            _ => None,
         };
-        let inversion = if config.display.invert_colors {
-            ColorInversion::Inverted
-        } else {
-            ColorInversion::Normal
-        };
-        let inner = Builder::new(config.model, interface)
-            .reset_pin(reset)
-            .display_size(size.width as u16, size.height as u16)
-            .display_offset(config.display.offset.0, config.display.offset.1)
-            .color_order(color_order)
-            .invert_colors(inversion)
-            .orientation(mipidsi_orientation(config.display.orientation))
-            .init(&mut delay)
-            .map_err(MipiDbiInitError::Display)?;
-        if let (Some(backlight), Some(active_high)) =
-            (&mut backlight, config.display.backlight_active_high)
-        {
-            set_backlight(backlight, active_high, true).map_err(MipiDbiInitError::Backlight)?;
-        }
-        Ok(MipiDbiDisplay {
-            inner,
-            delay,
-            backlight,
-            config: config.display,
-        })
+        initialize_panel(spi, dc, reset, backlight, power_hold, delay, buffer, config)
     }
 }
 
-impl<DI, M, RST, BL, DELAY> OriginDimensions for MipiDbiDisplay<DI, M, RST, BL, DELAY>
+impl<DI, M, RST, BL, DELAY, HOLD> OriginDimensions for MipiDbiDisplay<DI, M, RST, BL, DELAY, HOLD>
 where
     DI: Interface,
     M: Model,
@@ -301,7 +417,7 @@ where
     }
 }
 
-impl<DI, M, RST, BL, DELAY> DrawTarget for MipiDbiDisplay<DI, M, RST, BL, DELAY>
+impl<DI, M, RST, BL, DELAY, HOLD> DrawTarget for MipiDbiDisplay<DI, M, RST, BL, DELAY, HOLD>
 where
     DI: Interface,
     M: Model,
@@ -330,21 +446,22 @@ where
     }
 }
 
-impl<DI, M, RST, BL, DELAY> Display for MipiDbiDisplay<DI, M, RST, BL, DELAY>
+impl<DI, M, RST, BL, DELAY, HOLD> Display for MipiDbiDisplay<DI, M, RST, BL, DELAY, HOLD>
 where
     DI: Interface,
     M: Model,
     M::ColorFormat: InterfacePixelFormat<DI::Word>,
     M::ColorFormat: From<Rgb565>,
     RST: OutputPin,
-    BL: OutputPin,
+    BL: PanelBacklight,
     DELAY: DelayNs,
 {
     type ControlError = MipiDbiControlError<DI::Error, BL::Error>;
     type RenderError = DI::Error;
 
     fn descriptor(&self) -> DisplayDescriptor {
-        self.config.descriptor()
+        self.config
+            .descriptor_with_brightness(self.backlight.is_some())
     }
 
     fn draw_rgb565(&mut self, area: Rectangle, pixels: &[Rgb565]) -> Result<(), Self::RenderError> {
@@ -361,10 +478,12 @@ where
                 self.inner
                     .wake(&mut self.delay)
                     .map_err(MipiDbiControlError::Interface)?;
-                self.set_configured_backlight(true)
+                self.apply_backlight(self.brightness)
+                    .map_err(MipiDbiControlError::Backlight)
             }
             DisplayPower::Sleep | DisplayPower::Off => {
-                self.set_configured_backlight(false)?;
+                self.apply_backlight(0)
+                    .map_err(MipiDbiControlError::Backlight)?;
                 self.inner
                     .sleep(&mut self.delay)
                     .map_err(MipiDbiControlError::Interface)
@@ -373,13 +492,18 @@ where
     }
 
     async fn set_brightness(&mut self, brightness: u8) -> Result<(), Self::ControlError> {
-        let (Some(backlight), Some(active_high)) =
-            (&mut self.backlight, self.config.backlight_active_high)
-        else {
+        let Some(backlight) = &mut self.backlight else {
             return Err(MipiDbiControlError::BrightnessUnsupported);
         };
-        set_backlight(backlight, active_high, brightness != 0)
-            .map_err(MipiDbiControlError::Backlight)
+        backlight
+            .set_brightness(brightness)
+            .map_err(MipiDbiControlError::Backlight)?;
+        // Zero only darkens the panel; powering it on again restores the last
+        // non-zero level.
+        if brightness != 0 {
+            self.brightness = brightness;
+        }
+        Ok(())
     }
 
     async fn set_orientation(
@@ -398,36 +522,19 @@ where
     }
 }
 
-impl<DI, M, RST, BL, DELAY> MipiDbiDisplay<DI, M, RST, BL, DELAY>
+impl<DI, M, RST, BL, DELAY, HOLD> MipiDbiDisplay<DI, M, RST, BL, DELAY, HOLD>
 where
     DI: Interface,
     M: Model,
     M::ColorFormat: InterfacePixelFormat<DI::Word>,
     RST: OutputPin,
-    BL: OutputPin,
+    BL: PanelBacklight,
 {
-    fn set_configured_backlight(
-        &mut self,
-        on: bool,
-    ) -> Result<(), MipiDbiControlError<DI::Error, BL::Error>> {
-        let (Some(backlight), Some(active_high)) =
-            (&mut self.backlight, self.config.backlight_active_high)
-        else {
-            return Ok(());
-        };
-        set_backlight(backlight, active_high, on).map_err(MipiDbiControlError::Backlight)
-    }
-}
-
-fn set_backlight<BL: OutputPin>(
-    backlight: &mut BL,
-    active_high: bool,
-    on: bool,
-) -> Result<(), BL::Error> {
-    if active_high == on {
-        backlight.set_high()
-    } else {
-        backlight.set_low()
+    fn apply_backlight(&mut self, brightness: u8) -> Result<(), BL::Error> {
+        match &mut self.backlight {
+            Some(backlight) => backlight.set_brightness(brightness),
+            None => Ok(()),
+        }
     }
 }
 

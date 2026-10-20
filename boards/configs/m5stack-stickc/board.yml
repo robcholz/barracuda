@@ -1,4 +1,5 @@
 name: m5stack-stickc
+profile: screen
 hardware:
   chip: esp32
   # ESP32-PICO-D4.
@@ -7,3 +8,36 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5GFX/M5Unified: the internal bus (400 kHz) of the AXP192 at 34h.
+        peripheral: I2C1
+        scl: GPIO22
+        sda: GPIO21
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        # M5GFX StickC: SPI2_HOST, write clock 27 MHz.
+        peripheral: SPI2
+        sck: GPIO13
+        mosi: GPIO15
+        chip-select: GPIO5
+        frequency-hz: 27000000
+  devices:
+    display:
+      # ST7735S 80x160 at offset (26, 1) in its 132x162 frame, mounted upside
+      # down (M5GFX offset_rotation 2). AXP192 LDO3 powers it and LDO2 lights
+      # it; GPIO18 resets it.
+      implementation: m5stack-pmic-display
+      bindings: { dc: GPIO23, i2c: internal-i2c, reset: GPIO18, spi: display-spi }
+      parameters:
+        power-layout: stickc
+        controller: st7735s
+        width: 80
+        height: 160
+        offset-x: 26
+        offset-y: 1
+        invert-colors: true
+        orientation: deg180
