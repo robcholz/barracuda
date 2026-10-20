@@ -3,8 +3,8 @@
 import type { App } from "../app/app";
 import { EXAMPLES } from "../app/templates";
 import { DEVICES, type Attachment, type DeviceId } from "../state/project";
-import { ago, fill, h, icon, size, svg, tooltip } from "./dom";
-import { MARK } from "./icons";
+import { ago, fill, h, icon, mark, size, tooltip } from "./dom";
+import { MARK_BARE } from "../../../../../ui/marks";
 import { readAttachment } from "./chat";
 import { lang, t } from "../i18n";
 import {
@@ -263,7 +263,7 @@ export class NewApp implements Page {
             href: siteLink(),
             "aria-label": t.website,
           },
-          svg(MARK),
+          mark(MARK_BARE, 24),
           h("span", { class: "bc-wordmark" }, "Barracuda"),
         ),
         h("span", { class: "bc-topbar__divider le-desk" }),
@@ -279,7 +279,7 @@ export class NewApp implements Page {
         class: "bc-figure",
         alt: "",
         src: new URL(
-          `ds/assets/${theme === "dark" ? "laptop-dark" : "laptop"}.svg`,
+          `assets/${theme === "dark" ? "laptop-dark" : "laptop"}.svg`,
           app.base,
         ).href,
         style: { maxWidth: "200px" },

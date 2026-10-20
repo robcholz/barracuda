@@ -1,6 +1,7 @@
 // Builds Live Editor into dist/, a static site:
 //
-//   index.html, main.js, app.css   the page, and workers/ for the build and run workers
+//   index.html, main.js, app.css   the page (app.css carries the design system), and workers/ for
+//                                  the build and run workers; assets/ for its figures
 //   live-editor.wasm    the view linker and the preview (apps/live-editor/wasm)
 //   lua.wasm            Lua 5.4 for the preview's runs (wasmoon)
 //   fonts/              the device's system fonts (plugins/system-fonts)
@@ -192,6 +193,7 @@ async function buildApp() {
       join(src, "main.ts"),
       join(src, "workers/build.ts"),
       join(src, "workers/run.ts"),
+      join(src, "app.css"),
     ],
     root: src,
     outdir: dist,
@@ -219,9 +221,9 @@ async function buildApp() {
     ],
   });
   if (!app.success) throw new AggregateError(app.logs, "the app bundle failed");
-  for (const name of ["index.html", "app.css", "favicon.svg"])
+  for (const name of ["index.html", "favicon.svg"])
     fs.copyFileSync(join(src, name), join(dist, name));
-  fs.cpSync(join(src, "ds"), join(dist, "ds"), { recursive: true });
+  fs.cpSync(join(src, "assets"), join(dist, "assets"), { recursive: true });
   fs.copyFileSync(
     join(repository, "node_modules/wasmoon/dist/glue.wasm"),
     join(dist, "lua.wasm"),

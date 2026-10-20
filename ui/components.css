@@ -1,5 +1,6 @@
 /* Barracuda components. Plain CSS over tokens.css: no script, no framework.
-   The portal ships this file from device flash, so every rule earns its bytes.
+   The one copy: the website, Live Editor and the device portal all draw with it. The portal ships
+   only the rules its pages use (ui/prune.ts), so a new component costs it nothing.
    Radii: surfaces radius-lg, controls radius-md, anything nested in a control radius-sm.
    States: every pressable thing has hover, pressed (:active), keyboard focus and disabled.
    Selected is a quiet fill (`muted`), never a heavier outline.
@@ -297,7 +298,8 @@
 .bc-radio-card:has(input:checked) .bc-option-icon {
   background: var(--background);
 }
-.bc-radio-card input {
+.bc-radio-card input,
+.bc-picker__row input {
   flex: none;
   appearance: none;
   -webkit-appearance: none;
@@ -311,21 +313,26 @@
   transition: border-color 0.1s;
 }
 /* the radio is drawn, never the browser's: a 1px `input` ring; checked, a 5px `foreground` ring around a `background` dot (the switch's on colours) */
-.bc-radio-card:hover input:not(:checked):not(:disabled) {
+.bc-radio-card:hover input:not(:checked):not(:disabled),
+.bc-picker__row:hover input:not(:checked):not(:disabled) {
   border-color: var(--input-hover);
 }
-.bc-radio-card input:checked {
+.bc-radio-card input:checked,
+.bc-picker__row input:checked {
   border: 5px solid var(--foreground);
 }
-.bc-radio-card input:disabled {
+.bc-radio-card input:disabled,
+.bc-picker__row input:disabled {
   border-color: var(--border);
   background: var(--muted);
 }
-.bc-radio-card input:checked:disabled {
+.bc-radio-card input:checked:disabled,
+.bc-picker__row input:checked:disabled {
   border-color: var(--disabled-foreground);
   background: var(--background);
 }
-.bc-radio-card input:focus-visible {
+.bc-radio-card input:focus-visible,
+.bc-picker__row input:focus-visible {
   outline: none;
 }
 .bc-radio-card:has(input:focus-visible) {
@@ -1606,6 +1613,7 @@ button.bc-link {
   font-weight: 500;
 }
 .bc-icon-button {
+  position: relative;
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -1832,5 +1840,1121 @@ button.bc-link {
   .bc-nav-label,
   .bc-sidebar__footer {
     transition: none;
+  }
+}
+/* Chat motion: only live state moves. The caret blinks, the typing dots bob, 「思考中」 shimmers and a running tool or session spins; a new turn rises 4px into place. Reduced motion stills them all. */
+@keyframes bc-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes bc-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: none;
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+@keyframes bc-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+@keyframes bc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes bc-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.bc-caret {
+  animation: bc-blink 1s step-end infinite;
+}
+.bc-typing > i {
+  animation: bc-dot 1.2s ease-in-out infinite;
+}
+.bc-typing > i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.bc-typing > i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.bc-shimmer {
+  color: transparent;
+  background: linear-gradient(
+      90deg,
+      var(--muted-foreground) 35%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 65%
+    )
+    0 0/300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: bc-sweep 2s linear infinite;
+}
+.bc-spinner {
+  animation: bc-spin 0.8s linear infinite;
+}
+.bc-turn--new {
+  animation: bc-rise 0.15s ease-out both;
+}
+/* A fresh conversation holds the composer mid-page, the empty state above it and suggestions below */
+.bc-chat--fresh .bc-chat-log {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.bc-chat--fresh .bc-chat-dock {
+  flex: 1 1 0;
+  position: static;
+}
+/* Jump to the latest message: an outline icon button floating over the log, above the composer */
+.bc-chat-jump {
+  position: absolute;
+  left: 50%;
+  top: -52px;
+  transform: translateX(-50%);
+}
+/* A bar's own text, cut to one line: the reply quoted, a queued message */
+.bc-composer__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The session rail: new session, then the sessions as nav items grouped by day, behind a hairline at the page's left */
+.bc-chat-rail {
+  flex: none;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-3);
+  border-right: 1px solid var(--border);
+  background: var(--background);
+}
+.bc-chat-rail__foot {
+  margin: 0;
+  padding: 0 8px;
+}
+.bc-session {
+  position: relative;
+}
+.bc-session > .bc-nav-item {
+  padding-right: 36px;
+}
+.bc-session__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bc-session__more {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  opacity: 0;
+}
+.bc-session:hover .bc-session__more,
+.bc-session:focus-within .bc-session__more,
+.bc-session__more[aria-expanded="true"] {
+  opacity: 1;
+}
+.bc-session:hover .bc-spinner,
+.bc-session:focus-within .bc-spinner {
+  visibility: hidden;
+}
+/* A ghost toggle: on is a muted fill, like every selected thing */
+.bc-button--ghost[aria-pressed="true"] {
+  background: var(--muted);
+}
+/* Destructive menu item: red text and icon, a red surface on hover and press; a confirmation names what goes */
+.bc-menu-item--destructive {
+  color: var(--destructive);
+}
+.bc-menu-item--destructive:hover,
+.bc-menu-item--destructive:active {
+  background: var(--destructive-surface);
+}
+.bc-menu--confirm {
+  width: 256px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bc-caret,
+  .bc-typing > i,
+  .bc-spinner,
+  .bc-turn--new,
+  .bc-shimmer {
+    animation: none;
+  }
+  .bc-shimmer {
+    color: var(--muted-foreground);
+    background: none;
+  }
+}
+/* An icon-only button names itself in a tooltip on hover and keyboard focus (the button keeps its aria-label; the tooltip is aria-hidden) */
+.bc-button--icon {
+  position: relative;
+}
+.bc-icon-button:hover > .bc-tooltip,
+.bc-icon-button:focus-visible > .bc-tooltip,
+.bc-button--icon:hover > .bc-tooltip,
+.bc-button--icon:focus-visible > .bc-tooltip {
+  display: block;
+}
+/* The composer's textarea fits its text: one line when empty, growing to 200px (about eight lines), then it scrolls */
+.bc-composer textarea {
+  field-sizing: content;
+  min-height: 38px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+/* The conversation's head says once what kind of session it is: a centred badge whose tooltip explains */
+.bc-chat-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3) var(--space-8) 0;
+  background: var(--background);
+}
+.bc-chat-head .bc-badge {
+  position: relative;
+  cursor: default;
+}
+.bc-chat-head .bc-badge .bc-icon {
+  width: 14px;
+  height: 14px;
+}
+.bc-chat-head .bc-badge:hover > .bc-tooltip,
+.bc-chat-head .bc-badge:focus-visible > .bc-tooltip {
+  display: block;
+}
+.bc-chat-head .bc-badge:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+/* An outline toggle: on is a muted fill */
+.bc-button--outline[aria-pressed="true"] {
+  background: var(--muted);
+}
+/* One row: the textarea and its buttons side by side, the buttons held at the bottom right as the text grows; one line of text is a 44px row */
+.bc-composer__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.bc-composer__row > textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 11px 12px;
+}
+.bc-composer__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 0;
+}
+/* The Agent's mark while a turn runs: it spins bare in the 16px box, without its ink tile (WebGL), and rests as the tiled icon when the turn ends */
+.bc-mark-tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.bc-mark-spin {
+  width: 16px;
+  height: 16px;
+}
+/* Files: the tree rail, the open item's pane (a bar, then the body behind a hairline) and numbered lines */
+.bc-tree {
+  flex: none;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-4) var(--space-3);
+  border-right: 1px solid var(--border);
+  background: var(--background);
+}
+.bc-tree__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bc-pane {
+  flex: 1 1 480px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.bc-pane__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 64px;
+  padding: 12px var(--space-5);
+}
+.bc-pane__section {
+  border-top: 1px solid var(--border);
+}
+.bc-pane__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.bc-pane .bc-expanded__panel {
+  padding-top: var(--space-4);
+}
+.bc-lines {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  row-gap: 2px;
+  align-content: start;
+  padding: var(--space-4) var(--space-5) var(--space-6) var(--space-2);
+  overflow: auto;
+}
+.bc-lines__n {
+  padding: 1px var(--space-4) 0 0;
+  text-align: right;
+  user-select: none;
+}
+.bc-lines__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 719px) {
+  .bc-tree {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .bc-lines {
+    grid-template-columns: 36px minmax(0, 1fr);
+    padding: var(--space-4) var(--space-4) var(--space-6) 0;
+  }
+  .bc-lines__n {
+    padding-right: var(--space-3);
+  }
+}
+
+/* Attachment: files waiting in the chat composer, above the textarea. An image is a 64px thumbnail, any other file a
+   chip with its name and type; both are controls (radius-md). Uploading or failed dims the picture, as an expired QR
+   plate dims, under a spinner or a retry button; a live upload draws a 2px signal line along the bottom edge. */
+.bc-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 8px 0 12px;
+}
+.bc-attachment {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--muted);
+}
+.bc-attachment > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.bc-attachment--file {
+  width: auto;
+  max-width: 240px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 32px 0 12px;
+}
+.bc-attachment--error {
+  border-color: var(--destructive);
+}
+.bc-attachment--busy > img,
+.bc-attachment--error > img {
+  opacity: 0.35;
+}
+.bc-attachment__name {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.bc-attachment__name > .bc-small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bc-attachment__state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--foreground);
+}
+.bc-attachment__retry {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--foreground);
+}
+.bc-attachment__remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: var(--background);
+}
+.bc-attachment__remove:hover {
+  background: var(--muted-hover);
+}
+.bc-attachment__remove:active {
+  background: var(--muted-active);
+}
+.bc-attachment--file > .bc-attachment__remove {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.bc-attachment__progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--border);
+}
+.bc-attachment__progress > i {
+  display: block;
+  height: 100%;
+  background: var(--signal);
+}
+.bc-composer--drop,
+.bc-composer--drop:hover {
+  border-style: dashed;
+  border-color: var(--ring);
+}
+.bc-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 88px;
+  margin: 6px 6px 0;
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+}
+
+/* Media: pictures, audio and video in the chat log, surfaces (radius-lg) behind one hairline. A picture is a button
+   that opens the Viewer; several share one hairline frame two columns wide, the fourth dimmed under 「+N」.
+   A playback position is a 2px ink line; a live transfer a 2px signal line along the card's bottom edge. */
+.bc-media {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--muted);
+  cursor: zoom-in;
+  transition: border-color 0.1s;
+}
+.bc-media > img,
+.bc-media > video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.bc-media:hover {
+  border-color: var(--border-hover);
+}
+.bc-media:focus-visible {
+  outline: none;
+  border-color: var(--ring);
+}
+.bc-media-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--border);
+}
+.bc-media-grid > .bc-media {
+  border: 0;
+  border-radius: 0;
+}
+.bc-media-grid > .bc-media:hover {
+  outline: 1px solid var(--border-hover);
+  outline-offset: -1px;
+}
+.bc-media-grid > .bc-media:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.bc-media--more > img {
+  opacity: 0.35;
+}
+.bc-media__more {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--foreground);
+}
+.bc-media--video {
+  cursor: default;
+}
+.bc-media__play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+.bc-track {
+  position: relative;
+  display: block;
+  height: 2px;
+  background: var(--border);
+}
+.bc-track > i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--foreground);
+}
+.bc-card--progress {
+  position: relative;
+  overflow: hidden;
+}
+.bc-card--progress::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: var(--progress, 0%);
+  background: var(--signal);
+}
+
+/* Viewer: one picture over the whole page, always on the dark ground (data-theme="dark" on it) */
+.bc-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+  color: var(--foreground);
+}
+.bc-viewer__bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--topbar-height);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.bc-viewer__stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8) 96px;
+}
+.bc-viewer__image {
+  max-width: 100%;
+  max-height: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.bc-viewer__image > img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 120px);
+  object-fit: contain;
+}
+.bc-viewer__nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+@media (max-width: 719px) {
+  .bc-viewer__stage {
+    padding: var(--space-4);
+  }
+  .bc-viewer__nav {
+    display: none;
+  }
+}
+/* Banner: one line across the top of a site, above the top bar, for the release or the next step. */
+.bc-banner {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 48px;
+  background: var(--signal);
+  color: var(--signal-foreground);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  text-align: center;
+}
+.bc-banner a {
+  white-space: nowrap;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: #09090b66;
+  text-underline-offset: 3px;
+  border-radius: var(--radius-sm);
+  transition: text-decoration-color 0.1s;
+}
+.bc-banner a:hover {
+  text-decoration-color: currentColor;
+}
+.bc-banner a:focus-visible {
+  outline: 2px solid var(--signal-foreground);
+  outline-offset: 1px;
+}
+.bc-banner__close {
+  position: absolute;
+  font: inherit;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+.bc-banner__close:hover {
+  background: #09090b1a;
+}
+.bc-banner__close:active {
+  background: #09090b26;
+}
+.bc-banner__close:focus-visible {
+  outline: 2px solid var(--signal-foreground);
+  outline-offset: 1px;
+}
+@media (max-width: 719px) {
+  .bc-banner {
+    padding: 6px 44px 6px 16px;
+    justify-content: flex-start;
+    text-align: left;
+  }
+  .bc-banner__close {
+    right: 8px;
+  }
+}
+
+/* Window: a framed pane for code, terminal output, or a picture of another app. The website and the docs draw code the same way. */
+.bc-window {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--background);
+  color: var(--foreground);
+  overflow: hidden;
+}
+.bc-window__bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--sidebar);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
+.bc-window__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bc-window__dots {
+  flex: none;
+  display: inline-flex;
+  gap: 6px;
+}
+.bc-window__dots > i {
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--border-active);
+}
+.bc-window__dots ~ .bc-window__title {
+  padding-right: 42px;
+  text-align: center;
+}
+.bc-window__path {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
+.bc-window__code {
+  margin: 0;
+  padding: 16px 18px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 21px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+}
+.bc-window__code--wide {
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow: auto;
+}
+.bc-window__prompt {
+  color: var(--signal-text);
+}
+
+/* Command: one line to copy and run, with the prompt in signal-text and a copy button at the end. A sentence in its place (.bc-command__note) keeps the frame for the browser install. */
+.bc-command {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 8px 0 18px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 20px;
+}
+.bc-command__prompt {
+  flex: none;
+  color: var(--signal-text);
+}
+.bc-command__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bc-command__note {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  color: var(--muted-foreground);
+}
+
+/* Alert tones for reading pages: success (a tip, a check) and warning, on their own grounds. */
+.bc-alert--success {
+  border-color: var(--success-border);
+  background: var(--success-surface);
+}
+.bc-alert--warning {
+  border-color: var(--warning-border);
+  background: var(--warning-surface);
+}
+
+/* Icon tile: the 40px hairline tile that leads a card, a cell or an option. */
+.bc-icon-tile {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--sidebar);
+  color: var(--foreground);
+}
+.bc-icon-tile > svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Segmented control with words: the same track, each button sized to its label. */
+.bc-segmented--text > button {
+  width: auto;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* Prose link: a link inside running text, ink at 500 over a 2px signal-text underline. */
+.bc-link--prose {
+  font-weight: 500;
+  text-decoration-color: var(--signal-text);
+  text-decoration-thickness: 2px;
+}
+.bc-link--prose:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Inline code: a name, a path or a command inside a sentence. */
+.bc-inline-code {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  overflow-wrap: anywhere;
+}
+
+/* Eyebrow: the section a page belongs to, above its title, after a 6px signal square. */
+.bc-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+.bc-eyebrow::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--signal);
+}
+
+/* Stepper: where the reader is in a flow of pages; each step's mark is joined to the next by a line. */
+.bc-stepper {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.bc-stepper__item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 20px;
+  color: var(--muted-foreground);
+}
+.bc-stepper__item:last-child {
+  padding-bottom: 0;
+}
+.bc-stepper__item:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 28px;
+  bottom: 4px;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--border);
+}
+.bc-stepper__item--done:not(:last-child)::after {
+  background: var(--border-active);
+}
+.bc-stepper__mark {
+  flex: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+}
+.bc-stepper__label {
+  min-width: 0;
+  padding-top: 2px;
+}
+.bc-stepper__item[aria-current="step"] {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.bc-stepper__item[aria-current="step"] > .bc-stepper__mark {
+  border-color: transparent;
+  background: var(--muted);
+}
+.bc-stepper__item--done > .bc-stepper__mark {
+  border-color: transparent;
+  color: var(--success);
+}
+@media (max-width: 720px) {
+  .bc-stepper--collapse {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+  .bc-stepper--collapse > .bc-stepper__item {
+    flex: 1 1 0;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding-bottom: 0;
+  }
+  .bc-stepper--collapse > .bc-stepper__item:last-child {
+    flex: none;
+  }
+  .bc-stepper--collapse > .bc-stepper__item:not(:last-child)::after {
+    position: static;
+    flex: 1 1 auto;
+    min-width: 8px;
+    width: auto;
+    height: 1px;
+    margin: 0;
+  }
+  .bc-stepper--collapse .bc-stepper__label {
+    display: none;
+  }
+  .bc-stepper--collapse > [aria-current="step"] > .bc-stepper__label {
+    display: inline;
+    padding-top: 0;
+    white-space: nowrap;
+  }
+}
+
+/* Picker: one choice among many, as a searchable list of radio rows in one frame; the radio is the RadioCard's. */
+.bc-picker {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--background);
+}
+.bc-picker--flush {
+  border: 0;
+  border-radius: 0;
+}
+.bc-picker__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+.bc-picker__search {
+  position: relative;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.bc-picker__search > .bc-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  margin-top: -8px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.bc-picker__search > .bc-input {
+  padding-left: 36px;
+}
+.bc-picker__count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
+.bc-picker__list {
+  max-height: var(--picker-height, 440px);
+  overflow-y: auto;
+  border-radius: 0 0 7px 7px;
+}
+.bc-picker--flush > .bc-picker__list {
+  border-radius: 0;
+}
+.bc-picker__group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: var(--space-4) var(--space-5) var(--space-2);
+  background: var(--background);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.bc-picker__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 var(--space-5);
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+.bc-picker__row + .bc-picker__row,
+.bc-picker__row + .bc-picker__note,
+.bc-picker__row + .bc-picker__group {
+  border-top: 1px solid var(--border);
+}
+.bc-picker__row:not(:has(input:checked)):hover {
+  background: var(--ghost-hover);
+}
+.bc-picker__row:active {
+  background: var(--ghost-active);
+}
+.bc-picker__row:has(input:checked) {
+  background: var(--muted);
+}
+.bc-picker__row:has(input:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.bc-picker__row:has(input:disabled) {
+  background: none;
+  color: var(--disabled-foreground);
+  cursor: not-allowed;
+}
+.bc-picker__row > .bc-option-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.bc-picker__note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--muted-foreground);
+}
+@media (max-width: 720px) {
+  .bc-picker__head {
+    padding: var(--space-3) var(--space-4);
+  }
+  .bc-picker__group {
+    padding: var(--space-4) var(--space-4) var(--space-2);
+  }
+  .bc-picker__row {
+    min-height: 52px;
+    padding: 0 var(--space-4);
+  }
+  .bc-picker__note {
+    padding: var(--space-4);
+  }
+}
+
+/* Site header: the top bar of the website and the docs, the same on both. 56px on the page colour over a hairline; the brand, the site's own links, then language, GitHub and the primary action, all at --sm. */
+.bc-site-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--topbar-height);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+}
+.bc-site-header .bc-brand {
+  flex: none;
+}
+.bc-site-header__surface {
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+.bc-site-header__nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  margin-left: 16px;
+}
+.bc-site-header__nav [aria-current="page"] {
+  background: var(--muted);
+}
+.bc-site-header__end {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+@media (max-width: 960px) {
+  .bc-site-header__nav {
+    display: none;
+  }
+}
+@media (max-width: 720px) {
+  .bc-site-header {
+    padding: 0 var(--space-2);
+  }
+  .bc-site-header__optional {
+    display: none;
   }
 }

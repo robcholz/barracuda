@@ -225,7 +225,7 @@ export class InstallPage implements Page {
             class: "bc-figure",
             alt: "",
             src: new URL(
-              `ds/assets/${theme === "dark" ? "board-dark" : "board"}.svg`,
+              `assets/${theme === "dark" ? "board-dark" : "board"}.svg`,
               app.base,
             ).href,
             style: { maxWidth: "220px" },

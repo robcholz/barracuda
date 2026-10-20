@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "format": "bun --bun run prettier --write 'plugins/*/resources/web/**/*.{ts,css,html}' 'tools/web/**/*.ts' 'apps/live-editor/web/**/*.ts' package.json tsconfig.json eslint.config.mjs",
-    "format:check": "bun --bun run prettier --check 'plugins/*/resources/web/**/*.{ts,css,html}' 'tools/web/**/*.ts' 'apps/live-editor/web/**/*.ts' package.json tsconfig.json eslint.config.mjs",
-    "lint": "bun --bun run eslint 'plugins/*/resources/web/**/*.ts' 'tools/web/**/*.ts' 'apps/live-editor/web/**/*.ts'",
+    "format": "bun --bun run prettier --write 'plugins/*/resources/web/**/*.{ts,css,html}' 'ui/**/*.{ts,css}' 'tools/web/**/*.ts' 'apps/live-editor/web/**/*.ts' package.json tsconfig.json eslint.config.mjs",
+    "format:check": "bun --bun run prettier --check 'plugins/*/resources/web/**/*.{ts,css,html}' 'ui/**/*.{ts,css}' 'tools/web/**/*.ts' 'apps/live-editor/web/**/*.ts' package.json tsconfig.json eslint.config.mjs",
+    "lint": "bun --bun run eslint 'plugins/*/resources/web/**/*.ts' 'ui/**/*.ts' 'tools/web/**/*.ts' 'apps/live-editor/web/**/*.ts'",
     "check": "bun --bun run tsc --noEmit",
-    "test": "bun test ./plugins ./tools/web ./apps/live-editor/web",
+    "test": "bun test ./plugins ./ui ./tools/web ./apps/live-editor/web",
     "dev": "bun plugins/captive-portal/resources/web/build.ts && bun plugins/captive-portal/resources/web/preview.ts"
   },
   "devDependencies": {

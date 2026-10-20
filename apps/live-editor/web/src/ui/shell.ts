@@ -6,7 +6,8 @@
 import { activeChat } from "../state/project";
 import type { App, ThemeChoice } from "../app/app";
 import { lang, STRINGS, t, type Lang } from "../i18n";
-import { MARK, SITE } from "./icons";
+import { SITE } from "./icons";
+import { MARK_BARE } from "../../../../../ui/marks";
 import {
   append,
   button,
@@ -14,7 +15,7 @@ import {
   h,
   icon,
   iconButton,
-  svg,
+  mark,
   tooltip,
   type Children,
 } from "./dom";
@@ -250,7 +251,7 @@ function sidebar(app: App, folded: boolean) {
         href: siteLink(),
         "aria-label": t.website,
       },
-      svg(MARK),
+      mark(MARK_BARE, 24),
       h(
         "span",
         { class: "bc-wordmark bc-nav-text" },

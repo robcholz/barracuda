@@ -11,6 +11,7 @@
   },
   "include": [
     "plugins/*/resources/web/**/*.ts",
+    "ui/**/*.ts",
     "tools/web/**/*.ts",
     "apps/live-editor/web/**/*.ts"
   ]

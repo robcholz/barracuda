@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
-import "@/styles/ds/tokens.css";
-import "@/styles/ds/bundle.css";
+import "../../../ui/tokens.css";
+import "../../../ui/components.css";
 import "@/styles/site.css";
 
 /** The page shell shared by both languages: one root layout per language sets `lang`. */

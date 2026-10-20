@@ -11,7 +11,7 @@ import {
   type Step,
   type ToolCall,
 } from "../state/project";
-import { MARK_ICON } from "./icons";
+import { MARK_TILE } from "../../../../../ui/marks";
 import {
   button,
   fill,
@@ -19,7 +19,7 @@ import {
   icon,
   iconButton,
   size,
-  svg,
+  mark,
   tooltip,
   type Child,
 } from "./dom";
@@ -371,7 +371,7 @@ export class ChatColumn {
       h(
         "span",
         { class: "bc-meta bc-meta--author" },
-        svg(MARK_ICON),
+        mark(MARK_TILE, 16),
         "Barracuda",
       ),
       item.steps.map((step, index) => this.step(item.id, index, step)),

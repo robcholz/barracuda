@@ -2,8 +2,8 @@
  * The design system's Files rules (`.bc-tree`, `.bc-pane`, `.bc-lines`), the menu, spinner and
  * shimmer parts this page shares with the design's chat sessions, and the Card progress line the
  * Live Editor card shows while it writes. The shell's stylesheet is held
- * to the device's flash budget and carries none of them, so the page adds them while it is open.
- * Copied from the design system's `components/bundle.css`; keep them in step.
+ * to the device's flash budget, so the page adds them while it is open and the shell's build leaves
+ * them out (ui/prune.ts). Copied from ui/components.css; keep them in step.
  */
 export const STYLE =
   ".bc-tree{flex:none;width:260px;display:flex;flex-direction:column;gap:2px;padding:var(--space-4) var(--space-3);border-right:1px solid var(--border);background:var(--background)}" +

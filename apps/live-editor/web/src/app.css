@@ -1,6 +1,9 @@
-/* Live Editor's layout glue over the design system (ds/bundle.css): grid placement, widths and
-   the few patterns the design system has no component for yet (the diff, the console rows, the
-   preview device). Colours, radii, type and spacing all come from tokens. */
+/* Live Editor's layout glue over the design system: grid placement, widths and the few patterns
+   the design system has no component for yet (the diff, the console rows, the preview device).
+   Colours, radii, type and spacing all come from tokens. */
+@import "../../../../ui/tokens.css";
+@import "../../../../ui/components.css";
+
 html,
 body {
   margin: 0;

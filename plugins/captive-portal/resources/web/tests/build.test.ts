@@ -41,7 +41,6 @@ test("device output is self-contained, carries the kernel once and imports plugi
     ".bc-mobile-header",
     ".bc-chat-log",
     ".bc-turn--user",
-    ".bc-composer__foot",
     ".bc-input--code",
     ".bc-row--compact",
   ])
