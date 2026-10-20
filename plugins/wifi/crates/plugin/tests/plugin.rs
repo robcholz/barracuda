@@ -15,7 +15,7 @@ use barracuda_plugin::{
 use barracuda_vfs::{MountOptions, Vfs};
 use barracuda_vfs_memfs::MemFs;
 use barracuda_webserver_plugin::{WebServer, WebServerPlugin};
-use barracuda_wifi_plugin::{WifiControl, WifiPlugin, WifiStatus};
+use barracuda_wifi_plugin::{WifiControl, WifiControlErrorKind, WifiPlugin, WifiStatus};
 use embassy_net::{Ipv4Address, tcp::TcpSocket};
 use embedded_io_async::Write as _;
 
@@ -110,9 +110,13 @@ async fn host_registers_portal_entry_and_reports_platform_managed_network() {
         .clone();
     assert_eq!(wifi.capabilities(), WifiCapabilities::host_managed());
     assert!(wifi.scan().await.expect("scan noop").is_empty());
-    wifi.start_access_point("setup", "secret")
-        .await
-        .expect("AP noop");
+    assert_eq!(
+        wifi.start_access_point("setup", "secret")
+            .await
+            .expect_err("no access point without a radio that opens one")
+            .kind(),
+        WifiControlErrorKind::Unsupported
+    );
     wifi.stop_access_point().await.expect("AP noop");
     wifi.configure_station("home", "secret")
         .await

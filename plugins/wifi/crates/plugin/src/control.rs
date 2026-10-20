@@ -32,6 +32,9 @@ pub enum WifiControlErrorKind {
     Storage,
     /// The selected Platform's Wi-Fi mechanism failed.
     Device,
+    /// The selected Platform or Board cannot perform the operation, such as
+    /// opening an access point without a radio that supports one.
+    Unsupported,
 }
 
 /// Failure returned by a [`WifiControl`] domain operation.
@@ -61,6 +64,13 @@ impl WifiControlError {
         Self::new(
             WifiControlErrorKind::Storage,
             alloc::format!("Wi-Fi configuration storage failed: {error}"),
+        )
+    }
+
+    fn unsupported(operation: &str) -> Self {
+        Self::new(
+            WifiControlErrorKind::Unsupported,
+            alloc::format!("this device cannot {operation}"),
         )
     }
 
@@ -519,7 +529,9 @@ impl<Storage: PluginStorage> WifiService for ScopedWifiService<Storage> {
     ) -> WifiControlFuture<'a, ()> {
         Box::pin(async move {
             if !self.capabilities().access_point {
-                return Ok(());
+                // Without a radio that opens one, a hotspot that "started"
+                // would send people looking for a network that never appears.
+                return Err(WifiControlError::unsupported("open a Wi-Fi access point"));
             }
             if !valid_configuration(ssid, password) {
                 return Err(WifiControlError::invalid_configuration());
