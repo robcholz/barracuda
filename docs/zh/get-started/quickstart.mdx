@@ -6,7 +6,7 @@ description: "在你的电脑上运行 Barracuda，连接一个模型，然后�
 在 Linux 或 macOS 上运行与设备相同的 System，用虚拟外设代替硬件。然后连接一个模型，与板上 Agent 对话。
 
 <Info>
-  前提条件：已安装 Rust 并克隆了仓库，参见[安装](/zh/get-started/installation)。你还需要一个兼容 OpenAI 或 Anthropic 的模型服务的 API key。
+  前提条件：已安装 Rust 并克隆了仓库，参见[安装](/zh/get-started/installation)。你还需要一个 OpenAI 或 Anthropic 模型服务的 API key。
 </Info>
 
 <Steps>
@@ -40,7 +40,7 @@ description: "在你的电脑上运行 Barracuda，连接一个模型，然后�
     cargo cli configure
     ```
 
-    按提示填写：API 格式（`openai_compatible` 或 `anthropic_compatible`）、用途 `root_agent`、base URL、模型和你的 API key。key 保存在设备上。你也可以在[设备门户](/zh/use/device-portal)的 **模型配置**页面完成同样的操作。
+    按提示填写：API 格式（`openai` 或 `anthropic`）、用途 `root_agent`、base URL、模型和你的 API key。key 保存在设备上。你也可以在[设备门户](/zh/use/device-portal)的 **模型配置**页面完成同样的操作。
   </Step>
   <Step title="与 Agent 对话">
     打开终端消息通道并选择 **Local**：

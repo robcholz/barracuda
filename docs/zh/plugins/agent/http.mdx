@@ -19,7 +19,7 @@ description: "Agent 插件的 HTTP 路由：配置模型 API 并读取它们的�
     "image_max_bytes": 524288,
     "input_modalities": {"image": true, "pdf": false},
     "max_images_in_context": 2,
-    "backend": "openai_compatible",
+    "backend": "openai",
     "purpose": "root_agent",
     "default": true,
     "api_key": "provider-secret",
@@ -29,11 +29,11 @@ description: "Agent 插件的 HTTP 路由：配置模型 API 并读取它们的�
 ]
 ```
 
-数组不能为空，每个字段都是必需的，未知字段会被拒绝。`backend` 为 `openai_compatible` 或 `anthropic_compatible`。
+数组不能为空，每个字段都是必需的，未知字段会被拒绝。`backend` 为 `openai` 或 `anthropic`。
 `purpose` 为 `root_agent`、`sub_agent`、`memory` 或 `compaction`。
 
 附件字段决定一次请求把哪些文件交给模型直接读取。`input_modalities.image` 把 JPEG、PNG、GIF 和 WebP 图片作为图片块发送；`input_modalities.pdf` 把 PDF 作为文档块发送，仅适用于
-`anthropic_compatible`。上下文中只有最新的 `max_images_in_context` 个图片或
+`anthropic`。上下文中只有最新的 `max_images_in_context` 个图片或
 PDF 附件会以这种方式发送，每个最多
 `image_max_bytes` 字节；其他所有附件以一行文本的形式到达模型，写明它的文件、类型、大小和路径。没有这些字段的已存储模型在加载时，`image` 为开启，`pdf` 为关闭，`max_images_in_context` 为 2。
 
@@ -53,9 +53,9 @@ PDF 附件会以这种方式发送，每个最多
 ```json
 {
   "configured": true,
-  "default": {"backend": "openai_compatible", "model": "model-name", "base_url": "https://provider.example/v1"},
+  "default": {"backend": "openai", "model": "model-name", "base_url": "https://provider.example/v1"},
   "purposes": {
-    "root_agent": {"backend": "openai_compatible", "model": "model-name", "base_url": "https://provider.example/v1"},
+    "root_agent": {"backend": "openai", "model": "model-name", "base_url": "https://provider.example/v1"},
     "sub_agent": null,
     "memory": null,
     "compaction": null

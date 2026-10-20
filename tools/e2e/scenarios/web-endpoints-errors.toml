@@ -67,13 +67,13 @@ status = 400
 [[http]]
 method = "POST"
 path = "/api/model-api"
-body = '[{"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"","model":"m","base_url":"http://10.42.0.1:9/v1","timeout_ms":1000,"max_tokens":16,"image_max_bytes":1024,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2}]'
+body = '[{"backend":"openai","purpose":"root_agent","default":true,"api_key":"","model":"m","base_url":"http://10.42.0.1:9/v1","timeout_ms":1000,"max_tokens":16,"image_max_bytes":1024,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2}]'
 status = 422
 
 [[http]]
 method = "POST"
 path = "/api/model-api"
-body = '[{"backend":"anthropic_compatible","purpose":"root_agent","default":true,"api_key":"k","model":"m","base_url":"http://10.42.0.1:9/v1","timeout_ms":1000,"max_tokens":16,"image_max_bytes":1024,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2}]'
+body = '[{"backend":"anthropic","purpose":"root_agent","default":true,"api_key":"k","model":"m","base_url":"http://10.42.0.1:9/v1","timeout_ms":1000,"max_tokens":16,"image_max_bytes":1024,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2}]'
 status = 204
 
 [[http]]

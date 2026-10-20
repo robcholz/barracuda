@@ -20,7 +20,7 @@ Request body:
     "image_max_bytes": 524288,
     "input_modalities": {"image": true, "pdf": false},
     "max_images_in_context": 2,
-    "backend": "openai_compatible",
+    "backend": "openai",
     "purpose": "root_agent",
     "default": true,
     "api_key": "provider-secret",
@@ -31,13 +31,13 @@ Request body:
 ```
 
 The array must not be empty, every field is required, and unknown fields are
-rejected. `backend` is `openai_compatible` or `anthropic_compatible`.
+rejected. `backend` is `openai` or `anthropic`.
 `purpose` is `root_agent`, `sub_agent`, `memory`, or `compaction`.
 
 The attachment fields decide which files a request gives the model to read
 directly. `input_modalities.image` sends JPEG, PNG, GIF and WebP images as
 image blocks; `input_modalities.pdf` sends PDFs as document blocks, on
-`anthropic_compatible` only. Only the newest `max_images_in_context` image or
+`anthropic` only. Only the newest `max_images_in_context` image or
 PDF attachments in the context are sent this way, each at most
 `image_max_bytes` bytes; every other attachment reaches the model as a text
 line naming its file, type, size and path. A stored model without these
@@ -60,9 +60,9 @@ Reports the active model configuration without API keys:
 ```json
 {
   "configured": true,
-  "default": {"backend": "openai_compatible", "model": "model-name", "base_url": "https://provider.example/v1"},
+  "default": {"backend": "openai", "model": "model-name", "base_url": "https://provider.example/v1"},
   "purposes": {
-    "root_agent": {"backend": "openai_compatible", "model": "model-name", "base_url": "https://provider.example/v1"},
+    "root_agent": {"backend": "openai", "model": "model-name", "base_url": "https://provider.example/v1"},
     "sub_agent": null,
     "memory": null,
     "compaction": null

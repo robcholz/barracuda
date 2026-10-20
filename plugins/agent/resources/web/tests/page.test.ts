@@ -116,8 +116,8 @@ test("renders the design in Chinese: header, socket figure, purpose cards, fold,
     ),
   ).toEqual(["true", "true", "false"]);
   expect(texts(root, ".bc-radio-card .bc-option-title")).toEqual([
-    "OpenAI 兼容",
-    "Anthropic 兼容",
+    "OpenAI",
+    "Anthropic",
     "主 Agent",
     "子 Agent",
     "记忆",
@@ -128,7 +128,7 @@ test("renders the design in Chinese: header, socket figure, purpose cards, fold,
   ).toHaveLength(6);
   expect(
     root.querySelector<HTMLInputElement>('[name="backend"]:checked')?.value,
-  ).toBe("openai_compatible");
+  ).toBe("openai");
   expect(
     root.querySelector<HTMLInputElement>('[name="purpose"]:checked')?.value,
   ).toBe("root_agent");
@@ -206,9 +206,7 @@ test("required connection fields block the request", async () => {
 
 test("posts one model as a batch with every field the endpoint requires", async () => {
   const { root, input, submit, toasts, routes, refreshes } = await render("zh");
-  root
-    .querySelector<HTMLInputElement>('[value="anthropic_compatible"]')!
-    .click();
+  root.querySelector<HTMLInputElement>('[value="anthropic"]')!.click();
   root.querySelector<HTMLInputElement>('[value="memory"]')!.click();
   root.querySelector<HTMLButtonElement>('[role="switch"]')!.click();
   input("base_url").value = " https://api.example.com/v1 ";
@@ -227,7 +225,7 @@ test("posts one model as a batch with every field the endpoint requires", async 
   expect(calls[0][1].method).toBe("POST");
   expect(JSON.parse(String(calls[0][1].body))).toEqual([
     {
-      backend: "anthropic_compatible",
+      backend: "anthropic",
       purpose: "memory",
       default: false,
       base_url: "https://api.example.com/v1",
@@ -296,7 +294,7 @@ test("the header shows whether the device holds a model, and updates after a sav
 
 test("the header shows the model each purpose uses, the default where it has none", async () => {
   const model = (name: string) => ({
-    backend: "openai_compatible",
+    backend: "openai",
     model: name,
     base_url: "https://api.example.com/v1",
   });

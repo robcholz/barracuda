@@ -8,7 +8,7 @@ use getset::CopyGetters;
 
 mod anthropic;
 mod body;
-mod openai_compatible;
+mod openai;
 pub(crate) mod shared;
 pub(crate) mod sse;
 
@@ -44,12 +44,12 @@ fn parse_backend_kind_error(_: &str) -> ParseBackendKindError {
     parse_err_fn = parse_backend_kind_error
 )]
 pub enum BackendKind {
-    #[serde(rename = "openai_compatible")]
-    #[strum(serialize = "openai_compatible")]
-    OpenAiCompatible,
-    #[serde(rename = "anthropic_compatible")]
-    #[strum(serialize = "anthropic_compatible")]
-    AnthropicCompatible,
+    #[serde(rename = "openai")]
+    #[strum(serialize = "openai")]
+    OpenAi,
+    #[serde(rename = "anthropic")]
+    #[strum(serialize = "anthropic")]
+    Anthropic,
 }
 
 impl BackendKind {
@@ -89,11 +89,11 @@ impl Backend {
             ..
         } = config;
         let (path, headers) = match kind {
-            BackendKind::OpenAiCompatible => (
-                openai_compatible::CHAT_PATH,
+            BackendKind::OpenAi => (
+                openai::CHAT_PATH,
                 vec![("Authorization".to_string(), format!("Bearer {api_key}"))],
             ),
-            BackendKind::AnthropicCompatible => (
+            BackendKind::Anthropic => (
                 anthropic::CHAT_PATH,
                 vec![
                     ("x-api-key".to_string(), api_key),
@@ -113,7 +113,7 @@ impl Backend {
             max_tokens,
             media: MediaPolicy {
                 modalities: input_modalities,
-                documents: kind == BackendKind::AnthropicCompatible,
+                documents: kind == BackendKind::Anthropic,
                 max_inline: max_images_in_context,
                 max_bytes: image_max_bytes,
             },
@@ -139,10 +139,8 @@ impl Backend {
         media: &RequestMedia,
     ) -> Result<LlmResponse, Error> {
         match self.kind {
-            BackendKind::OpenAiCompatible => {
-                openai_compatible::chat(self, http, request, media).await
-            }
-            BackendKind::AnthropicCompatible => anthropic::chat(self, http, request, media).await,
+            BackendKind::OpenAi => openai::chat(self, http, request, media).await,
+            BackendKind::Anthropic => anthropic::chat(self, http, request, media).await,
         }
     }
 
@@ -155,10 +153,10 @@ impl Backend {
         schema: &Value,
     ) -> Result<LlmResponse, Error> {
         match self.kind {
-            BackendKind::OpenAiCompatible => {
-                openai_compatible::chat_json(self, http, request, media, schema_name, schema).await
+            BackendKind::OpenAi => {
+                openai::chat_json(self, http, request, media, schema_name, schema).await
             }
-            BackendKind::AnthropicCompatible => {
+            BackendKind::Anthropic => {
                 anthropic::chat_json(self, http, request, media, schema_name, schema).await
             }
         }
@@ -171,12 +169,8 @@ impl Backend {
         media: &RequestMedia,
     ) -> Result<ProviderStream<'h>, Error> {
         match self.kind {
-            BackendKind::OpenAiCompatible => {
-                openai_compatible::chat_stream(self, http, request, media).await
-            }
-            BackendKind::AnthropicCompatible => {
-                anthropic::chat_stream(self, http, request, media).await
-            }
+            BackendKind::OpenAi => openai::chat_stream(self, http, request, media).await,
+            BackendKind::Anthropic => anthropic::chat_stream(self, http, request, media).await,
         }
     }
 }

@@ -1,10 +1,10 @@
 ---
 title: "barracuda-model-api"
 sidebarTitle: "Model API"
-description: "调用 OpenAI 和 Anthropic 兼容的模型，进行聊天、流式输出和结构化 JSON 输出。"
+description: "调用 OpenAI 和 Anthropic 的模型，进行聊天、流式输出和结构化 JSON 输出。"
 ---
 
-LLM 客户端：在一个由 Agent 拥有的持久 HTTP 传输上，提供 OpenAI 和 Anthropic 兼容的聊天以及结构化 JSON 输出，并把对话引用的图片和 PDF
+LLM 客户端：在一个由 Agent 拥有的持久 HTTP 传输上，提供 OpenAI 和 Anthropic 的聊天以及结构化 JSON 输出，并把对话引用的图片和 PDF
 附件内联进每个请求。
 
 这套独立的 LLM 接口可以脱离 Agent 执行单独复用。
@@ -19,14 +19,14 @@ LLM 客户端：在一个由 Agent 拥有的持久 HTTP 传输上，提供 OpenA
 | `ModelApi::chat_json` | `ChatRequest` + `StaticOutputSchema` | `ChatJsonResponse`（解析出的 `T` + 工具调用） |
 | `ModelApi::chat_stream` | `ChatRequest` | 由包含 `barracuda_runtime_utils::stream::StreamPart` 的 `ChatStreamEvent` 值组成的 `ChatStream`；该流在被 Drop 之前独占借用 HTTP 传输 |
 
-`openai_compatible` 和 `anthropic_compatible` 两种后端都受支持；这个 crate 把统一的请求形状（以及工具定义、工具调用/工具结果角色、结构化输出配置）转换为各服务商的线上格式。
+`openai` 和 `anthropic` 两种后端都受支持；这个 crate 把统一的请求形状（以及工具定义、工具调用/工具结果角色、结构化输出配置）转换为各服务商的线上格式。
 
 ## 附件
 
 用户消息和工具消息通过 `media` 内容部分
 （`barracuda_agent_message::attachment`）引用文件，从不直接携带字节。每次调用在第一次尝试之前，从
 `ChatRequest::files` 读取一次它可以内联的最新附件：`input_modalities.image` 开启时为 JPEG、PNG、GIF 和 WebP 图片（根据字节识别），在
-Anthropic 兼容后端上且 `input_modalities.pdf` 开启时为 PDF，最多
+Anthropic 后端上且 `input_modalities.pdf` 开启时为 PDF，最多
 `max_images_in_context` 个文件，每个最多 `image_max_bytes` 字节。请求体编码器把它们 base64 编码后原地放入请求体。其他所有附件以文本占位符的形式发送，写明文件、类型、大小和路径（文件不存在后则为 `… no longer available`）。
 
 ## HTTP 是注入的

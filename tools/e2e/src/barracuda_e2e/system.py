@@ -288,7 +288,7 @@ class TapeServer:
 
 
 def configure_model(
-    base_url: str, model: str, api_key: str, backend: str = 'openai_compatible'
+    base_url: str, model: str, api_key: str, backend: str = 'openai'
 ) -> None:
     """Install one default model API of the given wire format on the Agent."""
 

@@ -203,7 +203,7 @@ const en = {
   settingsLead:
     "The model Barracuda writes apps with, how its changes reach your code, and the open app's manifest.",
   anthropicHint: "Your Anthropic API key",
-  openaiTitle: "OpenAI compatible",
+  openaiTitle: "OpenAI",
   openaiHint: "Any service with the same API",
   urlError: "Enter the service's base URL, like https://api.example.com/v1",
   chars: (n: number) => `Use 1–${n} characters`,
@@ -531,7 +531,7 @@ const zh: Strings = {
   settingsLead:
     "Barracuda 编写应用所用的模型、它的修改如何进入你的代码，以及打开的应用的清单。",
   anthropicHint: "你的 Anthropic API 密钥",
-  openaiTitle: "OpenAI 兼容",
+  openaiTitle: "OpenAI",
   openaiHint: "任何提供相同 API 的服务",
   urlError: "输入服务的基础 URL，例如 https://api.example.com/v1",
   chars: (n) => `使用 1–${n} 个字符`,

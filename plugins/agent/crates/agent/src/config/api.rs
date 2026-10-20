@@ -147,12 +147,7 @@ mod tests {
     use barracuda_model_api::BackendKind;
 
     fn cfg(model: &str, key: &str) -> ModelApiConfig {
-        ModelApiConfig::new(
-            BackendKind::OpenAiCompatible,
-            key,
-            model,
-            "http://api.test/v1",
-        )
+        ModelApiConfig::new(BackendKind::OpenAi, key, model, "http://api.test/v1")
     }
 
     #[test]

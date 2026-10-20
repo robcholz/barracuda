@@ -93,7 +93,7 @@ const CONFIGURATIONS: &[Configuration] = &[
         description: "为指定 Agent 用途注册模型。每次提交一个模型配置。",
         fields: &[
             Field::new("backend", "接口协议", FieldKind::Choice)
-                .with_options(&["openai_compatible", "anthropic_compatible"]),
+                .with_options(&["openai", "anthropic"]),
             Field::new("purpose", "用途", FieldKind::Choice).with_options(&[
                 "root_agent",
                 "sub_agent",

@@ -1,4 +1,4 @@
-//! OpenAI-compatible backend.
+//! OpenAI backend.
 
 use alloc::borrow::ToOwned;
 use alloc::format;
@@ -303,8 +303,8 @@ mod tests {
 
     #[test]
     fn streaming_requests_ask_provider_to_include_usage() {
-        let backend = BackendKind::OpenAiCompatible.make(ModelApiConfig::new(
-            BackendKind::OpenAiCompatible,
+        let backend = BackendKind::OpenAi.make(ModelApiConfig::new(
+            BackendKind::OpenAi,
             "key",
             "model",
             "https://example.invalid/v1",
@@ -338,8 +338,8 @@ mod wire_tests {
     use crate::{BackendKind, ModelApiConfig};
 
     fn backend() -> Backend {
-        BackendKind::OpenAiCompatible.make(ModelApiConfig::new(
-            BackendKind::OpenAiCompatible,
+        BackendKind::OpenAi.make(ModelApiConfig::new(
+            BackendKind::OpenAi,
             "key",
             "model-\"x\"",
             "https://example.invalid/v1",
