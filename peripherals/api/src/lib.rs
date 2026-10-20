@@ -435,17 +435,33 @@ pub mod display {
     ///
     /// Display implementations select the external controller, timing, and command
     /// sequence; the Platform owns the DSI PHY, framebuffer, and vendor HAL handles.
+    ///
+    /// The link starts in command mode: [`DsiHost::initialize`] brings it up,
+    /// and [`DsiHost::start_video`] starts streaming the framebuffer. Commands
+    /// may be written in either mode, so a panel whose controller expects its
+    /// initialization sequence before video, or during it, is served by
+    /// ordering the two calls.
     pub trait DsiHost {
         /// Vendor HAL failure.
         type Error: core::fmt::Debug;
 
-        /// Establishes the DSI link and configures the video data plane.
+        /// Establishes the DSI link in command mode and records the video timing.
         fn initialize(&mut self, config: DsiPanelConfig) -> Result<(), Self::Error>;
+
+        /// Starts streaming the framebuffer to the panel in video mode.
+        ///
+        /// Starting a stream that already runs does nothing.
+        fn start_video(&mut self) -> Result<(), Self::Error>;
 
         /// Sends one chip-specific command over the DSI DBI command channel.
         fn write_command(&mut self, command: u8, data: &[u8]) -> Result<(), Self::Error>;
 
+        /// Makes every pixel drawn since the last call visible to the stream.
+        fn present(&mut self) -> Result<(), Self::Error>;
+
         /// Copies one row-major RGB565 rectangle into the DSI framebuffer.
+        ///
+        /// The pixels reach the panel at the next [`DsiHost::present`].
         fn draw_rgb565(
             &mut self,
             x: u16,
@@ -455,13 +471,18 @@ pub mod display {
             pixels: &[u16],
         ) -> Result<(), Self::Error>;
 
-        /// Enables or blanks panel output.
+        /// Enables or blanks panel output with the DCS display on/off commands.
         fn set_display_enabled(&mut self, enabled: bool) -> Result<(), Self::Error>;
 
         /// Enters or leaves the controller's sleep state.
         fn set_sleep(&mut self, sleep: bool) -> Result<(), Self::Error>;
 
-        /// Sets the PWM backlight on the portable `0..=255` scale.
+        /// Sets the backlight on the portable `0..=255` scale.
+        ///
+        /// A Board that switches its backlight pin without PWM treats every
+        /// non-zero level as on. A host whose Board drives the backlight
+        /// through another chip reports an error; the display implementation
+        /// that owns that chip controls it instead.
         fn set_backlight(&mut self, brightness: u8) -> Result<(), Self::Error>;
     }
 
