@@ -57,7 +57,7 @@ exposed-io:
     expansion-2: { pin: GPIO4 }
 ```
 
-每个可选的外设实现都拥有 `peripherals/impl/<peripheral>/<implementation-id>/peripheral.yml`，它声明该实现的绑定、参数、外设 API 和静态构造模板。`cargo board sync` 按约定发现各个实现。`board.yml` 仍然只是硬件数据，不包含 Cargo 包、crate 路径、Rust 类型或平台 feature 注册。选择过程会先解析并渲染完整的组合，再写入选择状态，然后只启用具体的外设实现包。GPIO、SPI、I2C、摄像头采集和 I2S 流的构造来自独立选择的平台 HAL。生成的 `SelectedBoardHal` 是单态化的；不会添加运行时注册表或 trait 对象。
+每个可选的外设实现都拥有 `peripherals/impl/<peripheral>/<implementation-id>/peripheral.yml`，它声明该实现的绑定、参数、外设 API 和静态构造模板。`cargo board sync` 按约定发现各个实现。`board.yml` 仍然只是硬件数据，不包含 Cargo 包、crate 路径、Rust 类型或平台 feature 注册。选择过程会先解析并渲染完整的组合，再写入选择状态，然后只启用具体的外设实现包。GPIO、SPI、I2C、摄像头采集、并行显示输出和 I2S 流的构造来自独立选择的平台 HAL。生成的 `SelectedBoardHal` 是单态化的；不会添加运行时注册表或 trait 对象。
 
 开发板 HAL 不取代 `embedded-hal`。它为暴露的物理资源提供一个共享的运行时所有者。功能提供者以原子方式占用引脚，并在需要时占用一个内部选择的控制器，请所选平台配置它们的复用，然后把具体的 `embedded-hal` 或 `embedded-hal-async` 值返回给使用方。它的构造、GPIO 模式和模拟扩展涵盖了 embedded-hal 1.0 没有定义的操作。
 

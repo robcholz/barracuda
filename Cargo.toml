@@ -68,6 +68,7 @@ barracuda-gdeh0154d67-display = { path = "peripherals/impl/display/gdeh0154d67-d
 barracuda-ina226-power-monitor = { path = "peripherals/impl/power-monitor/ina226-power-monitor" }
 barracuda-indicator-led = { path = "peripherals/impl/indicator/indicator-led" }
 barracuda-mipi-dbi-display = { path = "peripherals/impl/display/mipi-dbi-display" }
+barracuda-mipi-dbi-parallel-display = { path = "peripherals/impl/display/mipi-dbi-parallel-display" }
 barracuda-mipi-dbi-pi4ioe5v6408-display = { path = "peripherals/impl/display/mipi-dbi-pi4ioe5v6408-display" }
 barracuda-ov2640-camera = { path = "peripherals/impl/camera/ov2640-camera" }
 barracuda-ov3660-camera = { path = "peripherals/impl/camera/ov3660-camera" }

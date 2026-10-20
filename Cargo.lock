@@ -881,6 +881,7 @@ dependencies = [
  "barracuda-ina226-power-monitor",
  "barracuda-indicator-led",
  "barracuda-mipi-dbi-display",
+ "barracuda-mipi-dbi-parallel-display",
  "barracuda-mipi-dbi-pi4ioe5v6408-display",
  "barracuda-ov2640-camera",
  "barracuda-ov3660-camera",
@@ -1734,6 +1735,17 @@ dependencies = [
  "embedded-hal 1.0.0",
  "mipidsi",
  "static_cell",
+]
+
+[[package]]
+name = "barracuda-mipi-dbi-parallel-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-mipi-dbi-display",
+ "barracuda-peripheral",
+ "embedded-hal 1.0.0",
+ "mipidsi",
 ]
 
 [[package]]

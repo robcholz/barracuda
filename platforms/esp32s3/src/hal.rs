@@ -1,9 +1,13 @@
 //! ESP32-S3 adaptation from Board-selected tokens to hardware resources.
 
 mod capacitive_touch;
+mod parallel_output;
 mod sdmmc;
 
 pub use capacitive_touch::{capacitive_touch_buttons, CapacitiveTouchButtons};
+pub use parallel_output::{
+    parallel_output, ParallelOutput, ParallelOutputConfigError, ParallelOutputError,
+};
 pub use sdmmc::{sdmmc_device_1bit, SdmmcConfigError, SdmmcDevice};
 
 include!("../../esp32/src/hal.rs");
@@ -119,12 +123,24 @@ macro_rules! __barracuda_esp32s3_i2s_dma_buffers {
     }};
 }
 
+/// Statically allocates one parallel-output DMA staging buffer at the
+/// generated Board call site.
+#[macro_export]
+macro_rules! __barracuda_esp32s3_parallel_output_dma_buffer {
+    ($bytes:expr) => {
+        $crate::hal::__vendor::dma_tx_buffer!($bytes)
+            .map_err($crate::hal::ParallelOutputConfigError::DmaBuffer)
+    };
+}
+
 #[doc(hidden)]
 pub use __barracuda_esp32s3_camera_dma_buffer as camera_dma_buffer;
 #[doc(hidden)]
 pub use __barracuda_esp32s3_i2s_dma_buffers as i2s_dma_buffers;
 #[doc(hidden)]
 pub use __barracuda_esp32s3_i2s_dma_buffers as runtime_i2s_dma_buffers;
+#[doc(hidden)]
+pub use __barracuda_esp32s3_parallel_output_dma_buffer as parallel_output_dma_buffer;
 
 /// ESP32-S3 camera receiver construction failure.
 #[derive(Debug)]

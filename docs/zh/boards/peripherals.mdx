@@ -68,6 +68,21 @@ spi-device:
     frequency-hz: 40000000
 ~~~
 
+接在八位 Intel 8080 总线上的面板是一个 `parallel-output`：写选通线、数据/命令线和片选线，按位序排列的八根数据线，选通时钟，以及 DMA 暂存缓冲区。平台把它作为 `ParallelBus` 交给显示实现：
+
+~~~yaml
+parallel-output:
+  display-bus:
+    peripheral: LCD_CAM
+    dma: DMA_CH1
+    wr: GPIO11
+    dc: GPIO12
+    chip-select: GPIO14
+    data: [GPIO13, GPIO9, GPIO8, GPIO7, GPIO6, GPIO5, GPIO4, GPIO3]
+    frequency-hz: 10000000
+    dma-buffer-bytes: 4096
+~~~
+
 每个生成的语义槽位都是可选的。没有实时时钟的开发板就没有 `RealTimeClock` 值；有实时时钟的开发板则有 `Some(concrete_clock)`。缺席不需要伪造硬件，存在也不会暴露辅助芯片。
 
 ## 实现清单

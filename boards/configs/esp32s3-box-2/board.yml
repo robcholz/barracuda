@@ -1,4 +1,5 @@
 name: esp32s3-box-2
+profile: screen
 hardware:
   chip: esp32s3
   # Espressif esp_friends_boards `esp32_s3_box_2`: 16 MB flash and octal PSRAM
@@ -21,6 +22,19 @@ peripherals:
         scl: GPIO47
         sda: GPIO48
         frequency-hz: 100000
+    parallel-output:
+      display-bus:
+        # Espressif esp_friends_boards `esp32_s3_box_2` board_devices.yaml
+        # (`display_lcd`, i80 bus): D0..D7, WR G11, D/C G12, CS G14, 10 MHz.
+        # DMA_CH0 belongs to the audio stream.
+        peripheral: LCD_CAM
+        dma: DMA_CH1
+        wr: GPIO11
+        dc: GPIO12
+        chip-select: GPIO14
+        data: [GPIO13, GPIO9, GPIO8, GPIO7, GPIO6, GPIO5, GPIO4, GPIO3]
+        frequency-hz: 10000000
+        dma-buffer-bytes: 4096
     i2s-stream:
       audio-stream:
         # DOUT/DIN are named from the ESP32-S3 controller's perspective.
@@ -43,3 +57,18 @@ peripherals:
         stream: audio-stream
       parameters:
         address: 32
+    display:
+      # 240 x 320 ST7789 with no reset line; its read strobe (G10) idles high
+      # and its backlight (G21) is lit high (`lcd_rd_gpio_ctrl`,
+      # `lcd_bl_gpio_ctrl`).
+      implementation: mipi-dbi-parallel-display
+      bindings:
+        bus: display-bus
+        read: GPIO10
+        backlight: GPIO21
+      parameters:
+        controller: st7789
+        width: 240
+        height: 320
+        color-order: rgb
+        invert-colors: true

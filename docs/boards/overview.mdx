@@ -78,8 +78,9 @@ bindings, parameters, peripheral API, and static construction templates.
 remains hardware data and contains no Cargo package, crate path, Rust type, or
 Platform feature registration. Selection resolves and renders the complete
 composition before it writes selection state, then enables only the concrete
-peripheral implementation packages. GPIO, SPI, I2C, camera-capture, and I2S-stream
-construction comes from the independently selected Platform HAL.
+peripheral implementation packages. GPIO, SPI, I2C, camera-capture,
+parallel-output, and I2S-stream construction comes from the independently
+selected Platform HAL.
 The generated `SelectedBoardHal` is monomorphized; no runtime registry or trait
 object is added.
 

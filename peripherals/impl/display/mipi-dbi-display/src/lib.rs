@@ -262,50 +262,89 @@ where
             spi,
             dc,
             reset,
-            mut backlight,
-            mut delay,
+            backlight,
+            delay,
             buffer,
         } = bindings;
-        let mut interface = SpiInterface::new(spi, dc, buffer);
-        if reset.is_none() {
-            // Without a reset line, the DCS software reset returns the
-            // controller to its power-on defaults before the model init.
-            interface
-                .send_command(SOFTWARE_RESET, &[])
-                .map_err(|error| MipiDbiInitError::Display(InitError::Interface(error)))?;
-            delay.delay_ms(SOFTWARE_RESET_SETTLE_MS);
-        }
-        let size = config.display.size;
-        let color_order = match config.display.color_order {
-            MipiDbiColorOrder::Rgb => ColorOrder::Rgb,
-            MipiDbiColorOrder::Bgr => ColorOrder::Bgr,
-        };
-        let inversion = if config.display.invert_colors {
-            ColorInversion::Inverted
-        } else {
-            ColorInversion::Normal
-        };
-        let inner = Builder::new(config.model, interface)
-            .reset_pin(PanelReset::new(reset, config.display.reset_active_high))
-            .display_size(size.width as u16, size.height as u16)
-            .display_offset(config.display.offset.0, config.display.offset.1)
-            .color_order(color_order)
-            .invert_colors(inversion)
-            .orientation(mipidsi_orientation(config.display.orientation))
-            .init(&mut delay)
-            .map_err(MipiDbiInitError::Display)?;
-        if let (Some(backlight), Some(active_high)) =
-            (&mut backlight, config.display.backlight_active_high)
-        {
-            set_backlight(backlight, active_high, true).map_err(MipiDbiInitError::Backlight)?;
-        }
-        Ok(MipiDbiDisplay {
-            inner,
-            delay,
+        initialize_on(
+            SpiInterface::new(spi, dc, buffer),
+            reset,
             backlight,
-            config: config.display,
-        })
+            delay,
+            config,
+        )
     }
+}
+
+/// Result of [`initialize_on`].
+pub type InitResult<DI, M, RST, BL, DELAY> = Result<
+    MipiDbiDisplay<DI, M, RST, BL, DELAY>,
+    MipiDbiInitError<
+        <DI as Interface>::Error,
+        <RST as embedded_hal::digital::ErrorType>::Error,
+        <BL as embedded_hal::digital::ErrorType>::Error,
+    >,
+>;
+
+/// Initializes a panel on any `mipidsi` interface, such as a parallel bus,
+/// with the same reset, backlight, and option handling as the SPI factory.
+///
+/// # Errors
+///
+/// Returns [`MipiDbiInitError`] when the controller or backlight fails.
+pub fn initialize_on<DI, M, RST, BL, DELAY>(
+    mut interface: DI,
+    reset: Option<RST>,
+    mut backlight: Option<BL>,
+    mut delay: DELAY,
+    config: MipiDbiDriverConfig<M>,
+) -> InitResult<DI, M, RST, BL, DELAY>
+where
+    DI: Interface,
+    M: Model,
+    M::ColorFormat: InterfacePixelFormat<DI::Word>,
+    RST: OutputPin,
+    BL: OutputPin,
+    DELAY: DelayNs,
+{
+    if reset.is_none() {
+        // Without a reset line, the DCS software reset returns the
+        // controller to its power-on defaults before the model init.
+        interface
+            .send_command(SOFTWARE_RESET, &[])
+            .map_err(|error| MipiDbiInitError::Display(InitError::Interface(error)))?;
+        delay.delay_ms(SOFTWARE_RESET_SETTLE_MS);
+    }
+    let size = config.display.size;
+    let color_order = match config.display.color_order {
+        MipiDbiColorOrder::Rgb => ColorOrder::Rgb,
+        MipiDbiColorOrder::Bgr => ColorOrder::Bgr,
+    };
+    let inversion = if config.display.invert_colors {
+        ColorInversion::Inverted
+    } else {
+        ColorInversion::Normal
+    };
+    let inner = Builder::new(config.model, interface)
+        .reset_pin(PanelReset::new(reset, config.display.reset_active_high))
+        .display_size(size.width as u16, size.height as u16)
+        .display_offset(config.display.offset.0, config.display.offset.1)
+        .color_order(color_order)
+        .invert_colors(inversion)
+        .orientation(mipidsi_orientation(config.display.orientation))
+        .init(&mut delay)
+        .map_err(MipiDbiInitError::Display)?;
+    if let (Some(backlight), Some(active_high)) =
+        (&mut backlight, config.display.backlight_active_high)
+    {
+        set_backlight(backlight, active_high, true).map_err(MipiDbiInitError::Backlight)?;
+    }
+    Ok(MipiDbiDisplay {
+        inner,
+        delay,
+        backlight,
+        config: config.display,
+    })
 }
 
 impl<DI, M, RST, BL, DELAY> OriginDimensions for MipiDbiDisplay<DI, M, RST, BL, DELAY>

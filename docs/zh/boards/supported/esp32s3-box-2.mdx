@@ -10,7 +10,7 @@ ESP32-S3-BOX-2 是 Espressif 推出的 ESP32-S3 开发板。
 - 芯片：ESP32-S3
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32s3-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/esp32s3-box-2/partitions.csv`
 
 ## 构建和运行
@@ -28,3 +28,4 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `audio-codec` | 音频编解码器（ES8389） | [`audio`](/zh/plugins/vm-audio) |
+| `display` | 显示屏（MIPI DBI，八位并行） | [`display`](/zh/plugins/vm-display) |
