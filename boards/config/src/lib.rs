@@ -247,6 +247,9 @@ impl BoardDefinition {
         {
             return Err(ConfigError::ZeroExternalMemory);
         }
+        if let Some(ethernet) = &self.hardware.ethernet {
+            ethernet.validate()?;
+        }
         if let Some(toolchain) = &self.toolchain {
             if toolchain.target.trim().is_empty() {
                 return Err(ConfigError::EmptyToolchainTarget);
@@ -645,12 +648,17 @@ impl MipiCsiDefinition {
 }
 
 /// One MIPI DSI host and its fixed Board power/backlight resources.
+///
+/// `backlight` is the panel backlight pin when the chip drives it directly. A
+/// panel whose backlight sits behind another chip, such as an I/O expander,
+/// omits it, and its display implementation drives that chip.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct DsiHostDefinition {
     peripheral: String,
     dma: String,
-    backlight: String,
+    #[serde(default)]
+    backlight: Option<String>,
     #[serde(rename = "data-lanes")]
     data_lanes: u8,
     #[serde(rename = "phy-power-channel")]
@@ -672,10 +680,10 @@ impl DsiHostDefinition {
         &self.dma
     }
 
-    /// Returns the panel backlight PWM pin.
+    /// Returns the panel backlight pin, when the chip drives it directly.
     #[must_use]
-    pub fn backlight(&self) -> &str {
-        &self.backlight
+    pub fn backlight(&self) -> Option<&str> {
+        self.backlight.as_deref()
     }
 
     /// Returns the physical MIPI DSI data-lane count.
@@ -699,7 +707,9 @@ impl DsiHostDefinition {
     fn validate(&self, name: &str) -> Result<(), ConfigError> {
         validate_identifier(name, "peripheral", &self.peripheral)?;
         validate_identifier(name, "dma", &self.dma)?;
-        validate_identifier(name, "backlight", &self.backlight)?;
+        if let Some(backlight) = &self.backlight {
+            validate_identifier(name, "backlight", backlight)?;
+        }
         if self.data_lanes == 0
             || self.data_lanes > 4
             || self.phy_power_channel == 0
@@ -1408,6 +1418,8 @@ pub struct HardwareDefinition {
     flash_size: Option<String>,
     #[serde(default, rename = "external-memory")]
     external_memory: Option<ExternalMemoryDefinition>,
+    #[serde(default)]
+    ethernet: Option<EthernetDefinition>,
 }
 
 impl HardwareDefinition {
@@ -1429,6 +1441,248 @@ impl HardwareDefinition {
     pub const fn external_memory(&self) -> Option<&ExternalMemoryDefinition> {
         self.external_memory.as_ref()
     }
+
+    /// Returns the wired Ethernet PHY attached to the chip's MAC, when the
+    /// Board has one.
+    #[must_use]
+    pub const fn ethernet(&self) -> Option<&EthernetDefinition> {
+        self.ethernet.as_ref()
+    }
+}
+
+/// Wired Ethernet: the chip's Ethernet MAC connected to an external PHY.
+///
+/// Every field is a hardware fact read from the Board schematic. The selected
+/// Platform owns the MAC, builds its IP link on it, and rejects a Board whose
+/// interface it cannot drive.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct EthernetDefinition {
+    phy: EthernetPhyDefinition,
+    rmii: RmiiDefinition,
+}
+
+impl EthernetDefinition {
+    /// Returns the PHY chip and its management address.
+    #[must_use]
+    pub const fn phy(&self) -> &EthernetPhyDefinition {
+        &self.phy
+    }
+
+    /// Returns the RMII wiring between the MAC and the PHY.
+    #[must_use]
+    pub const fn rmii(&self) -> &RmiiDefinition {
+        &self.rmii
+    }
+
+    /// Iterates every chip pin the Ethernet wiring uses, with its signal name.
+    pub fn pins(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        let rmii = &self.rmii;
+        [
+            (
+                "reference-clock input",
+                Some(rmii.reference_clock.input.as_str()),
+            ),
+            (
+                "reference-clock output",
+                rmii.reference_clock.output.as_deref(),
+            ),
+            ("mdc", Some(rmii.mdc.as_str())),
+            ("mdio", Some(rmii.mdio.as_str())),
+            ("tx-en", Some(rmii.tx_en.as_str())),
+            ("txd0", Some(rmii.txd0.as_str())),
+            ("txd1", Some(rmii.txd1.as_str())),
+            ("crs-dv", Some(rmii.crs_dv.as_str())),
+            ("rxd0", Some(rmii.rxd0.as_str())),
+            ("rxd1", Some(rmii.rxd1.as_str())),
+            ("phy reset", self.phy.reset.as_deref()),
+        ]
+        .into_iter()
+        .filter_map(|(field, pin)| pin.map(|pin| (field, pin)))
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        let resource = "ethernet";
+        validate_identifier(resource, "phy model", &self.phy.model)?;
+        if self.phy.address > 31 {
+            return Err(ConfigError::InvalidEthernet {
+                reason: "the PHY address must be a Clause 22 address from 0 to 31",
+            });
+        }
+        let clock = &self.rmii.reference_clock;
+        match (clock.source, clock.output.is_some()) {
+            (RmiiReferenceClockSource::External, false)
+            | (RmiiReferenceClockSource::Internal, true) => {}
+            (RmiiReferenceClockSource::External, true) => {
+                return Err(ConfigError::InvalidEthernet {
+                    reason: "an external reference clock has no chip output pin",
+                });
+            }
+            (RmiiReferenceClockSource::Internal, false) => {
+                return Err(ConfigError::InvalidEthernet {
+                    reason: "an internal reference clock needs the chip pin that drives it out",
+                });
+            }
+        }
+        let mut pins = Vec::new();
+        for (field, pin) in self.pins() {
+            validate_identifier(resource, field, pin)?;
+            if pins.contains(&pin) {
+                return Err(ConfigError::InvalidEthernet {
+                    reason: "one chip pin is wired to two Ethernet signals",
+                });
+            }
+            pins.push(pin);
+        }
+        Ok(())
+    }
+}
+
+/// The Ethernet PHY chip on a Board.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct EthernetPhyDefinition {
+    model: String,
+    address: u8,
+    #[serde(default)]
+    reset: Option<String>,
+}
+
+impl EthernetPhyDefinition {
+    /// Returns the PHY part, such as `ip101gri`. It documents the hardware; a
+    /// Platform that drives every PHY through IEEE 802.3 Clause 22 registers
+    /// does not need it.
+    #[must_use]
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    /// Returns the PHY's Clause 22 management address, set by its strap pins.
+    #[must_use]
+    pub const fn address(&self) -> u8 {
+        self.address
+    }
+
+    /// Returns the chip pin wired to the PHY's active-low reset, when one is.
+    #[must_use]
+    pub fn reset(&self) -> Option<&str> {
+        self.reset.as_deref()
+    }
+}
+
+/// RMII wiring between the chip's MAC and the PHY, by chip-native pin names.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RmiiDefinition {
+    #[serde(rename = "reference-clock")]
+    reference_clock: RmiiReferenceClockDefinition,
+    mdc: String,
+    mdio: String,
+    #[serde(rename = "tx-en")]
+    tx_en: String,
+    txd0: String,
+    txd1: String,
+    #[serde(rename = "crs-dv")]
+    crs_dv: String,
+    rxd0: String,
+    rxd1: String,
+}
+
+impl RmiiDefinition {
+    /// Returns where the 50 MHz reference clock comes from.
+    #[must_use]
+    pub const fn reference_clock(&self) -> &RmiiReferenceClockDefinition {
+        &self.reference_clock
+    }
+
+    /// Returns the management clock pin.
+    #[must_use]
+    pub fn mdc(&self) -> &str {
+        &self.mdc
+    }
+
+    /// Returns the management data pin.
+    #[must_use]
+    pub fn mdio(&self) -> &str {
+        &self.mdio
+    }
+
+    /// Returns the transmit-enable pin.
+    #[must_use]
+    pub fn tx_en(&self) -> &str {
+        &self.tx_en
+    }
+
+    /// Returns the first transmit data pin.
+    #[must_use]
+    pub fn txd0(&self) -> &str {
+        &self.txd0
+    }
+
+    /// Returns the second transmit data pin.
+    #[must_use]
+    pub fn txd1(&self) -> &str {
+        &self.txd1
+    }
+
+    /// Returns the carrier-sense/receive-data-valid pin.
+    #[must_use]
+    pub fn crs_dv(&self) -> &str {
+        &self.crs_dv
+    }
+
+    /// Returns the first receive data pin.
+    #[must_use]
+    pub fn rxd0(&self) -> &str {
+        &self.rxd0
+    }
+
+    /// Returns the second receive data pin.
+    #[must_use]
+    pub fn rxd1(&self) -> &str {
+        &self.rxd1
+    }
+}
+
+/// The RMII 50 MHz reference clock and the chip pins it uses.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RmiiReferenceClockDefinition {
+    source: RmiiReferenceClockSource,
+    input: String,
+    #[serde(default)]
+    output: Option<String>,
+}
+
+impl RmiiReferenceClockDefinition {
+    /// Returns which side generates the clock.
+    #[must_use]
+    pub const fn source(&self) -> RmiiReferenceClockSource {
+        self.source
+    }
+
+    /// Returns the chip pin the clock enters the MAC on.
+    #[must_use]
+    pub fn input(&self) -> &str {
+        &self.input
+    }
+
+    /// Returns the chip pin that drives an internal clock out, looped back on
+    /// the Board into `input`; `None` for an external clock.
+    #[must_use]
+    pub fn output(&self) -> Option<&str> {
+        self.output.as_deref()
+    }
+}
+
+/// Who generates the RMII reference clock.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RmiiReferenceClockSource {
+    /// The PHY or an oscillator on the Board drives it into the chip.
+    External,
+    /// The chip generates it and drives it out; the Board loops it back in.
+    Internal,
 }
 
 /// Directly addressable external memory installed on a Board.
@@ -1566,6 +1820,12 @@ pub enum ConfigError {
     InvalidDsiHost {
         /// Board-level DSI host resource name.
         resource: String,
+    },
+    /// The Board's wired Ethernet declaration is inconsistent.
+    #[error("Board Ethernet is invalid: {reason}")]
+    InvalidEthernet {
+        /// What is wrong with the declaration.
+        reason: &'static str,
     },
     /// An SDMMC slot has an unsupported width or no power supply.
     #[error("Board SDMMC device `{resource}` has an invalid bus or power configuration")]
