@@ -19,7 +19,7 @@ peripherals:
         frequency-hz: 40000000
   devices:
     display:
-      implementation: gdeh0154d67-display
+      implementation: epaper-1in54-display
       bindings:
         busy: GPIO1
         dc: GPIO3

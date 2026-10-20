@@ -1,11 +1,12 @@
 [package]
-name = "barracuda-gdeh0154d67-display"
+name = "barracuda-epaper-1in54-display"
 version = "0.1.0"
 edition = "2024"
-description = "Buffered GDEH0154D67 e-paper implementation for Barracuda"
+description = "Buffered 1.54-inch 200 x 200 e-paper implementation for Barracuda, GDEH0154D67 or GDEW0154M09 detected at start-up"
 license = "AGPL-3.0-only"
 
 [dependencies]
+barracuda-driver-jd79653a.workspace = true
 barracuda-peripheral.workspace = true
 embedded-graphics-core.workspace = true
 embedded-hal.workspace = true

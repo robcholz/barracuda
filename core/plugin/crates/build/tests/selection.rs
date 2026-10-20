@@ -34,7 +34,7 @@ fn workspace() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     let root_path = root.path();
     for (kind, id) in [
-        ("display", "gdeh0154d67-display"),
+        ("display", "epaper-1in54-display"),
         ("touch", "cst816t-touch"),
     ] {
         let source = Path::new(REPOSITORY)
@@ -107,8 +107,8 @@ fn claims(selection: &Selection, id: &str) -> Vec<(String, String, Filled)> {
 }
 
 const ONE_DISPLAY: &str =
-    "peripherals:\n  devices:\n    panel:\n      implementation: gdeh0154d67-display\n";
-const THREE_DISPLAYS: &str = "peripherals:\n  devices:\n    front:\n      implementation: gdeh0154d67-display\n      primary: true\n    back-eink:\n      implementation: gdeh0154d67-display\n    status:\n      implementation: gdeh0154d67-display\n";
+    "peripherals:\n  devices:\n    panel:\n      implementation: epaper-1in54-display\n";
+const THREE_DISPLAYS: &str = "peripherals:\n  devices:\n    front:\n      implementation: epaper-1in54-display\n      primary: true\n    back-eink:\n      implementation: epaper-1in54-display\n    status:\n      implementation: epaper-1in54-display\n";
 
 #[test]
 fn boards_without_a_profile_use_base() {
