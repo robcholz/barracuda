@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-atom-s3r-display"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda display implementation for the M5Stack AtomS3R panel with its LP5562 backlight driver"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-atom-s3-display.workspace = true
+barracuda-driver-lp5562.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

@@ -1,0 +1,36 @@
+id: atom-s3r-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-atom-s3r-display
+  crate: barracuda_atom_s3r_display
+  factory: "::{{crate}}::AtomS3rDisplayImplementation<{{binding.spi.type}}, {{binding.dc.type}}, {{binding.reset.type}}, {{binding.backlight.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::AtomS3DisplayBindings::new({{binding.spi.value}}, {{binding.dc.value}}, {{binding.reset.value}}, {{binding.backlight.value}}, {{hal.delay.value}}, ::{{crate}}::take_transfer_buffer())"
+  config-expression: "::{{crate}}::AtomS3rDisplayConfig::new({{parameter.backlight-address}}, {{parameter.orientation}})"
+bindings:
+  # A three-wire SPI device: the controller is identified by reading its ID
+  # back on the data line.
+  spi:
+    kind: spi-device
+  dc:
+    kind: digital-output
+    initial: low
+  reset:
+    kind: digital-output
+    initial: high
+  # The I2C bus of the LP5562 LED driver whose white channel lights the panel.
+  backlight:
+    kind: i2c-device
+parameters:
+  backlight-address:
+    type: integer
+    default: 48
+  orientation:
+    type: enum
+    values: [deg0, deg90, deg180, deg270]
+    rust-values:
+      deg0: "::barracuda_peripheral::display::DisplayOrientation::Deg0"
+      deg90: "::barracuda_peripheral::display::DisplayOrientation::Deg90"
+      deg180: "::barracuda_peripheral::display::DisplayOrientation::Deg180"
+      deg270: "::barracuda_peripheral::display::DisplayOrientation::Deg270"
+    default: deg0

@@ -1,4 +1,5 @@
 name: m5stack-atom-s3
+profile: screen
 hardware:
   chip: esp32s3
   # ESP32-S3FN8.
@@ -7,3 +8,26 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    spi-device:
+      display-spi:
+        # M5GFX `board_M5AtomS3`: SPI3, SCLK G17, MOSI G21 as the one
+        # bidirectional data line, CS G15, written at 40 MHz and probed at 8 MHz.
+        peripheral: SPI3
+        sck: GPIO17
+        mosi: GPIO21
+        three-wire: true
+        read-frequency-hz: 8000000
+        chip-select: GPIO15
+        frequency-hz: 40000000
+  devices:
+    display:
+      # GC9107 or ST7735S, identified from the panel's ID at start-up.
+      implementation: atom-s3-display
+      bindings:
+        spi: display-spi
+        dc: GPIO33
+        reset: GPIO34
+        # M5GFX drives the backlight with non-inverted PWM on G16.
+        backlight: GPIO16

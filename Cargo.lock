@@ -770,6 +770,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-atom-s3-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-peripheral",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
+ "mipidsi",
+ "static_cell",
+]
+
+[[package]]
+name = "barracuda-atom-s3r-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-atom-s3-display",
+ "barracuda-driver-lp5562",
+ "barracuda-peripheral",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-audio-plugin"
 version = "0.1.0"
 dependencies = [
@@ -845,6 +866,8 @@ name = "barracuda-board-selection"
 version = "0.0.0"
 dependencies = [
  "barracuda-apa102-led-strip",
+ "barracuda-atom-s3-display",
+ "barracuda-atom-s3r-display",
  "barracuda-bmi270-imu",
  "barracuda-bq27220-power-monitor",
  "barracuda-capacitive-touch-buttons",
@@ -857,10 +880,12 @@ dependencies = [
  "barracuda-ina226-power-monitor",
  "barracuda-indicator-led",
  "barracuda-mipi-dbi-display",
+ "barracuda-mipi-dbi-pi4ioe5v6408-display",
  "barracuda-ov2640-camera",
  "barracuda-ov3660-camera",
  "barracuda-rx8130ce-rtc",
  "barracuda-sdmmc-fat-removable-storage",
+ "barracuda-ssd1306-spi-display",
  "barracuda-st77916-qspi-display",
  "barracuda-tab5-dsi-display",
  "barracuda-tab5-sc202cs-camera",
@@ -1141,6 +1166,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-lp5562"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-m5ioe1"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-ov2640"
 version = "0.1.0"
 dependencies = [
@@ -1163,6 +1202,13 @@ dependencies = [
 
 [[package]]
 name = "barracuda-driver-rx8130ce"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ssd1306"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
@@ -1665,6 +1711,17 @@ dependencies = [
  "embedded-hal 1.0.0",
  "mipidsi",
  "static_cell",
+]
+
+[[package]]
+name = "barracuda-mipi-dbi-pi4ioe5v6408-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-mipi-dbi-display",
+ "barracuda-peripheral",
+ "embedded-hal 1.0.0",
+ "mipidsi",
 ]
 
 [[package]]
@@ -2409,6 +2466,16 @@ dependencies = [
  "futures-lite",
  "portable-atomic",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-ssd1306-spi-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-ssd1306",
+ "barracuda-peripheral",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
