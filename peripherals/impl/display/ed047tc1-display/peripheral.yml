@@ -1,0 +1,46 @@
+id: ed047tc1-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-ed047tc1-display
+  crate: barracuda_ed047tc1_display
+  factory: "::{{crate}}::Ed047tc1DisplayImplementation<{{binding.bus.type}}, {{binding.spv.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Ed047tc1Bindings::new({{binding.bus.value}}, {{binding.spv.value}}, {{binding.ckv.value}}, {{binding.le.value}}, {{binding.oe.value}}, {{binding.pwr.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Ed047tc1DisplayConfig::new({{parameter.mounting}})"
+bindings:
+  # Source data D0..D7, source clock (CL) as the write clock, and the source
+  # start pulse (SPH) as the active-low select.
+  bus:
+    kind: parallel-output
+  # Gate start pulse.
+  spv:
+    kind: digital-output
+    initial: low
+  # Gate clock.
+  ckv:
+    kind: digital-output
+    initial: low
+  # Source latch enable.
+  le:
+    kind: digital-output
+    initial: low
+  # Source output enable.
+  oe:
+    kind: digital-output
+    initial: low
+  # Panel supply enable.
+  pwr:
+    kind: digital-output
+    initial: low
+parameters:
+  # Clockwise turn from the panel's scan direction to the Board's upright
+  # view (M5GFX `offset_rotation`).
+  mounting:
+    type: enum
+    values: [deg0, deg90, deg180, deg270]
+    rust-values:
+      deg0: "::barracuda_peripheral::display::DisplayOrientation::Deg0"
+      deg90: "::barracuda_peripheral::display::DisplayOrientation::Deg90"
+      deg180: "::barracuda_peripheral::display::DisplayOrientation::Deg180"
+      deg270: "::barracuda_peripheral::display::DisplayOrientation::Deg270"
+    default: deg0

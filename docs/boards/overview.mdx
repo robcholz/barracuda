@@ -78,8 +78,9 @@ bindings, parameters, peripheral API, and static construction templates.
 remains hardware data and contains no Cargo package, crate path, Rust type, or
 Platform feature registration. Selection resolves and renders the complete
 composition before it writes selection state, then enables only the concrete
-peripheral implementation packages. GPIO, SPI, I2C, camera-capture, and I2S-stream
-construction comes from the independently selected Platform HAL.
+peripheral implementation packages. GPIO, SPI, I2C, camera-capture,
+parallel-output, and I2S-stream construction comes from the independently
+selected Platform HAL.
 The generated `SelectedBoardHal` is monomorphized; no runtime registry or trait
 object is added.
 
@@ -216,9 +217,12 @@ must not be advertised until a real bare-metal driver can own that hardware.
 
 All bundles establish Board identity, the correct Rust compilation target, and
 a native ESP partition layout. The display matrix currently composes
-ILI9342C, ST7789, and GC9A01 SPI LCDs through `mipi-dbi-display`, plus the
-GDEH0154D67 e-paper panels in CoreInk and AirQ through
-`gdeh0154d67-display`. Both families expose Barracuda's stable `DisplayPeripheral`
-API. Other fixed peripherals remain absent until their reusable implementation is
+ILI9342C, ST7789, and GC9A01 SPI LCDs through `mipi-dbi-display`, plus
+M5Stack's e-paper panels: the 1.54-inch GDEH0154D67 or GDEW0154M09 in CoreInk
+and AirQ (`epaper-1in54-display`, which identifies the panel at start-up), the
+IT8951E-driven M5Paper (`it8951-display`), the directly driven ED047TC1 in
+PaperS3 and PaperDIY (`ed047tc1-display`, `paper-diy-display`), and the
+Paper Mono and PaperColor (`paper-mono-display`, `paper-color-display`). All of
+them expose Barracuda's stable `DisplayPeripheral` API. Other fixed peripherals remain absent until their reusable implementation is
 implemented and selected in that Board's YAML. ESP32-C5 and ESP32-H2 products
 are intentionally excluded until those Platforms exist in Barracuda.

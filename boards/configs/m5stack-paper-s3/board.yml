@@ -1,4 +1,5 @@
 name: m5stack-paper-s3
+profile: screen
 hardware:
   chip: esp32s3
   # ESP32-S3R8 with 16 MB flash.
@@ -11,3 +12,34 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    parallel-output:
+      epd-bus:
+        # M5GFX board_M5PaperS3 Bus_EPD: the ED047TC1 source data DB0..DB7 on
+        # LCD_CAM in i8080 mode at 16 MHz, CL (pin_cl) as the write clock and
+        # SPH/XSTL (pin_sph) as the active-low select. One line is 240 data
+        # bytes plus M5GFX's 8 bytes of padding.
+        peripheral: LCD_CAM
+        # DMA_CH0 stays with the runtime I2S pool.
+        dma: DMA_CH1
+        clock: GPIO16
+        select: GPIO13
+        data: [GPIO6, GPIO14, GPIO7, GPIO12, GPIO9, GPIO11, GPIO8, GPIO10]
+        frequency-hz: 16000000
+        dma-buffer-bytes: 256
+  devices:
+    display:
+      implementation: ed047tc1-display
+      bindings:
+        bus: epd-bus
+        # M5GFX Bus_EPD: SPV (gate start), CKV (gate clock), LE/XLE (source
+        # latch), OE/XOE (source output enable), PWR (panel supply).
+        spv: GPIO17
+        ckv: GPIO18
+        le: GPIO15
+        oe: GPIO45
+        pwr: GPIO46
+      parameters:
+        # M5GFX offset_rotation 3: upright portrait, 540 x 960.
+        mounting: deg270
