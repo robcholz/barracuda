@@ -124,6 +124,38 @@ hardware:
     size-bytes: 8388608
 ```
 
+`ethernet` records a wired Ethernet PHY on the chip's Ethernet MAC: the PHY
+part and its management address, the pin wired to its active-low reset, and
+the RMII pins with the source of the 50 MHz reference clock (`external` when
+the PHY or an oscillator drives it into `input`; `internal` when the chip
+drives it out on `output` and the Board loops it back into `input`). Like the
+rest of `hardware` it is a fact from the schematic, not a choice: the selected
+Platform builds its IP stack on it, and a Platform that cannot drive the
+interface rejects the Board at `cargo board select`. A pin it names belongs to
+the Platform and is never also a peripheral binding or an exposed pin.
+
+```yaml
+hardware:
+  chip: esp32p4
+  ethernet:
+    phy:
+      model: ip101gri
+      address: 1
+      reset: GPIO51
+    rmii:
+      reference-clock:
+        source: external
+        input: GPIO50
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
+```
+
 Select a concrete Board once, then use the ordinary build command:
 
 ```bash
@@ -199,16 +231,21 @@ ESP chip family currently implemented by the workspace: ESP32, ESP32-C3,
 ESP32-C6, ESP32-S3, and ESP32-P4. Run `cargo board select` and search for the
 `m5stack-` prefix to see the complete, current catalog.
 
-The M5Stack Tab5 selects `m5stack-tab5`. Its Board HAL instantiates the onboard
-ES8388/ES7210 audio path, BMI270 inertial measurement, INA226 power monitor,
-RX8130CE real-time clock, microSD storage, revision-aware touch and DSI display,
-with pure `esp-hal` bindings. Audio, display, and touch implementations
-privately compose the PI4IOE5V6408 chip driver for their enable or reset lines;
-the expander is not a System-visible peripheral. The Board also exposes
-HY2.0-4P PORT.A, rear M5-Bus, and available SIT3088 RS-485 signals through the
-shared runtime I/O owner. The
+The M5Stack Tab5 selects `m5stack-tab5`. Its Board HAL instantiates the
+revision-aware DSI display and touch, the BMI270 inertial measurement, the
+INA226 power monitor, and the RX8130CE real-time clock, with pure `esp-hal`
+bindings. The display and touch implementations privately compose the
+PI4IOE5V6408 chip driver for their reset lines; the expander is not a
+System-visible peripheral. The ES8388/ES7210 audio path and the microSD slot
+wait for I2S and SD/MMC bindings on the ESP32-P4 Platform. The
 `m5stack-tab5x` identity remains separate and must not be substituted based only
 on an ESP32-P4 silicon revision reported by the flashing tool.
+
+The M5Stack CoreP4X selects `m5stack-corep4x`; its 480x480 ST7102 DSI panel is
+composed by `corep4x-dsi-display`, which privately drives the M5IOE1 expander
+for the panel's power, reset, and backlight and the M5PM1 for the 5 V boost.
+The ESP32-P4-Function-EV-Board and the M5Stack Unit PoE-P4 declare their
+IP101GRI Ethernet PHYs under `hardware.ethernet`.
 
 The fitted SC202CS camera remains absent from the Board peripheral set because
 `esp-hal` does not currently expose the ESP32-P4 MIPI-CSI/ISP data plane. It
@@ -216,9 +253,10 @@ must not be advertised until a real bare-metal driver can own that hardware.
 
 All bundles establish Board identity, the correct Rust compilation target, and
 a native ESP partition layout. The display matrix currently composes
-ILI9342C, ST7789, and GC9A01 SPI LCDs through `mipi-dbi-display`, plus the
+ILI9342C, ST7789, and GC9A01 SPI LCDs through `mipi-dbi-display`, the
 GDEH0154D67 e-paper panels in CoreInk and AirQ through
-`gdeh0154d67-display`. Both families expose Barracuda's stable `DisplayPeripheral`
+`gdeh0154d67-display`, and the ESP32-P4 MIPI DSI panels of Tab5 and CoreP4X
+through `tab5-dsi-display` and `corep4x-dsi-display`. Both families expose Barracuda's stable `DisplayPeripheral`
 API. Other fixed peripherals remain absent until their reusable implementation is
 implemented and selected in that Board's YAML. ESP32-C5 and ESP32-H2 products
 are intentionally excluded until those Platforms exist in Barracuda.

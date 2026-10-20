@@ -11,7 +11,7 @@ The M5Stack CoreP4X is an ESP32-P4 Board from M5Stack.
 - Chip: ESP32-P4
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `riscv32imafc-unknown-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-corep4x/partitions.csv`
 
 ## Build and run
@@ -26,10 +26,19 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-corep4x/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | 2.64-inch 480x480 MIPI DSI display (ST7102) | [`display`](/plugins/vm-display) |
+
+The display implementation powers the panel, releases its reset, and dims its
+backlight through the M5IOE1 expander at `4Fh`, and turns on the 5 V boost of
+the M5PM1 at `6Eh`; neither chip is a device of its own. The CST3530 touch
+controller, the ES8311/ES7210 audio path, the BMI270 and BMM150 motion
+sensors, the RX8130CE clock, and the microSD slot are not declared yet.
+
+The IP101GRI Ethernet PHY is not declared either: its RMII pins on the
+CoreP4X are not published, and the ESP32-P4 Platform does not drive the
+ESP32-C6 Wi-Fi co-processor yet, so the IP stack has no link on this Board.
 
 ## Plugin settings
 

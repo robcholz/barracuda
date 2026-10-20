@@ -11,7 +11,7 @@ M5Stack Tab5X 是 M5Stack 推出的 ESP32-P4 开发板。
 - 芯片：ESP32-P4
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`riscv32imafc-unknown-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-tab5x/partitions.csv`
 
 ## 构建和运行
@@ -26,7 +26,15 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-tab5x/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | 720x1280 MIPI DSI 显示屏（ILI9881C、ST7123 或 ST7121，启动时识别） | [`display`](/zh/plugins/vm-display) |
+| `touch` | 触摸控制器（GT911 或面板自带的 ST712x） | — |
+| `real-time-clock` | 实时时钟（RX8130CE） | — |
+| `inertial-measurement` | 运动传感器（BMI270） | [`motion`](/zh/plugins/vm-imu) |
+| `power-monitor` | 电源监测（INA226） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+
+显示屏和触摸实现通过 `43h` 处的 PI4IOE5V6408 扩展芯片复位各自的控制器；该扩展芯片本身不是设备。ES8388/ES7210 音频通路、microSD 卡槽和 SC202CS 摄像头尚未声明：ESP32-P4 平台还没有 I2S、SDMMC 或 MIPI CSI 绑定。Wi-Fi 由 ESP32-C6 协处理器提供，平台尚未驱动它，所以这块开发板上的 IP 协议栈没有链路。
 
 ## 插件设置
 

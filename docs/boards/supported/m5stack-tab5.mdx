@@ -11,7 +11,7 @@ The M5Stack Tab5 is an ESP32-P4 Board from M5Stack.
 - Chip: ESP32-P4
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `riscv32imafc-unknown-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-tab5/partitions.csv`
 
 ## Build and run
@@ -26,10 +26,20 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-tab5/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | 720x1280 MIPI DSI display (ILI9881C, ST7123, or ST7121, detected at start) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (GT911 or the panel's ST712x) | — |
+| `real-time-clock` | Real-time clock (RX8130CE) | — |
+| `inertial-measurement` | Motion sensor (BMI270) | [`motion`](/plugins/vm-imu) |
+| `power-monitor` | Power monitor (INA226) | [`power_monitor`](/plugins/vm-power-monitor) |
+
+The display and touch implementations reset their controllers through the
+PI4IOE5V6408 expander at `43h`; the expander is not a device of its own.
+The ES8388/ES7210 audio path, the microSD slot, and the SC202CS camera are not
+declared yet: the ESP32-P4 Platform has no I2S, SDMMC, or MIPI CSI binding.
+The Wi-Fi radio is an ESP32-C6 co-processor the Platform does not drive yet,
+so the IP stack has no link on this Board.
 
 ## Plugin settings
 
