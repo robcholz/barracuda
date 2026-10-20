@@ -6,9 +6,10 @@ use std::fs;
 
 use barracuda_board_config::{PeripheralParameter, parse};
 use barracuda_peripheral_config::{
-    ResolveError, load_catalog, render_board_hal, render_board_hal_for_platform, resolve_board,
+    GenerateError, ResolveError, load_catalog, render_board_hal, render_board_hal_for_platform,
+    resolve_board, validate_platform_hal,
 };
-use barracuda_platform_config::{discover_platforms, resolve_board_platform};
+use barracuda_platform_config::{HalBinding, discover_platforms, resolve_board_platform};
 use tempfile::tempdir;
 
 const INDICATOR_MANIFEST: &str = r#"
@@ -876,6 +877,116 @@ peripherals:
         rust.matches("shared_i2c_internal_sensors.device()").count(),
         2
     );
+}
+
+const DSI_DISPLAY_MANIFEST: &str = r#"
+id: test-dsi-display
+api-version: 1
+peripheral: display
+implementation:
+  package: test-dsi-display
+  crate: test_dsi_display
+  factory: "::{{crate}}::Implementation<{{binding.host.type}}>"
+  bindings-expression: "{{binding.host.value}}"
+  config-expression: "()"
+bindings:
+  host:
+    kind: dsi-host
+parameters: {}
+"#;
+
+fn dsi_board(backlight: &str) -> String {
+    format!(
+        r#"
+name: dsi-board
+hardware:
+  chip: esp32p4
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    dsi-host:
+      panel:
+        peripheral: MIPI_DSI
+        dma: VDMA_CH0
+{backlight}        data-lanes: 2
+        phy-power-channel: 3
+        phy-power-millivolts: 2500
+  devices:
+    screen:
+      implementation: test-dsi-display
+      bindings: {{ host: panel }}
+"#
+    )
+}
+
+#[test]
+fn renders_a_dsi_host_with_or_without_a_backlight_pin() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-dsi-display", DSI_DISPLAY_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let render = |backlight: &str| {
+        let board = parse(&dsi_board(backlight)).expect("DSI Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("resolved DSI display");
+        let rust = render_board_hal(&board, &resolved).expect("generated DSI HAL");
+        assert_valid_rust(&rust);
+        assert!(rust.contains("controller_binding_type!(MIPI_DSI)"));
+        assert!(rust.contains("controller_binding_type!(VDMA_CH0)"));
+        assert!(rust.contains(", 2, 3, 2500)"));
+        rust
+    };
+
+    let pin = render("        backlight: GPIO22\n");
+    assert!(pin.contains("pin_binding_type!(GPIO22)"));
+    assert!(pin.contains("hal::dsi_backlight_pin(bindings.screen_host_backlight)"));
+
+    let external = render("");
+    assert!(!external.contains("GPIO22"));
+    assert!(external.contains("hal::dsi_backlight_none()"));
+}
+
+#[test]
+fn only_a_platform_with_rmii_ethernet_accepts_a_wired_board() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog = load_catalog(&root).expect("repository Implementation catalog");
+    let wired = |chip: &str| {
+        format!(
+            r#"
+name: wired-board
+hardware:
+  chip: {chip}
+  ethernet:
+    phy: {{ model: ip101gri, address: 1 }}
+    rmii:
+      reference-clock: {{ source: external, input: GPIO50 }}
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
+native-layout:
+  artifact: partitions.csv
+"#
+        )
+    };
+    let validate = |chip: &str| {
+        let board = parse(&wired(chip)).expect("wired Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("resolved wired Board");
+        let platform = resolve_board_platform(&root, chip, None).expect("repository Platform");
+        validate_platform_hal(&board, &resolved, &platform)
+    };
+
+    assert_eq!(validate("esp32p4"), Ok(()));
+    assert!(matches!(
+        validate("esp32s3"),
+        Err(GenerateError::UnsupportedHalBinding {
+            binding: HalBinding::EthernetRmii,
+            ..
+        })
+    ));
 }
 
 #[test]

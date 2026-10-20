@@ -297,6 +297,18 @@ impl<T: Pod> BulkBox<[T]> {
     }
 }
 
+impl<T: BulkData + ?Sized + 'static> BulkBox<T> {
+    /// Keeps the allocation for the rest of the program and returns it, as
+    /// `Box::leak` does.
+    ///
+    /// For buffers a vendor driver borrows for the program's lifetime, such
+    /// as a display framebuffer that DMA scans out.
+    #[must_use]
+    pub fn leak(self) -> &'static mut T {
+        AllocBox::leak(self.inner)
+    }
+}
+
 impl<T: BulkData + ?Sized> Deref for BulkBox<T> {
     type Target = T;
 

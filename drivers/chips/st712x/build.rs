@@ -21,5 +21,10 @@ fn main() {
             "ST7123_INIT_COMMANDS",
             false,
         ),
+        (
+            "assets/display_init_st7102.h",
+            "ST7102_INIT_COMMANDS",
+            false,
+        ),
     ]);
 }

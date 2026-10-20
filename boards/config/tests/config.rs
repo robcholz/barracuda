@@ -2,7 +2,9 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use barracuda_board_config::{parse, render_rust, ConfigError, PeripheralParameter, PluginSetting};
+use barracuda_board_config::{
+    parse, render_rust, ConfigError, PeripheralParameter, PluginSetting, RmiiReferenceClockSource,
+};
 use std::path::Path;
 
 const VALID: &str = r#"
@@ -572,4 +574,172 @@ fn parses_plugin_profiles() {
     let root = barracuda_board_config::parse_profile("enable: [time]\n").expect("root profile");
     assert!(root.extends().is_empty());
     assert!(barracuda_board_config::parse_profile("enable: [ui]\nextra: true\n").is_err());
+}
+
+const ETHERNET_BOARD: &str = r#"
+name: wired-board
+hardware:
+  chip: esp32p4
+  ethernet:
+    phy:
+      model: ip101gri
+      address: 1
+      reset: GPIO51
+    rmii:
+      reference-clock:
+        source: external
+        input: GPIO50
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
+native-layout:
+  artifact: partitions.csv
+"#;
+
+#[test]
+fn parses_a_wired_ethernet_phy_as_hardware_facts() {
+    let board = parse(ETHERNET_BOARD).expect("valid wired Ethernet");
+    let ethernet = board.hardware().ethernet().expect("Ethernet");
+
+    assert_eq!(
+        (
+            ethernet.phy().model(),
+            ethernet.phy().address(),
+            ethernet.phy().reset()
+        ),
+        ("ip101gri", 1, Some("GPIO51"))
+    );
+    let rmii = ethernet.rmii();
+    assert_eq!(
+        rmii.reference_clock().source(),
+        RmiiReferenceClockSource::External
+    );
+    assert_eq!(
+        (
+            rmii.reference_clock().input(),
+            rmii.reference_clock().output()
+        ),
+        ("GPIO50", None)
+    );
+    assert_eq!(
+        [
+            rmii.mdc(),
+            rmii.mdio(),
+            rmii.tx_en(),
+            rmii.txd0(),
+            rmii.txd1(),
+            rmii.crs_dv(),
+            rmii.rxd0(),
+            rmii.rxd1()
+        ],
+        ["GPIO31", "GPIO52", "GPIO49", "GPIO34", "GPIO35", "GPIO28", "GPIO29", "GPIO30"]
+    );
+    assert_eq!(ethernet.pins().count(), 10);
+    assert!(parse(VALID)
+        .expect("Board without Ethernet")
+        .hardware()
+        .ethernet()
+        .is_none());
+}
+
+#[test]
+fn rejects_inconsistent_wired_ethernet() {
+    let invalid = |from: &str, to: &str| {
+        assert!(ETHERNET_BOARD.contains(from), "{from}");
+        parse(&ETHERNET_BOARD.replacen(from, to, 1)).unwrap_err()
+    };
+
+    assert!(matches!(
+        invalid("address: 1", "address: 32"),
+        ConfigError::InvalidEthernet { .. }
+    ));
+    assert!(matches!(
+        invalid("rxd1: GPIO30", "rxd1: GPIO29"),
+        ConfigError::InvalidEthernet { .. }
+    ));
+    assert!(matches!(
+        invalid("source: external", "source: internal"),
+        ConfigError::InvalidEthernet { .. }
+    ));
+    assert!(matches!(
+        invalid("input: GPIO50", "input: GPIO50\n        output: GPIO23"),
+        ConfigError::InvalidEthernet { .. }
+    ));
+    assert_eq!(
+        invalid("mdc: GPIO31", "mdc: ''"),
+        ConfigError::EmptyHardwareIdentifier {
+            resource: String::from("ethernet"),
+            field: "mdc",
+        }
+    );
+    let internal = parse(&ETHERNET_BOARD.replacen(
+        "source: external\n        input: GPIO50",
+        "source: internal\n        input: GPIO50\n        output: GPIO23",
+        1,
+    ))
+    .expect("internal reference clock");
+    assert_eq!(
+        internal
+            .hardware()
+            .ethernet()
+            .map(|ethernet| ethernet.rmii().reference_clock().output()),
+        Some(Some("GPIO23"))
+    );
+}
+
+const DSI_BOARD: &str = r#"
+name: dsi-board
+hardware:
+  chip: esp32p4
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    dsi-host:
+      panel:
+        peripheral: MIPI_DSI
+        dma: VDMA_CH0
+        backlight: GPIO22
+        data-lanes: 2
+        phy-power-channel: 3
+        phy-power-millivolts: 2500
+"#;
+
+#[test]
+fn parses_dsi_hosts_with_or_without_a_backlight_pin() {
+    let board = parse(DSI_BOARD).expect("backlight pin");
+    let host = board.peripheral_io().dsi_host("panel").expect("DSI host");
+    assert_eq!(
+        (host.peripheral(), host.dma(), host.backlight()),
+        ("MIPI_DSI", "VDMA_CH0", Some("GPIO22"))
+    );
+    assert_eq!(
+        (
+            host.data_lanes(),
+            host.phy_power_channel(),
+            host.phy_power_millivolts()
+        ),
+        (2, 3, 2500)
+    );
+    assert!(board.peripheral_io().uses_controller("MIPI_DSI"));
+
+    let external = parse(&DSI_BOARD.replacen("        backlight: GPIO22\n", "", 1))
+        .expect("backlight driven by another chip");
+    let host = external
+        .peripheral_io()
+        .dsi_host("panel")
+        .expect("DSI host");
+    assert_eq!(host.backlight(), None);
+
+    assert_eq!(
+        parse(&DSI_BOARD.replacen("data-lanes: 2", "data-lanes: 5", 1)).unwrap_err(),
+        ConfigError::InvalidDsiHost {
+            resource: String::from("panel"),
+        }
+    );
 }

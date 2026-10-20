@@ -1,4 +1,5 @@
 name: m5stack-tab5x
+profile: screen
 hardware:
   chip: esp32p4
   # Tab5 with an ESP32-P4 of revision v3.0 or later (M5Unified, M5Stack's
@@ -12,6 +13,64 @@ toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    dsi-host:
+      panel:
+        peripheral: MIPI_DSI
+        dma: VDMA_CH0
+        # LCD backlight (LEDA) on GPIO22: Espressif's m5stack_tab5 board
+        # definition (`ledc_backlight`) and M5Stack's Tab5 pin map.
+        backlight: GPIO22
+        # Two lanes; the PHY runs from on-chip LDO VO3 at 2.5 V (m5stack_tab5
+        # `ldo_mipi` and `dsi_display`, M5GFX `Bus_DSI` configuration).
+        data-lanes: 2
+        phy-power-channel: 3
+        phy-power-millivolts: 2500
+    i2c-device:
+      # The internal bus: SDA GPIO31, SCL GPIO32 (M5Unified, M5GFX,
+      # m5stack_tab5 `i2c_master`).
+      internal:
+        peripheral: I2C0
+        scl: GPIO32
+        sda: GPIO31
+        frequency-hz: 400000
+  devices:
+    # 720x1280 MIPI DSI panel: ILI9881C, ST7123, or ST7121 depending on the
+    # unit, detected at start. Its reset is the PI4IOE5V6408 at 43h.
+    display:
+      implementation: tab5-dsi-display
+      bindings: { host: panel, i2c: internal }
+      parameters:
+        # GT911 at 14h (ILI9881C units) or the ST712x touch at 55h.
+        gt911-address: 20
+        st712x-address: 85
+    touch:
+      implementation: tab5-touch
+      bindings: { i2c: internal }
+      parameters:
+        gt911-address: 20
+        st712x-address: 85
+    real-time-clock:
+      implementation: rx8130ce-rtc
+      bindings: { i2c: internal }
+      parameters:
+        # RX8130CE at 32h (M5Stack Tab5 pin map).
+        address: 50
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal }
+      parameters:
+        # BMI270 at 68h (M5Stack Tab5 pin map).
+        address: 104
+    power-monitor:
+      implementation: ina226-power-monitor
+      bindings: { i2c: internal }
+      parameters:
+        # INA226 at 41h (M5Stack Tab5 pin map) across a 5 mOhm shunt
+        # (M5Unified Power_Class, Tab5: `shunt_res = 0.005f`).
+        address: 65
+        shunt-micro-ohms: 5000
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.

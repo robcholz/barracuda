@@ -82,6 +82,8 @@ exposed-io:
 
 这四个实现都使用 `drivers/chips/pi4ioe5v6408`；没有一个向 System 暴露这个扩展芯片、它的引脚或一个通用的系统控制器外设。其他由 PI4 控制的信号同样必须由它们所使能的具体语义服务拥有。
 
+在 M5Stack CoreP4X 上，`corep4x-dsi-display` 以同样的方式隐藏位于 `0x4F` 的 M5IOE1 扩展芯片（面板电源、复位和 PWM 背光）和位于 `0x6E` 的 M5PM1 电源控制器（5 V 升压），分别通过 `drivers/chips/m5ioe1` 和 `drivers/chips/m5pm1`。
+
 ## 稳定的构造和运行时行为
 
 `PeripheralImplementation` 声明只能移动（move-only）的 `Bindings`、经过校验的 `Config`、返回的语义 `Peripheral`，以及它的初始化 `Error`。它的 future 不装箱，并且是单态化的。

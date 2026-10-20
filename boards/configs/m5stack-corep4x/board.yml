@@ -1,4 +1,5 @@
 name: m5stack-corep4x
+profile: screen
 hardware:
   chip: esp32p4
   # ESP32-P4NRW32X.
@@ -11,6 +12,38 @@ toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    dsi-host:
+      panel:
+        peripheral: MIPI_DSI
+        dma: VDMA_CH0
+        # No backlight pin: the M5IOE1 expander dims it (M5GFX
+        # `Light_M5CoreP4X`), driven by the display implementation.
+        # Two lanes; the PHY runs from on-chip LDO VO3 at 2.5 V (M5GFX
+        # CoreP4X `Bus_DSI` configuration).
+        data-lanes: 2
+        phy-power-channel: 3
+        phy-power-millivolts: 2500
+    i2c-device:
+      # The internal bus: SCL GPIO9, SDA GPIO11 (M5Unified, M5GFX, M5Stack's
+      # Arduino core `IN_SCL`/`IN_SDA`). The M5IOE1 and M5PM1 on it run at
+      # 100 kHz.
+      internal:
+        peripheral: I2C0
+        scl: GPIO9
+        sda: GPIO11
+        frequency-hz: 100000
+  devices:
+    # 2.64-inch 480x480 ST7102 MIPI DSI panel. Its power, reset, and
+    # backlight sit behind the M5IOE1 at 4Fh; the 5 V boost behind the M5PM1
+    # at 6Eh.
+    display:
+      implementation: corep4x-dsi-display
+      bindings: { host: panel, i2c: internal }
+      parameters:
+        expander-address: 79
+        power-address: 110
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.

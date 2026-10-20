@@ -7,6 +7,27 @@ hardware:
     technology: psram
     interface: hex
     size-bytes: 33554432
+  # IP101GRI 10/100 PHY on the EMAC's RMII pads. The PHY drives the 50 MHz
+  # reference clock into GPIO50. Pins, reset and PHY address 1: ESP-IDF's
+  # ethernet_init Kconfig defaults for the ESP32-P4 and espp's
+  # esp32-p4-function-ev-board BSP. GPIO35 (BOOT) is RMII TXD1.
+  ethernet:
+    phy:
+      model: ip101gri
+      address: 1
+      reset: GPIO51
+    rmii:
+      reference-clock:
+        source: external
+        input: GPIO50
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:

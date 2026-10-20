@@ -2,9 +2,12 @@
 
 #![no_std]
 
-/// Platform-owned GPIO, SPI, I2C, and delay implementation.
+/// Platform-owned GPIO, SPI, I2C, DSI, and delay implementation.
 #[cfg(target_arch = "riscv32")]
 pub mod hal;
+
+#[cfg(target_arch = "riscv32")]
+mod network;
 
 #[cfg(target_arch = "riscv32")]
 #[doc(hidden)]
@@ -258,6 +261,9 @@ mod internal_flash {
         Partitions(PartitionsInsertError),
         /// An Embassy network runner could not be allocated.
         NetworkTask,
+        /// The Board's Ethernet PHY did not come up.
+        #[cfg(barracuda_esp32p4_ethernet)]
+        Ethernet(esp_hal::ethernet::Error),
     }
 
     impl From<PartitionsInsertError> for Esp32P4PlatformError {
@@ -272,6 +278,8 @@ mod internal_flash {
                 Self::IncompatibleChip => formatter.write_str("incompatible ESP32 chip"),
                 Self::Partitions(error) => write!(formatter, "invalid ESP32 partitions: {error}"),
                 Self::NetworkTask => formatter.write_str("failed to allocate ESP32 network task"),
+                #[cfg(barracuda_esp32p4_ethernet)]
+                Self::Ethernet(error) => write!(formatter, "Ethernet PHY failed: {error:?}"),
             }
         }
     }

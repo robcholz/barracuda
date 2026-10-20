@@ -250,25 +250,40 @@ impl WifiDevice for HostWifiDevice {
     }
 }
 
-/// Placeholder for a Platform whose Wi-Fi driver has not been implemented.
+/// Placeholder for a Platform or Board without a Wi-Fi radio Barracuda drives.
 ///
 /// Unlike [`HostWifiDevice`], this adapter does not claim that the supplied IP
 /// stack is connected. It keeps the cross-Platform resource shape honest while
-/// reporting no controllable Wi-Fi capabilities.
+/// reporting no controllable Wi-Fi capabilities, and it refuses every
+/// operation that needs a radio: an access point it cannot open or a network
+/// it cannot join is an error, never a silent success. The supplied stack may
+/// still carry traffic over another link, such as wired Ethernet.
 pub struct UnavailableWifiDevice {
     stack: Stack<'static>,
 }
 
 impl UnavailableWifiDevice {
-    /// Wraps the Platform's disconnected placeholder IP stack.
+    /// Wraps the Platform's IP stack, which no radio serves.
     #[must_use]
     pub const fn new(stack: Stack<'static>) -> Self {
         Self { stack }
     }
 }
 
+/// An operation that needs a Wi-Fi radio was asked of a device without one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WifiUnavailable;
+
+impl core::fmt::Display for WifiUnavailable {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("this device has no Wi-Fi radio")
+    }
+}
+
+impl core::error::Error for WifiUnavailable {}
+
 impl WifiDevice for UnavailableWifiDevice {
-    type Error = core::convert::Infallible;
+    type Error = WifiUnavailable;
 
     fn capabilities(&self) -> WifiCapabilities {
         WifiCapabilities::host_managed()
@@ -287,17 +302,18 @@ impl WifiDevice for UnavailableWifiDevice {
     }
 
     async fn scan(&mut self) -> Result<Vec<VisibleNetwork>, Self::Error> {
-        Ok(Vec::new())
+        Err(WifiUnavailable)
     }
 
     async fn start_access_point(
         &mut self,
         _configuration: &AccessPointConfiguration,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        Err(WifiUnavailable)
     }
 
     async fn stop_access_point(&mut self) -> Result<(), Self::Error> {
+        // No access point can be running.
         Ok(())
     }
 
@@ -305,10 +321,11 @@ impl WifiDevice for UnavailableWifiDevice {
         &mut self,
         _configuration: &StationConfiguration,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        Err(WifiUnavailable)
     }
 
     async fn disconnect_station(&mut self) -> Result<(), Self::Error> {
+        // No station can be connected.
         Ok(())
     }
 }

@@ -116,6 +116,11 @@ All four use `drivers/chips/pi4ioe5v6408`; none exposes the expander, its pins,
 or a generic system-controller peripheral to System. Other PI4-controlled
 signals must likewise be owned by the concrete semantic service they enable.
 
+On M5Stack CoreP4X, `corep4x-dsi-display` hides the M5IOE1 expander at
+`0x4F` (panel power, reset, and PWM backlight) and the M5PM1 power controller
+at `0x6E` (the 5 V boost) the same way, through `drivers/chips/m5ioe1` and
+`drivers/chips/m5pm1`.
+
 ## Stable construction and runtime behavior
 
 `PeripheralImplementation` declares move-only `Bindings`, validated `Config`,

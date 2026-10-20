@@ -848,6 +848,7 @@ dependencies = [
  "barracuda-bmi270-imu",
  "barracuda-bq27220-power-monitor",
  "barracuda-capacitive-touch-buttons",
+ "barracuda-corep4x-dsi-display",
  "barracuda-cst816t-touch",
  "barracuda-es8311-audio-codec",
  "barracuda-es8311-es7210-audio-codec",
@@ -1034,6 +1035,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-corep4x-dsi-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-m5ioe1",
+ "barracuda-driver-m5pm1",
+ "barracuda-driver-st712x",
+ "barracuda-peripheral",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-cst816t-touch"
 version = "0.1.0"
 dependencies = [
@@ -1157,6 +1170,20 @@ version = "0.1.0"
 
 [[package]]
 name = "barracuda-driver-ina226"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-m5ioe1"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-m5pm1"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
@@ -1904,9 +1931,11 @@ dependencies = [
  "barracuda-board-config",
  "barracuda-board-hal",
  "barracuda-bulk-memory",
+ "barracuda-peripheral",
  "barracuda-platform",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
+ "embassy-futures",
  "embassy-net",
  "embassy-sync 0.8.0",
  "embassy-time",

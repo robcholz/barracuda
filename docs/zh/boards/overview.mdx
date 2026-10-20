@@ -84,6 +84,30 @@ hardware:
     size-bytes: 8388608
 ```
 
+`ethernet` 记录接在芯片以太网 MAC 上的有线以太网 PHY：PHY 型号和它的管理地址、接到其低电平有效复位脚的引脚，以及 RMII 引脚和 50 MHz 参考时钟的来源（`external` 表示由 PHY 或板上晶振把时钟送入 `input`；`internal` 表示由芯片从 `output` 输出，开发板再把它环回到 `input`）。和 `hardware` 的其余部分一样，它是原理图上的事实，而不是选择：所选平台在它上面构建 IP 协议栈，无法驱动该接口的平台会在 `cargo board select` 时拒绝这块开发板。它用到的引脚归平台所有，不会同时作为外设绑定或可用引脚。
+
+```yaml
+hardware:
+  chip: esp32p4
+  ethernet:
+    phy:
+      model: ip101gri
+      address: 1
+      reset: GPIO51
+    rmii:
+      reference-clock:
+        source: external
+        input: GPIO50
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
+```
+
 先选择一次具体的开发板，然后使用普通的构建命令：
 
 ```bash
@@ -113,8 +137,10 @@ cargo run
 
 Barracuda 为基于工作区当前已实现的每个 ESP 芯片系列的 M5Stack 控制器提供可选择的开发板包：ESP32、ESP32-C3、ESP32-C6、ESP32-S3 和 ESP32-P4。运行 `cargo board select` 并搜索 `m5stack-` 前缀，即可看到完整的当前目录。
 
-M5Stack Tab5 选择 `m5stack-tab5`。它的开发板 HAL 使用纯 `esp-hal` 绑定实例化板载的 ES8388/ES7210 音频通路、BMI270 惯性测量、INA226 电源监测、RX8130CE 实时时钟、microSD 存储，以及区分硬件版本的触摸和 DSI 显示屏。音频、显示和触摸实现私下组合 PI4IOE5V6408 芯片驱动，用于各自的使能线或复位线；这个扩展芯片不是 System 可见的外设。该开发板还通过共享的运行时 I/O 所有者暴露 HY2.0-4P PORT.A、背面的 M5-Bus，以及可用的 SIT3088 RS-485 信号。`m5stack-tab5x` 身份保持独立，不得仅凭烧录工具报告的 ESP32-P4 芯片版本就替换它。
+M5Stack Tab5 选择 `m5stack-tab5`。它的开发板 HAL 使用纯 `esp-hal` 绑定实例化区分硬件版本的 DSI 显示屏和触摸、BMI270 惯性测量、INA226 电源监测和 RX8130CE 实时时钟。显示和触摸实现私下组合 PI4IOE5V6408 芯片驱动，用于各自的复位线；这个扩展芯片不是 System 可见的外设。ES8388/ES7210 音频通路和 microSD 卡槽要等 ESP32-P4 平台有了 I2S 和 SD/MMC 绑定才能声明。`m5stack-tab5x` 身份保持独立，不得仅凭烧录工具报告的 ESP32-P4 芯片版本就替换它。
+
+M5Stack CoreP4X 选择 `m5stack-corep4x`；它的 480x480 ST7102 DSI 面板由 `corep4x-dsi-display` 组合，该实现私下驱动 M5IOE1 扩展芯片控制面板的电源、复位和背光，并驱动 M5PM1 打开 5 V 升压。ESP32-P4-Function-EV-Board 和 M5Stack Unit PoE-P4 在 `hardware.ethernet` 下声明各自的 IP101GRI 以太网 PHY。
 
 板上配备的 SC202CS 摄像头仍然不在开发板外设集合中，因为 `esp-hal` 目前没有暴露 ESP32-P4 的 MIPI-CSI/ISP 数据面。在有真正的裸机驱动能够拥有该硬件之前，不得宣传它。
 
-所有开发板包都确立开发板身份、正确的 Rust 编译目标和原生的 ESP 分区布局。显示矩阵目前通过 `mipi-dbi-display` 组合 ILI9342C、ST7789 和 GC9A01 SPI LCD，并通过 `gdeh0154d67-display` 组合 CoreInk 和 AirQ 中的 GDEH0154D67 电子纸面板。Core2、Core2 for AWS、Tough、StickC、StickC Plus、Station、CoreS3、CoreS3 SE 和 StackChan 通过 PMIC 而不是 GPIO 为其 ILI9342C、ST7789 或 ST7735S LCD 供电、复位和点亮背光；`m5stack-pmic-display` 驱动这些屏幕，并私有地组合 AXP192、AXP2101 和 AW9523B 芯片驱动，因此 PMIC 和扩展芯片都不是 System 可见的外设。它们都暴露 Barracuda 稳定的 `DisplayPeripheral` API。其他固定外设在其可复用实现完成并在该开发板的 YAML 中被选用之前，仍然缺席。ESP32-C5 和 ESP32-H2 产品被有意排除，直到 Barracuda 中有这些平台为止。
+所有开发板包都确立开发板身份、正确的 Rust 编译目标和原生的 ESP 分区布局。显示矩阵目前通过 `mipi-dbi-display` 组合 ILI9342C、ST7789 和 GC9A01 SPI LCD，通过 `gdeh0154d67-display` 组合 CoreInk 和 AirQ 中的 GDEH0154D67 电子纸面板，并通过 `tab5-dsi-display` 和 `corep4x-dsi-display` 组合 Tab5 和 CoreP4X 的 ESP32-P4 MIPI DSI 面板。Core2、Core2 for AWS、Tough、StickC、StickC Plus、Station、CoreS3、CoreS3 SE 和 StackChan 通过 PMIC 而不是 GPIO 为其 ILI9342C、ST7789 或 ST7735S LCD 供电、复位和点亮背光；`m5stack-pmic-display` 驱动这些屏幕，并私有地组合 AXP192、AXP2101 和 AW9523B 芯片驱动，因此 PMIC 和扩展芯片都不是 System 可见的外设。它们都暴露 Barracuda 稳定的 `DisplayPeripheral` API。其他固定外设在其可复用实现完成并在该开发板的 YAML 中被选用之前，仍然缺席。ESP32-C5 和 ESP32-H2 产品被有意排除，直到 Barracuda 中有这些平台为止。

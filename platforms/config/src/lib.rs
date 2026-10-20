@@ -39,6 +39,9 @@ pub enum HalBinding {
     I2sStream,
     /// Fixed capacitive-touch channel group construction.
     CapacitiveTouch,
+    /// Platform IP link over a Board-declared RMII Ethernet PHY
+    /// (`hardware.ethernet` in `board.yml`).
+    EthernetRmii,
 }
 
 /// One ADC channel route owned by a Platform ADC controller pool.

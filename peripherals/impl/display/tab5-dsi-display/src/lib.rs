@@ -145,6 +145,13 @@ where
         panel
             .write_init_commands(&mut bindings.host, &mut bindings.delay)
             .map_err(Tab5DsiDisplayInitError::Host)?;
+        // ESP-IDF's ILI9881C and ST712x panel drivers send their
+        // initialization sequence in command mode, then start video and turn
+        // the display on.
+        bindings
+            .host
+            .start_video()
+            .map_err(Tab5DsiDisplayInitError::Host)?;
         bindings
             .host
             .set_display_enabled(true)
@@ -311,7 +318,7 @@ impl<HOST: DsiHost> Display for Tab5DsiDisplay<HOST> {
             self.size(),
             PixelFormat::Rgb565,
             DisplayTechnology::Lcd,
-            DisplayFeatures::BRIGHTNESS | DisplayFeatures::SLEEP,
+            DisplayFeatures::BUFFERED | DisplayFeatures::BRIGHTNESS | DisplayFeatures::SLEEP,
         )
     }
 
@@ -347,7 +354,7 @@ impl<HOST: DsiHost> Display for Tab5DsiDisplay<HOST> {
     }
 
     async fn flush(&mut self, _request: RefreshRequest) -> Result<(), Self::ControlError> {
-        Ok(())
+        self.host.present().map_err(Tab5DsiDisplayError::Host)
     }
 
     async fn set_power(&mut self, power: DisplayPower) -> Result<(), Self::ControlError> {

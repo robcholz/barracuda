@@ -17,7 +17,9 @@ log.workspace = true
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
 barracuda-board-hal.workspace = true
+barracuda-peripheral.workspace = true
 embassy-executor.workspace = true
+embassy-futures.workspace = true
 embassy-embedded-hal = "0.6.0"
 embassy-net = { workspace = true, features = ["dhcpv4"] }
 embassy-sync = { version = "0.8.0", default-features = false }
@@ -36,6 +38,9 @@ esp-rtos = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp32p4"] }
 esp-storage = { version = "0.10.0", default-features = false, features = ["esp32p4", "embedded-storage"] }
 static_cell.workspace = true
 nb = "1"
+
+[dev-dependencies]
+barracuda-board-config.workspace = true
 
 [build-dependencies]
 barracuda-board-config.workspace = true

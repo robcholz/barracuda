@@ -1070,6 +1070,12 @@ pub fn validate_platform_hal(
     resolved: &ResolvedBoard<'_>,
     platform: &PlatformDefinition,
 ) -> Result<(), GenerateError> {
+    if board.hardware().ethernet().is_some() && !platform.hal().supports(HalBinding::EthernetRmii) {
+        return Err(GenerateError::UnsupportedHalBinding {
+            platform: platform.name().to_owned(),
+            binding: HalBinding::EthernetRmii,
+        });
+    }
     if board.exposed_io().pins().next().is_some() && !platform.hal().supports(HalBinding::Gpio) {
         return Err(GenerateError::UnsupportedHalBinding {
             platform: platform.name().to_owned(),
@@ -2366,13 +2372,10 @@ fn render_binding(
             })?;
             validate_hardware_identifier(host.peripheral())?;
             validate_hardware_identifier(host.dma())?;
-            validate_hardware_identifier(host.backlight())?;
             let prefix = format!("{}_{}", peripheral.name(), role);
             let controller =
                 checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
             let dma = checked_identifier(&format!("{prefix}_dma"), &mut state.identifiers)?;
-            let backlight =
-                checked_identifier(&format!("{prefix}_backlight"), &mut state.identifiers)?;
             state.raw_fields.extend([
                 (
                     controller.clone(),
@@ -2388,14 +2391,28 @@ fn render_binding(
                         host.dma()
                     ),
                 ),
-                (
-                    backlight.clone(),
-                    format!(
-                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
-                        host.backlight()
-                    ),
-                ),
             ]);
+            // The backlight is a chip pin, or absent when another chip on the
+            // Board drives it.
+            let backlight = match host.backlight() {
+                None => String::from(
+                    "::barracuda_platform_selected::__platform::hal::dsi_backlight_none()",
+                ),
+                Some(pin) => {
+                    validate_hardware_identifier(pin)?;
+                    let field =
+                        checked_identifier(&format!("{prefix}_backlight"), &mut state.identifiers)?;
+                    state.raw_fields.push((
+                        field.clone(),
+                        format!(
+                            "::barracuda_platform_selected::__platform::hal::pin_binding_type!({pin})"
+                        ),
+                    ));
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::dsi_backlight_pin(bindings.{field})"
+                    )
+                }
+            };
             let variant = format!(
                 "{}{}Binding",
                 pascal_identifier(peripheral.name()),
@@ -2408,7 +2425,7 @@ fn render_binding(
             Ok((
                 String::from("::barracuda_platform_selected::__platform::hal::DsiHost"),
                 format!(
-                    "::barracuda_platform_selected::__platform::hal::dsi_host(bindings.{controller}, bindings.{dma}, bindings.{backlight}, {}, {}, {}).map_err(GeneratedBoardError::{variant})?",
+                    "::barracuda_platform_selected::__platform::hal::dsi_host(bindings.{controller}, bindings.{dma}, {backlight}, {}, {}, {}).map_err(GeneratedBoardError::{variant})?",
                     host.data_lanes(),
                     host.phy_power_channel(),
                     host.phy_power_millivolts(),

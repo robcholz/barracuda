@@ -97,6 +97,15 @@ these controllers on a Board's exposed pins:
 ESP32-S3 adds quad SPI devices, SD/MMC cards, camera capture, I2S audio
 streams, and capacitive touch.
 
+ESP32-P4 adds the MIPI DSI host (`dsi-host`): the link, the RGB565
+framebuffer in PSRAM that VDMA scans out, DCS commands before and during
+video, and the backlight pin, which it switches on and off because esp-hal has
+no LEDC driver for the ESP32-P4. The chip has no radio, so the IP stack runs
+over the wired Ethernet a Board declares under `hardware.ethernet`: the EMAC
+on the Board's RMII pins, an IEEE 802.3 PHY at its address, and a DHCP client.
+On a Board without it the stack has no link, and the Wi-Fi Plugin opens no
+setup hotspot.
+
 ## Boards
 
 See every Board for each chip under **Boards** in the sidebar, or start from

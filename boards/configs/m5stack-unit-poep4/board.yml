@@ -7,6 +7,27 @@ hardware:
     technology: psram
     interface: hex
     size-bytes: 33554432
+  # IP101GRI 10/100 PHY behind the PoE front end, on the EMAC's RMII pads.
+  # The PHY drives the 50 MHz reference clock into GPIO50. Pins: M5Stack's
+  # Unit PoE-P4 pin map; PHY address 1 and the external clock: M5Stack's
+  # Unit PoE-P4 Arduino Ethernet example.
+  ethernet:
+    phy:
+      model: ip101gri
+      address: 1
+      reset: GPIO51
+    rmii:
+      reference-clock:
+        source: external
+        input: GPIO50
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
