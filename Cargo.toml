@@ -74,6 +74,7 @@ barracuda-rx8130ce-rtc = { path = "peripherals/impl/real-time-clock/rx8130ce-rtc
 barracuda-sdmmc-fat-removable-storage = { path = "peripherals/impl/removable-storage/sdmmc-fat-removable-storage" }
 barracuda-ssd1306-spi-display = { path = "peripherals/impl/display/ssd1306-spi-display" }
 barracuda-st77916-qspi-display = { path = "peripherals/impl/display/st77916-qspi-display" }
+barracuda-stopwatch-co5300-display = { path = "peripherals/impl/display/stopwatch-co5300-display" }
 barracuda-tab5-dsi-display = { path = "peripherals/impl/display/tab5-dsi-display" }
 barracuda-tab5-sc202cs-camera = { path = "peripherals/impl/camera/tab5-sc202cs-camera" }
 barracuda-tab5-touch = { path = "peripherals/impl/touch/tab5-touch" }
@@ -148,6 +149,7 @@ barracuda-peripheral = { path = "peripherals/api" }
 barracuda-peripheral-config = { path = "peripherals/config" }
 barracuda-driver-apa102 = { path = "drivers/chips/apa102" }
 barracuda-driver-bq27220 = { path = "drivers/chips/bq27220" }
+barracuda-driver-co5300 = { path = "drivers/chips/co5300" }
 barracuda-driver-cst816t = { path = "drivers/chips/cst816t" }
 barracuda-driver-es8311 = { path = "drivers/chips/es8311" }
 barracuda-driver-es7210 = { path = "drivers/chips/es7210" }
@@ -157,6 +159,7 @@ barracuda-driver-gt911 = { path = "drivers/chips/gt911" }
 barracuda-driver-ili9881c = { path = "drivers/chips/ili9881c" }
 barracuda-driver-ina226 = { path = "drivers/chips/ina226" }
 barracuda-driver-lp5562 = { path = "drivers/chips/lp5562" }
+barracuda-driver-m5ioe1 = { path = "drivers/chips/m5ioe1" }
 barracuda-driver-ov2640 = { path = "drivers/chips/ov2640" }
 barracuda-driver-ov3660 = { path = "drivers/chips/ov3660" }
 barracuda-driver-pi4ioe5v6408 = { path = "drivers/chips/pi4ioe5v6408" }

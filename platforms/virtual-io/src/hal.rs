@@ -655,6 +655,16 @@ impl barracuda_board_hal::QuadSpiBus for QuadSpiDevice {
         frame.extend_from_slice(data);
         embedded_hal::spi::SpiDevice::write(&mut self.device, &frame)
     }
+
+    // Virtual frames carry bytes, not line widths: both forms frame alike.
+    fn write_single_line(
+        &mut self,
+        opcode: u8,
+        address: u32,
+        data: &[u8],
+    ) -> Result<(), Self::Error> {
+        self.write(opcode, address, data)
+    }
 }
 
 /// Constructs a write-only quad-SPI device on a virtual controller: the

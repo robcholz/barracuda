@@ -149,6 +149,16 @@ pub trait QuadSpiBus {
 
     /// Writes one opcode, one 24-bit address, and an optional payload.
     fn write(&mut self, opcode: u8, address: u32, data: &[u8]) -> Result<(), Self::Error>;
+
+    /// Writes one opcode, one 24-bit address, and an optional payload, the
+    /// payload also on one data line. Display controllers take register
+    /// parameters this way and only pixel data on four lines.
+    fn write_single_line(
+        &mut self,
+        opcode: u8,
+        address: u32,
+        data: &[u8],
+    ) -> Result<(), Self::Error>;
 }
 
 /// Two-channel capacitive-touch sampling transport supplied by a Platform.

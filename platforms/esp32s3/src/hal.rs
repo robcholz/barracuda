@@ -50,6 +50,21 @@ impl QuadSpiBus for QuadSpiDevice {
             data,
         )
     }
+
+    fn write_single_line(
+        &mut self,
+        opcode: u8,
+        address: u32,
+        data: &[u8],
+    ) -> Result<(), Self::Error> {
+        self.spi.half_duplex_write(
+            DataMode::Single,
+            SpiCommand::_8Bit(u16::from(opcode), DataMode::Single),
+            SpiAddress::_24Bit(address, DataMode::Single),
+            0,
+            data,
+        )
+    }
 }
 
 /// Constructs one ESP32-S3 QSPI device from Board-selected resources.
