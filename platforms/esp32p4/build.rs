@@ -1,12 +1,17 @@
-//! Validates the selected Board against its native ESP-IDF partition table.
+//! Validates the selected Board against its native ESP-IDF partition table
+//! and projects the network links it declares.
 
 use std::{env, error::Error, fs, path::PathBuf};
 
 use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
 use esp_idf_part::{AppType, DataType, Flags, Partition, PartitionTable, SubType, Type};
 
+#[path = "build_network.rs"]
+mod network;
+
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=BARRACUDA_LOG_LEVEL");
+    println!("cargo:rerun-if-changed=build_network.rs");
     let log_level = generated_log_level()?;
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let root = manifest.join("../..");
@@ -24,6 +29,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
+
+    println!("cargo:rustc-check-cfg=cfg(barracuda_esp32p4_ethernet)");
+    let ethernet = board
+        .hardware()
+        .ethernet()
+        .filter(|_| board.hardware().chip() == "esp32p4");
+    let network = match ethernet {
+        Some(ethernet) => {
+            println!("cargo:rustc-cfg=barracuda_esp32p4_ethernet");
+            network::ethernet_tokens(ethernet)?
+        }
+        None => String::from(network::NO_NETWORK_TOKENS),
+    };
+    fs::write(output.join("esp32p4_network.rs"), network)?;
 
     // This Platform is an unconditional dependency of the selected-Platform
     // composition, so its build script runs for every selected Board, not only

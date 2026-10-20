@@ -2,8 +2,6 @@
 
 use core::cell::RefCell;
 
-use barracuda_platform::UnavailableNetworkDriver;
-use embassy_net::{Runner, StackResources};
 use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 use static_cell::StaticCell;
 
@@ -30,10 +28,9 @@ pub use static_cell::StaticCell as __StaticCell;
 #[unsafe(no_mangle)]
 extern "C" fn rust_eh_personality() {}
 
-#[embassy_executor::task]
-async fn run_network(mut runner: Runner<'static, UnavailableNetworkDriver>) -> ! {
-    runner.run().await
-}
+// `NetworkTokens` and `__barracuda_esp32p4_network_tokens!`, projected by
+// `build.rs` from the selected Board's network links.
+include!(concat!(env!("OUT_DIR"), "/esp32p4_network.rs"));
 
 /// Installs the internal-memory regions in the global allocator.
 #[doc(hidden)]
@@ -77,21 +74,15 @@ pub fn bindings(
     board: &barracuda_board::Board,
     spawner: embassy_executor::Spawner,
     flash_token: esp_hal::peripherals::FLASH<'static>,
+    network: NetworkTokens,
 ) -> Result<Esp32P4PlatformBindings, Esp32P4PlatformError> {
-    static NETWORK: StaticCell<StackResources<4>> = StaticCell::new();
     static FLASH: StaticCell<
         Mutex<CriticalSectionRawMutex, RefCell<crate::Esp32P4Flash<'static>>>,
     > = StaticCell::new();
 
-    // ESP32-P4 has no radio, so the IP stack never has a link.
-    let (ip_stack, runner) = embassy_net::new(
-        UnavailableNetworkDriver,
-        embassy_net::Config::default(),
-        NETWORK.init(StackResources::new()),
-        0,
-    );
-    let network = run_network(runner).map_err(|_error| Esp32P4PlatformError::NetworkTask)?;
-    spawner.spawn(network);
+    // The ESP32-P4 has no radio; the IP stack runs over the link the Board
+    // declares, or stays down without one.
+    let ip_stack = crate::network::start(spawner, network)?;
     let flash = FLASH.init(Mutex::new(RefCell::new(crate::flash(flash_token))));
     Esp32P4PlatformBindings::from_initialized_services(board, ip_stack, flash)
 }
@@ -121,19 +112,21 @@ macro_rules! platform_entry {
             $spawner: embassy_executor::Spawner,
             $board_bindings_value: $board_bindings_type,
             flash: $crate::application::__hal::peripherals::FLASH<'static>,
+            network: $crate::application::NetworkTokens,
         ) {
-            let $platform_bindings = match $crate::application::bindings($board, $spawner, flash) {
-                Ok(bindings) => bindings,
-                Err(error) => {
-                    $crate::application::__println::println!(
-                        "failed to bootstrap ESP32-P4 Platform: {}",
-                        error
-                    );
-                    loop {
-                        core::hint::spin_loop();
+            let $platform_bindings =
+                match $crate::application::bindings($board, $spawner, flash, network) {
+                    Ok(bindings) => bindings,
+                    Err(error) => {
+                        $crate::application::__println::println!(
+                            "failed to bootstrap ESP32-P4 Platform: {}",
+                            error
+                        );
+                        loop {
+                            core::hint::spin_loop();
+                        }
                     }
-                }
-            };
+                };
             if let Err(error) = $application.await {
                 $crate::application::__println::println!("application exited: {}", error);
                 loop {
@@ -150,6 +143,7 @@ macro_rules! platform_entry {
                 $crate::application::__hal::init($crate::application::__hal::Config::default());
             $crate::application::initialize_bulk_memory($board, peripherals.PSRAM);
             let $board_bindings_value = $board_bindings!(peripherals);
+            let network = $crate::__barracuda_esp32p4_network_tokens!(peripherals);
             let flash = peripherals.FLASH;
             let timer_group =
                 $crate::application::__hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
@@ -161,7 +155,7 @@ macro_rules! platform_entry {
                 .init($crate::application::__rtos::embassy::Executor::new())
                 .run(move |spawner| {
                     if let Ok(task) =
-                        __barracuda_application_task(spawner, $board_bindings_value, flash)
+                        __barracuda_application_task(spawner, $board_bindings_value, flash, network)
                     {
                         spawner.spawn(task);
                     } else {

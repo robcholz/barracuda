@@ -81,6 +81,8 @@ cargo image deploy
 
 ESP32-S3 还支持四线 SPI 设备、SD/MMC 卡、摄像头采集、I2S 音频流和电容触摸。
 
+ESP32-P4 还支持 MIPI DSI 主机（`dsi-host`）：链路、位于 PSRAM、由 VDMA 扫描输出的 RGB565 帧缓冲、视频开始前和进行中的 DCS 命令，以及背光引脚。由于 esp-hal 没有 ESP32-P4 的 LEDC 驱动，背光只能开关。这颗芯片没有射频，所以 IP 协议栈运行在开发板于 `hardware.ethernet` 下声明的有线以太网上：EMAC 接在开发板的 RMII 引脚上，按地址访问 IEEE 802.3 PHY，并运行 DHCP 客户端。没有声明以太网的开发板上，协议栈没有链路，Wi-Fi 插件也不会打开配置热点。
+
 ## 开发板
 
 在侧边栏的 **Boards** 下可以查看每款芯片的全部开发板，也可以从以下开发板入手：[M5Stack CoreS3](/zh/boards/supported/m5stack-cores3)（ESP32-S3）、[ESP32-DevKitC V4](/zh/boards/supported/esp32-devkitc-v4)（ESP32）、[ESP32-C3-DevKitM-1](/zh/boards/supported/esp32c3-devkitm-1)（ESP32-C3）、[ESP32-C6-DevKitC-1](/zh/boards/supported/esp32c6-devkitc-1)（ESP32-C6）和 [ESP32-P4-Function-EV-Board](/zh/boards/supported/esp32p4-function-ev-board)（ESP32-P4）。
