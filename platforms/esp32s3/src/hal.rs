@@ -12,6 +12,7 @@ use barracuda_board_hal::QuadSpiBus;
 use barracuda_peripheral::{
     audio::{PcmFormat, PcmStream},
     camera::{FrameReceiver, FrameReceiverErrorType},
+    display::ParallelOutput,
 };
 use esp_hal::{
     dma::{DmaBufError, DmaError, DmaRxBuf, DmaTxBuf},
@@ -25,7 +26,11 @@ use esp_hal::{
             Camera as VendorCamera, Config as VendorCameraConfig,
             ConfigError as VendorCameraConfigError,
         },
-        CamDmaRxChannel, LcdCam,
+        lcd::i8080::{
+            Command as I8080Command, Config as I8080Config, ConfigError as I8080ConfigError,
+            I8080Transfer, I8080,
+        },
+        CamDmaRxChannel, LcdCam, LcdDmaTxChannel,
     },
     spi::master::{Address as SpiAddress, Command as SpiCommand, DataMode},
 };
@@ -104,12 +109,24 @@ macro_rules! __barracuda_esp32s3_i2s_dma_buffers {
     }};
 }
 
+/// Statically allocates one ESP32-S3 parallel-output DMA buffer at the
+/// generated Board call site.
+#[macro_export]
+macro_rules! __barracuda_esp32s3_parallel_output_dma_buffer {
+    ($bytes:expr) => {
+        $crate::hal::__vendor::dma_tx_buffer!($bytes)
+            .map_err($crate::hal::ParallelOutputConfigError::DmaBuffer)
+    };
+}
+
 #[doc(hidden)]
 pub use __barracuda_esp32s3_camera_dma_buffer as camera_dma_buffer;
 #[doc(hidden)]
 pub use __barracuda_esp32s3_i2s_dma_buffers as i2s_dma_buffers;
 #[doc(hidden)]
 pub use __barracuda_esp32s3_i2s_dma_buffers as runtime_i2s_dma_buffers;
+#[doc(hidden)]
+pub use __barracuda_esp32s3_parallel_output_dma_buffer as parallel_output_dma_buffer;
 
 /// ESP32-S3 camera receiver construction failure.
 #[derive(Debug)]
@@ -236,6 +253,134 @@ pub fn camera_capture(
     .with_data7(data7);
     Ok(CameraReceiver {
         camera: Some(camera),
+        buffer: Some(buffer),
+    })
+}
+
+/// ESP32-S3 parallel-output construction failure.
+#[derive(Debug)]
+pub enum ParallelOutputConfigError {
+    /// The Board-selected DMA storage cannot be used by the controller.
+    DmaBuffer(DmaBufError),
+    /// The requested write clock is unsupported.
+    Peripheral(I8080ConfigError),
+}
+
+impl core::fmt::Display for ParallelOutputConfigError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::DmaBuffer(_) => formatter.write_str("invalid parallel-output DMA buffer"),
+            Self::Peripheral(_) => {
+                formatter.write_str("invalid ESP32-S3 parallel-output configuration")
+            }
+        }
+    }
+}
+
+impl core::error::Error for ParallelOutputConfigError {}
+
+/// ESP32-S3 parallel-output transfer failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParallelOutputError {
+    /// The controller lost ownership state after an earlier failure.
+    Busy,
+    /// The burst is larger than the Board-sized DMA buffer.
+    TooLong,
+    /// The DMA engine rejected or aborted the transfer.
+    Dma(DmaError),
+}
+
+impl core::fmt::Display for ParallelOutputError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Busy => formatter.write_str("parallel output is unavailable"),
+            Self::TooLong => formatter.write_str("parallel-output burst exceeds its DMA buffer"),
+            Self::Dma(_) => formatter.write_str("parallel-output DMA transfer failed"),
+        }
+    }
+}
+
+impl core::error::Error for ParallelOutputError {}
+
+/// ESP32-S3 LCD_CAM in i8080 mode as an 8-bit parallel output: the write
+/// clock on `LCD_PCLK`, the active-low select on `LCD_CS`, and the burst from
+/// one statically allocated DMA buffer.
+pub struct ParallelOutputBus {
+    bus: Option<I8080<'static, Blocking>>,
+    buffer: Option<DmaTxBuf>,
+}
+
+impl ParallelOutput for ParallelOutputBus {
+    type Error = ParallelOutputError;
+
+    fn capacity(&self) -> usize {
+        self.buffer.as_ref().map_or(0, DmaTxBuf::capacity)
+    }
+
+    fn write(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+        if data.len() > self.capacity() {
+            return Err(ParallelOutputError::TooLong);
+        }
+        let (Some(bus), Some(mut buffer)) = (self.bus.take(), self.buffer.take()) else {
+            return Err(ParallelOutputError::Busy);
+        };
+        buffer.fill(data);
+        let transfer: I8080Transfer<'static, DmaTxBuf, Blocking> =
+            match bus.send(I8080Command::<u8>::None, 0, buffer) {
+                Ok(transfer) => transfer,
+                Err((error, bus, buffer)) => {
+                    self.bus = Some(bus);
+                    self.buffer = Some(buffer);
+                    return Err(ParallelOutputError::Dma(error));
+                }
+            };
+        let (result, bus, buffer) = transfer.wait();
+        self.bus = Some(bus);
+        self.buffer = Some(buffer);
+        result.map_err(ParallelOutputError::Dma)
+    }
+}
+
+/// Constructs the ESP32-S3 parallel output from Board-selected resources.
+///
+/// # Errors
+///
+/// Returns [`ParallelOutputConfigError`] when the write clock is unsupported.
+#[allow(clippy::too_many_arguments)]
+pub fn parallel_output(
+    controller: esp_hal::peripherals::LCD_CAM<'static>,
+    dma: impl LcdDmaTxChannel<'static>,
+    clock: impl PeripheralOutput<'static>,
+    select: impl PeripheralOutput<'static>,
+    data0: impl PeripheralOutput<'static>,
+    data1: impl PeripheralOutput<'static>,
+    data2: impl PeripheralOutput<'static>,
+    data3: impl PeripheralOutput<'static>,
+    data4: impl PeripheralOutput<'static>,
+    data5: impl PeripheralOutput<'static>,
+    data6: impl PeripheralOutput<'static>,
+    data7: impl PeripheralOutput<'static>,
+    frequency_hz: u32,
+    buffer: DmaTxBuf,
+) -> Result<ParallelOutputBus, ParallelOutputConfigError> {
+    let bus = I8080::new(
+        LcdCam::new(controller).lcd,
+        dma,
+        I8080Config::default().with_frequency(Rate::from_hz(frequency_hz)),
+    )
+    .map_err(ParallelOutputConfigError::Peripheral)?
+    .with_wrx(clock)
+    .with_cs(select)
+    .with_data0(data0)
+    .with_data1(data1)
+    .with_data2(data2)
+    .with_data3(data3)
+    .with_data4(data4)
+    .with_data5(data5)
+    .with_data6(data6)
+    .with_data7(data7);
+    Ok(ParallelOutputBus {
+        bus: Some(bus),
         buffer: Some(buffer),
     })
 }

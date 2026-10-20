@@ -211,7 +211,7 @@ pub enum BindingKind {
     SpiBus,
     /// One data-only SPI waveform output using a Platform-owned controller.
     SpiOutput,
-    /// One parallel output bus.
+    /// One 8-bit parallel output with a write clock and select.
     ParallelOutput,
     /// One MIPI DSI host.
     DsiHost,
@@ -935,6 +935,8 @@ pub fn resolve_board<'a>(
                         && board.peripheral_io().sdmmc_device(resource).is_none())
                     || (schema.kind() == BindingKind::CameraCapture
                         && board.peripheral_io().camera_capture(resource).is_none())
+                    || (schema.kind() == BindingKind::ParallelOutput
+                        && board.peripheral_io().parallel_output(resource).is_none())
                     || (schema.kind() == BindingKind::I2sStream
                         && board.peripheral_io().i2s_stream(resource).is_none())
                     || (schema.kind() == BindingKind::CapacitiveTouch
@@ -1123,6 +1125,7 @@ const fn hal_binding(kind: BindingKind) -> Option<HalBinding> {
         BindingKind::MipiCsi => Some(HalBinding::MipiCsi),
         BindingKind::SdmmcDevice => Some(HalBinding::SdmmcDevice),
         BindingKind::CameraCapture => Some(HalBinding::CameraCapture),
+        BindingKind::ParallelOutput => Some(HalBinding::ParallelOutput),
         BindingKind::I2sStream => Some(HalBinding::I2sStream),
         BindingKind::CapacitiveTouch => Some(HalBinding::CapacitiveTouch),
         _ => None,
@@ -2681,6 +2684,75 @@ fn render_binding(
                     "::barracuda_platform_selected::__platform::hal::camera_capture(bindings.{controller}, bindings.{dma}, {pin_values}, {}, ::barracuda_platform_selected::__platform::hal::camera_dma_buffer!({}).map_err(GeneratedBoardError::{variant})?).map_err(GeneratedBoardError::{variant})?",
                     camera.xclk_frequency_hz(),
                     camera.dma_buffer_bytes()
+                ),
+            ))
+        }
+        BindingKind::ParallelOutput => {
+            let output = board
+                .peripheral_io()
+                .parallel_output(resource)
+                .ok_or_else(|| GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                })?;
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let controller =
+                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            let dma = checked_identifier(&format!("{prefix}_dma"), &mut state.identifiers)?;
+            for (field, token) in [(&controller, output.peripheral()), (&dma, output.dma())] {
+                validate_hardware_identifier(token)?;
+                state.raw_fields.push((
+                    field.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::controller_binding_type!({token})"
+                    ),
+                ));
+            }
+            let mut pins = Vec::new();
+            let named = [("clock", output.clock()), ("select", output.select())];
+            let data = output
+                .data()
+                .iter()
+                .enumerate()
+                .map(|(index, pin)| (format!("d{index}"), pin.as_str()));
+            for (name, pin) in named
+                .into_iter()
+                .map(|(name, pin)| (String::from(name), pin))
+                .chain(data)
+            {
+                validate_hardware_identifier(pin)?;
+                let field =
+                    checked_identifier(&format!("{prefix}_{name}"), &mut state.identifiers)?;
+                state.raw_fields.push((
+                    field.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({pin})"
+                    ),
+                ));
+                pins.push(field);
+            }
+            let variant = format!(
+                "{}{}Binding",
+                pascal_identifier(peripheral.name()),
+                pascal_identifier(role)
+            );
+            state.binding_errors.push((
+                variant.clone(),
+                String::from(
+                    "::barracuda_platform_selected::__platform::hal::ParallelOutputConfigError",
+                ),
+            ));
+            let pin_values = pins
+                .iter()
+                .map(|field| format!("bindings.{field}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Ok((
+                String::from("::barracuda_platform_selected::__platform::hal::ParallelOutputBus"),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::parallel_output(bindings.{controller}, bindings.{dma}, {pin_values}, {}, ::barracuda_platform_selected::__platform::hal::parallel_output_dma_buffer!({}).map_err(GeneratedBoardError::{variant})?).map_err(GeneratedBoardError::{variant})?",
+                    output.frequency_hz(),
+                    output.dma_buffer_bytes()
                 ),
             ))
         }

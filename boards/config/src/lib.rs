@@ -341,6 +341,8 @@ pub struct PeripheralIoDefinition {
     i2c_devices: BTreeMap<String, I2cDefinition>,
     #[serde(default, rename = "camera-capture")]
     camera_captures: BTreeMap<String, CameraCaptureDefinition>,
+    #[serde(default, rename = "parallel-output")]
+    parallel_outputs: BTreeMap<String, ParallelOutputDefinition>,
     #[serde(default, rename = "i2s-stream")]
     i2s_streams: BTreeMap<String, I2sStreamDefinition>,
     #[serde(default, rename = "capacitive-touch")]
@@ -360,6 +362,7 @@ impl PeripheralIoDefinition {
             && self.quad_spi_devices.is_empty()
             && self.i2c_devices.is_empty()
             && self.camera_captures.is_empty()
+            && self.parallel_outputs.is_empty()
             && self.i2s_streams.is_empty()
             && self.capacitive_touch.is_empty()
     }
@@ -418,6 +421,12 @@ impl PeripheralIoDefinition {
         self.camera_captures.get(name)
     }
 
+    /// Finds one 8-bit parallel output reserved by a peripheral implementation.
+    #[must_use]
+    pub fn parallel_output(&self, name: &str) -> Option<&ParallelOutputDefinition> {
+        self.parallel_outputs.get(name)
+    }
+
     /// Finds one I2S stream reserved by a peripheral implementation.
     #[must_use]
     pub fn i2s_stream(&self, name: &str) -> Option<&I2sStreamDefinition> {
@@ -468,6 +477,10 @@ impl PeripheralIoDefinition {
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
             || self
+                .parallel_outputs
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
                 .i2s_streams
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
@@ -480,12 +493,16 @@ impl PeripheralIoDefinition {
     /// Returns whether a fixed built-in declaration consumes this DMA channel.
     ///
     /// Platform-owned runtime DMA pools use this to remove channels already
-    /// moved into camera or I2S peripheral bindings.
+    /// moved into camera, parallel-output, or I2S peripheral bindings.
     #[must_use]
     pub fn uses_dma(&self, dma: &str) -> bool {
         self.camera_captures
             .values()
             .any(|binding| binding.dma == dma)
+            || self
+                .parallel_outputs
+                .values()
+                .any(|binding| binding.dma == dma)
             || self.i2s_streams.values().any(|binding| binding.dma == dma)
     }
 
@@ -545,6 +562,10 @@ impl PeripheralIoDefinition {
         for (name, camera) in &self.camera_captures {
             validate_resource_name("internal camera-capture", name)?;
             camera.validate(name)?;
+        }
+        for (name, output) in &self.parallel_outputs {
+            validate_resource_name("internal parallel-output", name)?;
+            output.validate(name)?;
         }
         for (name, stream) in &self.i2s_streams {
             validate_resource_name("internal i2s-stream", name)?;
@@ -876,6 +897,82 @@ impl CameraCaptureDefinition {
             validate_identifier(name, "data", pin)?;
         }
         validate_frequency(name, self.xclk_frequency_hz)?;
+        if self.dma_buffer_bytes == 0 {
+            return Err(ConfigError::ZeroDmaBuffer {
+                resource: name.to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// One 8-bit parallel output (for example an LCD controller in i8080 mode)
+/// and its fixed Board wiring: a write clock, an active-low select, and eight
+/// data lines.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ParallelOutputDefinition {
+    peripheral: String,
+    dma: String,
+    clock: String,
+    select: String,
+    data: [String; 8],
+    #[serde(rename = "frequency-hz")]
+    frequency_hz: u32,
+    #[serde(rename = "dma-buffer-bytes")]
+    dma_buffer_bytes: usize,
+}
+
+impl ParallelOutputDefinition {
+    /// Returns the chip-native output controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+    /// Returns the chip-native DMA channel.
+    #[must_use]
+    pub fn dma(&self) -> &str {
+        &self.dma
+    }
+    /// Returns the write-clock pin.
+    #[must_use]
+    pub fn clock(&self) -> &str {
+        &self.clock
+    }
+    /// Returns the active-low select pin, asserted for each burst.
+    #[must_use]
+    pub fn select(&self) -> &str {
+        &self.select
+    }
+    /// Returns the eight data pins in least-significant-bit order.
+    #[must_use]
+    pub fn data(&self) -> &[String; 8] {
+        &self.data
+    }
+    /// Returns the write-clock frequency.
+    #[must_use]
+    pub const fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+    /// Returns the statically allocated DMA burst capacity.
+    #[must_use]
+    pub const fn dma_buffer_bytes(&self) -> usize {
+        self.dma_buffer_bytes
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        for (field, value) in [
+            ("peripheral", self.peripheral.as_str()),
+            ("dma", self.dma.as_str()),
+            ("clock", self.clock.as_str()),
+            ("select", self.select.as_str()),
+        ] {
+            validate_identifier(name, field, value)?;
+        }
+        for pin in &self.data {
+            validate_identifier(name, "data", pin)?;
+        }
+        validate_frequency(name, self.frequency_hz)?;
         if self.dma_buffer_bytes == 0 {
             return Err(ConfigError::ZeroDmaBuffer {
                 resource: name.to_owned(),

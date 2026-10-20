@@ -465,6 +465,25 @@ pub mod display {
         fn set_backlight(&mut self, brightness: u8) -> Result<(), Self::Error>;
     }
 
+    /// Narrow 8-bit parallel output binding implemented by a Platform HAL.
+    ///
+    /// Clocks bursts of bytes onto eight data lines with a write clock while
+    /// an active-low select line is asserted, as the source driver of a
+    /// directly driven e-paper panel expects. The display implementation owns
+    /// every other timing line and the waveform; the Platform owns the
+    /// controller, its DMA, and the pin routing.
+    pub trait ParallelOutput {
+        /// Vendor HAL failure.
+        type Error: core::fmt::Debug;
+
+        /// Largest burst in bytes that [`ParallelOutput::write`] accepts.
+        fn capacity(&self) -> usize;
+
+        /// Clocks `data` out, data line 0 carrying bit 0 of each byte, and
+        /// returns once the last byte has left the bus.
+        fn write(&mut self, data: &[u8]) -> Result<(), Self::Error>;
+    }
+
     /// Pixel storage format reported independently of a implementation's concrete
     /// [`embedded_graphics_core::pixelcolor::PixelColor`] type.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
