@@ -1,0 +1,25 @@
+[package]
+name = "barracuda-paper-color-display"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda display implementation for the M5Stack PaperColor: 4-inch 400 x 600 E Ink Spectra 6 panel on an ED2208 controller"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-ed2208.workspace = true
+barracuda-driver-m5pm1.workspace = true
+barracuda-peripheral.workspace = true
+embedded-graphics-core.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

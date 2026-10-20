@@ -1,4 +1,5 @@
 name: m5stack-paper-color
+profile: screen
 hardware:
   chip: esp32s3
   # ESP32-S3R8 with 16 MB flash.
@@ -11,3 +12,32 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal:
+        # M5GFX board_M5PaperColor / M5Unified internal I2C: M5PM1 (0x6E),
+        # RX8130 RTC (0x32), SHT40 (0x44). M5GFX talks to the M5PM1 at 100 kHz.
+        peripheral: I2C0
+        scl: GPIO2
+        sda: GPIO3
+        frequency-hz: 100000
+    spi-device:
+      epd-spi:
+        # M5GFX board_M5PaperColor: ED2208 on SPI2 at 4 MHz. The microSD card
+        # shares SCK and MOSI (MISO GPIO14, chip-select GPIO47).
+        peripheral: SPI2
+        sck: GPIO15
+        mosi: GPIO13
+        chip-select: GPIO44
+        frequency-hz: 4000000
+  devices:
+    display:
+      implementation: paper-color-display
+      bindings:
+        spi: epd-spi
+        dc: GPIO43
+        busy: GPIO11
+        # M5GFX pulses GPIO12 as the panel reset (`_pin_reset(GPIO_NUM_12)`).
+        reset: GPIO12
+        i2c: internal
