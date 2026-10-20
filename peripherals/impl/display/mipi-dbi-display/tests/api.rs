@@ -48,3 +48,45 @@ fn digital_backlight_is_advertised_as_brightness_control() {
 
     assert!(descriptor.features().contains(DisplayFeatures::BRIGHTNESS));
 }
+
+#[test]
+fn digital_backlight_follows_its_active_level() {
+    use barracuda_mipi_dbi_display::{DigitalBacklight, PanelBacklight};
+    use core::convert::Infallible;
+    use embedded_hal::digital::{ErrorType, OutputPin};
+
+    #[derive(Default)]
+    struct Pin {
+        high: bool,
+    }
+
+    impl ErrorType for Pin {
+        type Error = Infallible;
+    }
+
+    impl OutputPin for Pin {
+        fn set_low(&mut self) -> Result<(), Infallible> {
+            self.high = false;
+            Ok(())
+        }
+
+        fn set_high(&mut self) -> Result<(), Infallible> {
+            self.high = true;
+            Ok(())
+        }
+    }
+
+    let mut active_low = Pin::default();
+    assert!(
+        DigitalBacklight::new(&mut active_low, false)
+            .set_brightness(128)
+            .is_ok()
+    );
+    assert!(!active_low.high);
+    assert!(
+        DigitalBacklight::new(&mut active_low, false)
+            .set_brightness(0)
+            .is_ok()
+    );
+    assert!(active_low.high);
+}
