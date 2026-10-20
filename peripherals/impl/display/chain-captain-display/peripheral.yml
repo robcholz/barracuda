@@ -1,0 +1,32 @@
+id: chain-captain-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-chain-captain-display
+  crate: barracuda_chain_captain_display
+  factory: "::{{crate}}::ChainCaptainDisplayImplementation<{{binding.spi.type}}, {{binding.dc.type}}, {{binding.expander.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::ChainCaptainDisplayBindings::new({{binding.spi.value}}, {{binding.dc.value}}, {{binding.expander.value}}, {{hal.delay.value}}, ::{{crate}}::take_transfer_buffer())"
+  config-expression: "::{{crate}}::ChainCaptainDisplayConfig::new({{parameter.expander-address}}, {{parameter.orientation}})"
+bindings:
+  spi:
+    kind: spi-device
+  dc:
+    kind: digital-output
+    initial: low
+  # The I2C bus of the M5IOE1 expander holding the panel supply, reset, and
+  # backlight PWM.
+  expander:
+    kind: i2c-device
+parameters:
+  expander-address:
+    type: integer
+    default: 79
+  orientation:
+    type: enum
+    values: [deg0, deg90, deg180, deg270]
+    rust-values:
+      deg0: "::barracuda_peripheral::display::DisplayOrientation::Deg0"
+      deg90: "::barracuda_peripheral::display::DisplayOrientation::Deg90"
+      deg180: "::barracuda_peripheral::display::DisplayOrientation::Deg180"
+      deg270: "::barracuda_peripheral::display::DisplayOrientation::Deg270"
+    default: deg0

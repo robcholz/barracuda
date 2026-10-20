@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-chain-captain-display"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda display implementation for the M5Stack Chain Captain's JD9853 panel and M5IOE1 controls"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-jd9853.workspace = true
+barracuda-driver-m5ioe1.workspace = true
+barracuda-peripheral.workspace = true
+embedded-graphics-core.workspace = true
+embedded-hal.workspace = true
+mipidsi.workspace = true
+static_cell.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

@@ -1,4 +1,5 @@
 name: m5stack-chain-captain
+profile: screen
 hardware:
   chip: esp32s3
   # ESP32-S3R8 with 16 MB flash.
@@ -11,3 +12,32 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified internal bus: SCL G2, SDA G3, at the M5IOE1's 100 kHz.
+        peripheral: I2C0
+        scl: GPIO2
+        sda: GPIO3
+        frequency-hz: 100000
+    spi-device:
+      display-spi:
+        # M5GFX `board_M5ChainCaptain`: SPI2, SCLK G15, MOSI G16, CS G45 at
+        # 40 MHz.
+        peripheral: SPI2
+        sck: GPIO15
+        mosi: GPIO16
+        chip-select: GPIO45
+        frequency-hz: 40000000
+  devices:
+    display:
+      # 1.54-inch 240 x 240 HSD015BPN2-A0 on a JD9853; supply, reset, and
+      # backlight on the M5IOE1 at 0x4F.
+      implementation: chain-captain-display
+      bindings:
+        spi: display-spi
+        dc: GPIO46
+        expander: internal-i2c
+      parameters:
+        expander-address: 79
