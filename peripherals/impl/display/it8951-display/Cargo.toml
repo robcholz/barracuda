@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-it8951-display"
+version = "0.1.0"
+edition = "2024"
+description = "Buffered 16-level e-paper implementation for Barracuda over an IT8951 timing controller"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-it8951.workspace = true
+barracuda-peripheral.workspace = true
+embedded-graphics-core.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
