@@ -1,6 +1,13 @@
 name: m5stack-tab5x
 hardware:
   chip: esp32p4
+  # Tab5 with an ESP32-P4 of revision v3.0 or later (M5Unified, M5Stack's
+  # Arduino core 3.3.10): ESP32-P4NRW32 with 16 MB flash and 32 MB PSRAM.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: hex
+    size-bytes: 33554432
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:

@@ -42,11 +42,34 @@ pub fn initialize_allocator() {
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
 }
 
-/// Serves bulk memory from the global heap; no ESP32-P4 Board declares
-/// external memory yet.
+static EXTERNAL_MEMORY_ALLOCATOR: esp_alloc::ExternalMemory = esp_alloc::ExternalMemory;
+static BULK_MEMORY_BACKEND: barracuda_bulk_memory::platform::Backend =
+    barracuda_bulk_memory::platform::Backend::new(&EXTERNAL_MEMORY_ALLOCATOR);
+
+/// Initializes Board-declared external memory as the explicit-use bulk domain.
+///
+/// The ESP32-P4's in-package PSRAM runs on the 16-line hex bus. Without
+/// external memory, bulk memory is the global heap.
 #[doc(hidden)]
-pub fn initialize_bulk_memory(_board: &barracuda_board::Board) {
+pub fn initialize_bulk_memory(
+    board: &barracuda_board::Board,
+    psram: esp_hal::peripherals::PSRAM<'static>,
+) {
     barracuda_bulk_memory::platform::install_global();
+    let Some(memory) = board.hardware().external_memory() else {
+        return;
+    };
+    if memory.interface() != barracuda_board::ExternalMemoryInterface::Hex {
+        esp_println::println!("ESP32-P4 drives only hex PSRAM; external memory stays unused");
+        return;
+    }
+    let config = esp_hal::psram::PsramConfig {
+        mode: esp_hal::psram::PsramMode::Hex,
+        size: esp_hal::psram::PsramSize::Size(memory.size_bytes()),
+        ..Default::default()
+    };
+    esp_alloc::psram_allocator!(psram, esp_hal::psram, config);
+    barracuda_bulk_memory::platform::install(&BULK_MEMORY_BACKEND);
 }
 
 /// Creates the process-lifetime mechanisms needed by the selected ESP32-P4 Platform.
@@ -125,7 +148,7 @@ macro_rules! platform_entry {
             $crate::application::initialize_allocator();
             let peripherals =
                 $crate::application::__hal::init($crate::application::__hal::Config::default());
-            $crate::application::initialize_bulk_memory($board);
+            $crate::application::initialize_bulk_memory($board, peripherals.PSRAM);
             let $board_bindings_value = $board_bindings!(peripherals);
             let flash = peripherals.FLASH;
             let timer_group =

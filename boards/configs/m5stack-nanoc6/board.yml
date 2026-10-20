@@ -1,6 +1,8 @@
 name: m5stack-nanoc6
 hardware:
   chip: esp32c6
+  # ESP32-C6FH4.
+  flash-size: 4mb
 toolchain:
   target: riscv32imac-unknown-none-elf
 native-layout:

@@ -71,6 +71,19 @@ exposed-io:
 
 这些原生文件是唯一的物理事实来源。平台构建代码对照它们校验 `board.yml` 的绑定，并把所选区域投射到 `embedded-storage`/Embassy 接口上。不要添加通用的 Barracuda 分区表，也不要添加生成厂商分区表的转换器。
 
+`hardware` 记录产品数据手册写明的事实，按它的模组或芯片型号读取：规范的 `chip`、实际焊接的 `flash-size`（`4mb`、`8mb`、`16mb` 等），以及产品带 PSRAM 时的 `external-memory`。原生布局必须在 `flash-size` 之内结束。
+
+```yaml
+hardware:
+  chip: esp32s3
+  # ESP32-S3-PICO-1-N8R8.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: octal-spi   # quad-spi、octal-spi，或 hex（ESP32-P4）
+    size-bytes: 8388608
+```
+
 先选择一次具体的开发板，然后使用普通的构建命令：
 
 ```bash

@@ -108,6 +108,22 @@ validates `board.yml` bindings against them and projects the selected region
 into `embedded-storage`/Embassy interfaces. Do not add a generic Barracuda
 partition table or a converter that emits vendor tables.
 
+`hardware` records what the product's datasheet states, read from its module
+or chip part number: the canonical `chip`, the installed `flash-size` (`4mb`,
+`8mb`, `16mb`, ...), and `external-memory` when the product has PSRAM. The
+native layout must end within `flash-size`.
+
+```yaml
+hardware:
+  chip: esp32s3
+  # ESP32-S3-PICO-1-N8R8.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: octal-spi   # quad-spi, octal-spi, or hex (ESP32-P4)
+    size-bytes: 8388608
+```
+
 Select a concrete Board once, then use the ordinary build command:
 
 ```bash

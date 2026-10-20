@@ -2,6 +2,8 @@ name: m5stack-basic
 profile: screen
 hardware:
   chip: esp32
+  # ESP32-D0WDQ6-V3 with 16 MB flash (units before 2020.6 had 4 MB).
+  flash-size: 16mb
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:

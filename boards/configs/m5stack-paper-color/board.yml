@@ -1,6 +1,12 @@
 name: m5stack-paper-color
 hardware:
   chip: esp32s3
+  # ESP32-S3R8 with 16 MB flash.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:

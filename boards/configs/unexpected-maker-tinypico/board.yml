@@ -1,6 +1,12 @@
 name: unexpected-maker-tinypico
 hardware:
   chip: esp32
+  # ESP32-PICO-D4 with 4 MB QSPI PSRAM.
+  flash-size: 4mb
+  external-memory:
+    technology: psram
+    interface: quad-spi
+    size-bytes: 4194304
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:

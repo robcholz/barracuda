@@ -1,6 +1,12 @@
 name: esp32s3-eye
 hardware:
   chip: esp32s3
+  # ESP32-S3-WROOM-1 with ESP32-S3R8.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:

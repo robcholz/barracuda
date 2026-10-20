@@ -1,6 +1,8 @@
 name: esp32c6-devkitm-1
 hardware:
   chip: esp32c6
+  # ESP32-C6-MINI-1-N4.
+  flash-size: 4mb
 toolchain:
   target: riscv32imac-unknown-none-elf
 native-layout:
