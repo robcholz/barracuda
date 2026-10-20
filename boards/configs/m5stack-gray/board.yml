@@ -2,6 +2,8 @@ name: m5stack-gray
 profile: screen
 hardware:
   chip: esp32
+  # ESP32-D0WDQ6.
+  flash-size: 16mb
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:

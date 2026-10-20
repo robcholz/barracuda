@@ -1,6 +1,8 @@
 name: esp32c3-devkitm-1
 hardware:
   chip: esp32c3
+  # ESP32-C3-MINI-1 (ESP32-C3FN4).
+  flash-size: 4mb
 toolchain:
   target: riscv32imc-unknown-none-elf
 native-layout:

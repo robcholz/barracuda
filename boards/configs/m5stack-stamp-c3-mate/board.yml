@@ -1,6 +1,8 @@
 name: m5stack-stamp-c3-mate
 hardware:
   chip: esp32c3
+  # Stamp-C3 (ESP32-C3, 4 MB flash).
+  flash-size: 4mb
 toolchain:
   target: riscv32imc-unknown-none-elf
 native-layout:

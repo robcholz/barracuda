@@ -2,6 +2,12 @@ name: m5stack-fire
 profile: screen
 hardware:
   chip: esp32
+  # ESP32-D0WDQ6 (units before 2020.4 had 4 MB PSRAM).
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: quad-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:

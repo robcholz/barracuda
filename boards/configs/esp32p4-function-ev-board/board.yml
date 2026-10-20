@@ -1,6 +1,12 @@
 name: esp32p4-function-ev-board
 hardware:
   chip: esp32p4
+  # ESP32-P4 with 32 MB in-package PSRAM.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: hex
+    size-bytes: 33554432
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:

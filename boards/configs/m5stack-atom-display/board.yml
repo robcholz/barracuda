@@ -1,6 +1,12 @@
 name: m5stack-atom-display
 hardware:
   chip: esp32
+  # ESP32-PICO-V3-02.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: quad-spi
+    size-bytes: 2097152
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:

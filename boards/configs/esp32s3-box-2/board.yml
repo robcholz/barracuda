@@ -1,6 +1,13 @@
 name: esp32s3-box-2
 hardware:
   chip: esp32s3
+  # Espressif esp_friends_boards `esp32_s3_box_2`: 16 MB flash and octal PSRAM
+  # whose size it detects at boot; every octal-PSRAM ESP32-S3 part has at least 8 MB.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:

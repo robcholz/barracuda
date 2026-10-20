@@ -1,6 +1,8 @@
 name: m5stack-atom-s3
 hardware:
   chip: esp32s3
+  # ESP32-S3FN8.
+  flash-size: 8mb
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:

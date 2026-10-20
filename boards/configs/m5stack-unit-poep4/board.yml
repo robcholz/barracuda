@@ -1,6 +1,12 @@
 name: m5stack-unit-poep4
 hardware:
   chip: esp32p4
+  # ESP32-P4NRW32.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: hex
+    size-bytes: 33554432
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:

@@ -1,6 +1,12 @@
 name: m5stack-corep4x
 hardware:
   chip: esp32p4
+  # ESP32-P4NRW32X.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: hex
+    size-bytes: 33554432
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:

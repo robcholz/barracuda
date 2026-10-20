@@ -1,6 +1,8 @@
 name: m5stack-station
 hardware:
   chip: esp32
+  # ESP32-D0WDQ6-V3.
+  flash-size: 16mb
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:

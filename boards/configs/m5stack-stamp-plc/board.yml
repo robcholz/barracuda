@@ -1,6 +1,8 @@
 name: m5stack-stamp-plc
 hardware:
   chip: esp32s3
+  # Stamp-S3A (ESP32-S3FN8).
+  flash-size: 8mb
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:

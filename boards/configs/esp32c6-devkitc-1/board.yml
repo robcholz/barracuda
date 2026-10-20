@@ -1,6 +1,8 @@
 name: esp32c6-devkitc-1
 hardware:
   chip: esp32c6
+  # ESP32-C6-WROOM-1-N8.
+  flash-size: 8mb
 toolchain:
   target: riscv32imac-unknown-none-elf
 native-layout:

@@ -1,6 +1,12 @@
 name: m5stack-paper
 hardware:
   chip: esp32
+  # ESP32-D0WDQ6-V3.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: quad-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
