@@ -290,10 +290,7 @@ where
     DC: OutputPin,
     I2C: I2c,
 {
-    fn set_backlight(
-        &mut self,
-        brightness: u8,
-    ) -> Result<(), ControlErrorFor<SPI, DC, I2C>> {
+    fn set_backlight(&mut self, brightness: u8) -> Result<(), ControlErrorFor<SPI, DC, I2C>> {
         self.expander
             .set_pwm_duty(BACKLIGHT_CHANNEL, backlight_duty(brightness), false, true)
             .map_err(ChainCaptainDisplayError::Expander)
