@@ -486,6 +486,41 @@ pub mod display {
         fn set_backlight(&mut self, brightness: u8) -> Result<(), Self::Error>;
     }
 
+    /// Narrow eight-bit Intel 8080-style parallel output binding implemented
+    /// by a Platform HAL.
+    ///
+    /// The Platform owns the controller, its DMA, and the pin routing: a write
+    /// strobe, an active-low chip select asserted for each burst, eight data
+    /// lines, and the data/command line when the Board wires one. A MIPI DBI
+    /// panel controller takes commands with data/command low and their
+    /// parameters and pixels with it high. A directly driven e-paper source
+    /// driver takes raw line bytes, its source clock on the write strobe and
+    /// its source start pulse on the chip select; its display implementation
+    /// drives every other timing line and the waveform itself.
+    pub trait ParallelOutput {
+        /// Vendor HAL failure.
+        type Error: core::fmt::Debug;
+
+        /// Largest burst in bytes clocked out under one chip-select
+        /// assertion.
+        fn capacity(&self) -> usize;
+
+        /// Clocks one command byte with data/command low, then its payload
+        /// with data/command high.
+        ///
+        /// A bus without a data/command line reports an error.
+        fn write_command(&mut self, command: u8, data: &[u8]) -> Result<(), Self::Error>;
+
+        /// Clocks `data` with data/command high, data line 0 carrying bit 0 of
+        /// each byte, and returns once the last byte has left the bus.
+        ///
+        /// Data no longer than [`ParallelOutput::capacity`] goes out as one
+        /// burst; longer data as consecutive bursts of at most that many
+        /// bytes, the chip select released between them. A consumer that
+        /// needs one unbroken burst keeps each write within the capacity.
+        fn write_data(&mut self, data: &[u8]) -> Result<(), Self::Error>;
+    }
+
     /// Pixel storage format reported independently of a implementation's concrete
     /// [`embedded_graphics_core::pixelcolor::PixelColor`] type.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

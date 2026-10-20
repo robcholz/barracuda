@@ -1,0 +1,26 @@
+[package]
+name = "barracuda-paper-mono-display"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda display implementation for the M5Stack Paper Mono: 3.97-inch four-gray SSD1677 e-paper with an M5PM1 front light"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-m5ioe1.workspace = true
+barracuda-driver-m5pm1.workspace = true
+barracuda-driver-ssd1677.workspace = true
+barracuda-peripheral.workspace = true
+embedded-graphics-core.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

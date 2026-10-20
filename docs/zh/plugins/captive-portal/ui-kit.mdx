@@ -53,8 +53,8 @@ import {
 - `h(tag, props, ...children)` 构建一个元素：支持 `class`、`on<event>` 监听器和布尔属性；字符串子节点是文本，从不作为标记解析。
 - `icon(ICON_*, size?, className?)`：一个 Lucide 图标（`ICON_EYE`、`ICON_REFRESH`、`ICON_PLUS`、
   `ICON_WIFI`、`ICON_COPY`、`ICON_EXTERNAL_LINK`、`ICON_MAIL`、`ICON_KEY_ROUND`……来自
-  `icons.ts`），默认 16px，手机列表行中为 18px；`className` 用来添加类，例如文字颜色（`bc-muted`、`bc-warning`）。
-- `mark(MARK_*, size?)`：来自 `marks.ts` 的设计标记——`MARK_BARE`、`MARK_TILE`
+  `icons.ts`，它再导出 `ui/icons.ts`），默认 16px，手机列表行中为 18px；`className` 用来添加类，例如文字颜色（`bc-muted`、`bc-warning`）。
+- `mark(MARK_*, size?)`：来自 `marks.ts` 的设计系统标志——`MARK_BARE`、`MARK_TILE`
   （聊天头像），或者页面保存在自己源码中的品牌标记。
 - `assetIcon(url, size?)`：一个图标文件；`.svg` 以 `currentColor` 遮罩绘制，其他格式按图片显示。页面自己的图标用 `new URL("./icon.svg", import.meta.url).href`。
 - `twoDigits(n)`：计数和步骤编号（`04`）。

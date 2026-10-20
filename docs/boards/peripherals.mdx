@@ -91,8 +91,9 @@ spi-device:
 
 A panel on an eight-bit Intel 8080 bus is a `parallel-output`: its write
 strobe, data/command and chip-select lines, eight data lines in bit order, the
-strobe clock, and the DMA staging buffer. The Platform hands it to the display
-implementation as a `ParallelBus`:
+strobe clock, and the DMA staging buffer, whose size is the longest burst sent
+under one chip-select assertion. The Platform hands it to the display
+implementation as a `ParallelOutput`:
 
 ~~~yaml
 parallel-output:
@@ -106,6 +107,11 @@ parallel-output:
     frequency-hz: 10000000
     dma-buffer-bytes: 4096
 ~~~
+
+A directly driven e-paper panel's source driver uses the same binding without
+`dc`: every byte is data, its source clock is `wr`, and its source start pulse
+is `chip-select`. Its display implementation drives the gate and latch lines
+as ordinary digital outputs and keeps each line within one burst.
 
 Every generated semantic slot is optional. A Board with no real-time clock has
 no `RealTimeClock` value; a Board with one has `Some(concrete_clock)`. Absence
@@ -154,7 +160,9 @@ signals must likewise be owned by the concrete semantic service they enable.
 On M5Stack CoreP4X, `corep4x-dsi-display` hides the M5IOE1 expander at
 `0x4F` (panel power, reset, and PWM backlight) and the M5PM1 power controller
 at `0x6E` (the 5 V boost) the same way, through `drivers/chips/m5ioe1` and
-`drivers/chips/m5pm1`.
+`drivers/chips/m5pm1`. The Paper Mono's `paper-mono-display` uses the same two
+drivers for its panel supply and reset and its front light; `paper-color-display`
+and `paper-diy-display` use the M5PM1 for the e-paper supply.
 
 ## Stable construction and runtime behavior
 

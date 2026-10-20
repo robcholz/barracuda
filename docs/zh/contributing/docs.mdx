@@ -57,7 +57,7 @@ description: "页面放在哪里、如何命名标题和开篇，以及面向每
 
 ## 样式
 
-`style.css` 把 Mintlify 的组件画成 Barracuda design system 里的样子：代码块是它的 Window，提示框是它的 Alert，Steps 用它的步骤标记，卡片以它的图标方块开头，正文链接和行内代码遵循它的 Text。只用它的 token（`--bc-*`）和圆角，不要新增颜色或尺寸。文件顶部的 token 块由 design system 的 `tokens.css` 生成；token 变了之后，重新生成：
+`style.css` 把 Mintlify 的组件画成 Barracuda design system 里的样子：代码块是它的 Window，提示框是它的 Alert，Steps 用它的步骤标记，卡片以它的图标方块开头，正文链接和行内代码遵循它的 Text。只用它的 token（`--bc-*`）和圆角，不要新增颜色或尺寸。文件顶部的 token 块由 `ui/tokens.css` 生成；token 变了之后，重新生成：
 
 ```bash terminal
 bun tools/web/docs-tokens.ts

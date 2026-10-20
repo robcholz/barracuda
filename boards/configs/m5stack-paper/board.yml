@@ -1,4 +1,5 @@
 name: m5stack-paper
+profile: screen
 hardware:
   chip: esp32
   # ESP32-D0WDQ6-V3.
@@ -11,3 +12,33 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    spi-device:
+      # IT8951E e-paper controller on HSPI's IOMUX pins (M5GFX board_M5Paper;
+      # Espressif m5stack_paper spi_master). The microSD card shares the bus
+      # with chip-select GPIO4. M5GFX initializes the IT8951 at 12 MHz and
+      # reads it at 2 MHz; 10 MHz keeps writes and reads within both.
+      epd-spi:
+        peripheral: SPI2
+        sck: GPIO14
+        mosi: GPIO12
+        miso: GPIO13
+        chip-select: GPIO15
+        frequency-hz: 10000000
+  devices:
+    display:
+      implementation: it8951-display
+      bindings:
+        spi: epd-spi
+        # IT8951 HRDY (M5GFX pin_busy).
+        ready: GPIO27
+        # E-paper rail enable; M5GFX pulses it as the controller reset.
+        panel-power: GPIO23
+        # Main power latch (M5Unified POWER_HOLD for board_M5Paper).
+        power-hold: GPIO2
+      parameters:
+        width: 960
+        height: 540
+        # M5GFX offset_rotation 3: upright portrait, 540 x 960.
+        mounting: deg270

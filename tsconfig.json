@@ -9,5 +9,10 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["plugins/*/resources/web/**/*.ts", "tools/web/**/*.ts"]
+  "include": [
+    "plugins/*/resources/web/**/*.ts",
+    "ui/**/*.ts",
+    "tools/web/**/*.ts",
+    "apps/live-editor/web/**/*.ts"
+  ]
 }

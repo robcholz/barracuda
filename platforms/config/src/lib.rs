@@ -35,7 +35,7 @@ pub enum HalBinding {
     I2cDevice,
     /// Parallel camera receiver construction.
     CameraCapture,
-    /// Parallel display write-bus construction.
+    /// Eight-bit parallel output construction.
     ParallelOutput,
     /// Full-duplex I2S stream construction.
     I2sStream,

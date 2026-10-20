@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "LIVE_EDITOR_CACHE=.next/cache/live-editor bash ../apps/live-editor/web/build-site.sh public/editor && bun run build"
+}

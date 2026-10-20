@@ -171,7 +171,7 @@ peripherals:
       primary: true
       bindings: { ... }
     status-panel:
-      implementation: gdeh0154d67-display
+      implementation: epaper-1in54-display
       bindings: { ... }
 
 exposed-io:
@@ -236,7 +236,7 @@ Barracuda 不替换上游 HAL trait 已经定义的操作。`ConfigurableDigital
 
 应用指定的是暴露的引脚和功能参数，而不是芯片的控制器实例。例如，`i2c.open(scl, sda, frequency)` 请求提供者选择一个兼容的空闲控制器。这样就把控制器分配和外设预留留在平台组合中，并为控制器编号不同的开发板提供相同的应用 API。
 
-可复用的外设实现直接导入 `embedded-hal`、`embedded-hal-async` 和成熟的领域生态 trait。只有当生态中没有合适的契约时，Barracuda 才定义一个窄范围的绑定。目前的例子是并行摄像头帧接收和 PCM 流；它们与外设 API 放在一起，而不是构成第二个通用 HAL。所选构建让具体的存储和分发保持静态分配；使用者不会在运行时查找平台、开发板或外设实现，异步 HAL trait 也不会被转换为 `dyn` trait 对象。
+可复用的外设实现直接导入 `embedded-hal`、`embedded-hal-async` 和成熟的领域生态 trait。只有当生态中没有合适的契约时，Barracuda 才定义一个窄范围的绑定。目前的例子是并行摄像头帧接收、PCM 流，以及同时为 MIPI DBI 面板控制器和直接驱动的电子墨水屏源极驱动器输出数据的 8 位 Intel 8080 式并行输出；它们与外设 API 放在一起，而不是构成第二个通用 HAL。所选构建让具体的存储和分发保持静态分配；使用者不会在运行时查找平台、开发板或外设实现，异步 HAL trait 也不会被转换为 `dyn` trait 对象。
 
 `embedded-hal` 没有对在输入和输出模式之间切换 GPIO 做标准化。因此，每个暴露给 VM 的数字句柄除了上游的操作 trait 之外，还实现小巧的开发板 HAL 配置契约。协议的复用功能由对应的提供者建立，而不是由数字 API 建立。每个平台的 `hal` 模块拥有厂商的引脚复用和控制器构造。
 
@@ -587,7 +587,7 @@ Platform adaptation + peripheral implementations + Board matrix -> Board HAL ---
 Platform services -> { IP, entropy, partitions } ------------------------+-> System -> Plugins
 ~~~
 
-平台 crate 不拥有外设实现或开发板组合。它们拥有的是自己的厂商 HAL 令牌词汇，以及 GPIO、I2C、SPI、摄像头、并行显示、I2S 和延时的构造函数。由 DMA 支撑的媒体资源是静态组合的：`camera-capture`、`parallel-output` 和 `i2s-stream` 声明用 `dma-buffer-bytes` 确定存储大小，所选平台在具体开发板的调用处分配它。语义化适配留在 `peripherals/impl` 下；可复用的寄存器和协议行为属于 `drivers/chips`。与开发板相关的 crate 留在 `boards/` 下；所选 Target 的组合根留在单个平台实现之外。
+平台 crate 不拥有外设实现或开发板组合。它们拥有的是自己的厂商 HAL 令牌词汇，以及 GPIO、I2C、SPI、摄像头、并行输出、I2S 和延时的构造函数。由 DMA 支撑的媒体资源是静态组合的：`camera-capture`、`parallel-output` 和 `i2s-stream` 声明用 `dma-buffer-bytes` 确定存储大小，所选平台在具体开发板的调用处分配它。语义化适配留在 `peripherals/impl` 下；可复用的寄存器和协议行为属于 `drivers/chips`。与开发板相关的 crate 留在 `boards/` 下；所选 Target 的组合根留在单个平台实现之外。
 
 生成的组合调用所选平台的 `hal` 模块，并把得到的 `embedded-hal` 资源交给由其清单选择的外设实现。复用现有实现的新开发板只需要开发板 YAML。新的实现添加它的 crate 和 `peripheral.yml`；它可以复用现有的芯片驱动，并且不需要在中央渲染器中添加分支。
 

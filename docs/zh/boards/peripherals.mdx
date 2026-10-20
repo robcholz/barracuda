@@ -68,7 +68,7 @@ spi-device:
     frequency-hz: 40000000
 ~~~
 
-接在八位 Intel 8080 总线上的面板是一个 `parallel-output`：写选通线、数据/命令线和片选线，按位序排列的八根数据线，选通时钟，以及 DMA 暂存缓冲区。平台把它作为 `ParallelBus` 交给显示实现：
+接在八位 Intel 8080 总线上的面板是一个 `parallel-output`：写选通线、数据/命令线和片选线，按位序排列的八根数据线，选通时钟，以及 DMA 暂存缓冲区，其大小就是一次片选有效期间发出的最长突发。平台把它作为 `ParallelOutput` 交给显示实现：
 
 ~~~yaml
 parallel-output:
@@ -82,6 +82,8 @@ parallel-output:
     frequency-hz: 10000000
     dma-buffer-bytes: 4096
 ~~~
+
+直接驱动的电子墨水屏源极驱动器使用同一种绑定，但不带 `dc`：每个字节都是数据，源极时钟接 `wr`，源极起始脉冲接 `chip-select`。它的显示实现把栅极和锁存线作为普通数字输出驱动，并让每一行都在一次突发之内发出。
 
 每个生成的语义槽位都是可选的。没有实时时钟的开发板就没有 `RealTimeClock` 值；有实时时钟的开发板则有 `Some(concrete_clock)`。缺席不需要伪造硬件，存在也不会暴露辅助芯片。
 
@@ -111,7 +113,7 @@ parallel-output:
 
 这四个实现都使用 `drivers/chips/pi4ioe5v6408`；没有一个向 System 暴露这个扩展芯片、它的引脚或一个通用的系统控制器外设。其他由 PI4 控制的信号同样必须由它们所使能的具体语义服务拥有。
 
-在 M5Stack CoreP4X 上，`corep4x-dsi-display` 以同样的方式隐藏位于 `0x4F` 的 M5IOE1 扩展芯片（面板电源、复位和 PWM 背光）和位于 `0x6E` 的 M5PM1 电源控制器（5 V 升压），分别通过 `drivers/chips/m5ioe1` 和 `drivers/chips/m5pm1`。
+在 M5Stack CoreP4X 上，`corep4x-dsi-display` 以同样的方式隐藏位于 `0x4F` 的 M5IOE1 扩展芯片（面板电源、复位和 PWM 背光）和位于 `0x6E` 的 M5PM1 电源控制器（5 V 升压），分别通过 `drivers/chips/m5ioe1` 和 `drivers/chips/m5pm1`。Paper Mono 的 `paper-mono-display` 用同样两个驱动控制面板电源、复位和前光；`paper-color-display` 和 `paper-diy-display` 用 M5PM1 控制电子墨水屏电源。
 
 ## 稳定的构造和运行时行为
 

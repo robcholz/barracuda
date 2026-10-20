@@ -6,7 +6,8 @@ mod sdmmc;
 
 pub use capacitive_touch::{capacitive_touch_buttons, CapacitiveTouchButtons};
 pub use parallel_output::{
-    parallel_output, ParallelOutput, ParallelOutputConfigError, ParallelOutputError,
+    parallel_output, parallel_output_data_only, ParallelOutputBus, ParallelOutputConfigError,
+    ParallelOutputError,
 };
 pub use sdmmc::{sdmmc_device_1bit, SdmmcConfigError, SdmmcDevice};
 

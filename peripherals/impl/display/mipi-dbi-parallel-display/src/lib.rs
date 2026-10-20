@@ -1,8 +1,9 @@
 //! MIPI DBI display on an eight-bit Intel 8080 parallel bus.
 //!
-//! The Platform supplies the bus as a [`ParallelBus`]; this implementation
-//! adapts it to `mipidsi`'s interface and otherwise drives the panel exactly
-//! as `mipi-dbi-display` does, including its reset and backlight handling.
+//! The Platform supplies the bus as a [`ParallelOutput`] with a data/command
+//! line; this implementation adapts it to `mipidsi`'s interface and otherwise
+//! drives the panel exactly as `mipi-dbi-display` does, including its reset
+//! and backlight handling.
 //! The panel's read strobe, when the Board wires it, is driven inactive
 //! (high) and left so for the rest of the program.
 
@@ -10,11 +11,10 @@
 
 use core::marker::PhantomData;
 
-use barracuda_board_hal::ParallelBus;
 use barracuda_mipi_dbi_display::{
     DigitalBacklight, MipiDbiDisplay, MipiDbiInitError, initialize_on,
 };
-use barracuda_peripheral::PeripheralImplementation;
+use barracuda_peripheral::{PeripheralImplementation, display::ParallelOutput};
 use embedded_hal::{delay::DelayNs, digital::OutputPin};
 use mipidsi::{
     interface::{Interface, InterfaceKind, InterfacePixelFormat},
@@ -46,7 +46,7 @@ impl<BUS> ParallelInterface<BUS> {
     }
 }
 
-impl<BUS: ParallelBus> Interface for ParallelInterface<BUS> {
+impl<BUS: ParallelOutput> Interface for ParallelInterface<BUS> {
     type Word = u8;
     type Error = BUS::Error;
 
@@ -146,7 +146,7 @@ pub struct MipiDbiParallelDisplayImplementation<BUS, M, RD, RST, BL, DELAY>(
 impl<BUS, M, RD, RST, BL, DELAY> PeripheralImplementation
     for MipiDbiParallelDisplayImplementation<BUS, M, RD, RST, BL, DELAY>
 where
-    BUS: ParallelBus + 'static,
+    BUS: ParallelOutput + 'static,
     M: Model + 'static,
     M::ColorFormat: InterfacePixelFormat<u8>,
     RD: OutputPin + 'static,

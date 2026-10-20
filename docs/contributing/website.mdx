@@ -21,8 +21,7 @@ the static site to `website/out/`.
 | --- | --- |
 | `src/content/en.tsx`, `src/content/zh.tsx` | Every word on the site. Change both languages in the same pull request |
 | `src/content/boards.ts` | The boards page's list: one entry per Board in `boards/configs/` |
-| `src/components/` | The pages, built from the design system's components |
-| `src/styles/ds/` | The design system's `tokens.css` and `bundle.css`, copied from the design system unchanged |
+| `src/components/` | The pages, built from the shared components in `ui/` |
 | `src/styles/site.css` | The website's own layout, on the design system's tokens |
 | `public/images/` | The painting, the brand logos, and the board figure |
 | `src/content/repo.ts` | The Platform, Plugin and channel counts the home page quotes, generated from the repository |
@@ -31,8 +30,9 @@ the static site to `website/out/`.
 | `src/lib/install/` | The installer's logic: release archives, flash layout, console lines, releases, and flashing |
 | `public/install/` | The installer's board figures, light and dark |
 
-Links to the docs go through `src/lib/links.ts`, so every page links to the
-docs in the reader's language. Every install button opens the installer.
+Links to the docs and to Live Editor go through `src/lib/links.ts`, so every
+page links to them in the reader's language. Every install button opens the
+installer.
 
 ## The installer
 
@@ -55,10 +55,9 @@ What a release holds is in [Releases](/contributing/releases).
 
 ## Rules
 
-- Draw with the design system's components (`bc-*`) and tokens. A component the
-  website and the docs both need belongs in the design system; copy its new
-  `tokens.css` and `bundle.css` into `src/styles/ds/`, then run
-  `bun tools/web/docs-tokens.ts` so the docs follow.
+- Draw with the design system's components (`bc-*`), tokens and icons. A
+  component another app could use belongs in `ui/`, not in
+  `site.css`.
 - Adding a Board adds its entry to `src/content/boards.ts`. `bun test tools/web`
   fails while the list and `boards/configs/` differ, or a listed Board has no
   docs page.
@@ -77,6 +76,14 @@ Vercel builds the site from this repository:
 - **Root Directory**: `website`
 - **Framework Preset**: Next.js (detected)
 - **Production branch**: `master`
+- **Include files outside the Root Directory in the Build Step**: on, the default
 
 Every push to `master` deploys the site, and every pull request gets a preview
 link.
+
+The site also serves [Live Editor](/apps/live-editor) at `/editor/`.
+`vercel.json` runs `apps/live-editor/web/build-site.sh public/editor` before
+`next build`, which installs Rust and PocketJS on the build machine and builds
+Live Editor into `public/editor/`; that directory is not committed. A local
+`bun run build` leaves Live Editor out. See
+[Live Editor internals](/tools/live-editor#deploy) for what the script does.

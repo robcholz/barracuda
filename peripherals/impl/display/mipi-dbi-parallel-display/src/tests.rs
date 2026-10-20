@@ -4,7 +4,7 @@ extern crate std;
 
 use std::vec::Vec;
 
-use barracuda_board_hal::ParallelBus;
+use barracuda_peripheral::display::ParallelOutput;
 use mipidsi::interface::Interface;
 
 use super::{ParallelInterface, STAGING_BYTES};
@@ -21,8 +21,12 @@ struct Bus {
     writes: Vec<Write>,
 }
 
-impl ParallelBus for &mut Bus {
+impl ParallelOutput for &mut Bus {
     type Error = core::convert::Infallible;
+
+    fn capacity(&self) -> usize {
+        4096
+    }
 
     fn write_command(&mut self, command: u8, data: &[u8]) -> Result<(), Self::Error> {
         self.writes.push(Write::Command(command, data.to_vec()));

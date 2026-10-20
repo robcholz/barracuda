@@ -3,3 +3,6 @@
 /out
 next-env.d.ts
 *.tsbuildinfo
+
+# Live Editor, built into the site by build-site.sh
+/public/editor/

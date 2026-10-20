@@ -255,14 +255,20 @@ must not be advertised until a real bare-metal driver can own that hardware.
 All bundles establish Board identity, the correct Rust compilation target, and
 a native ESP partition layout. The display matrix currently composes
 ILI9342C, ST7789, and GC9A01 SPI LCDs through `mipi-dbi-display`, the
-GDEH0154D67 e-paper panels in CoreInk and AirQ through
-`gdeh0154d67-display`, and the ESP32-P4 MIPI DSI panels of Tab5 and CoreP4X
-through `tab5-dsi-display` and `corep4x-dsi-display`. The Core2, Core2 for AWS,
-Tough, StickC, StickC Plus, Station, CoreS3, CoreS3 SE, and StackChan power,
-reset, and light their ILI9342C, ST7789, or ST7735S LCD through a PMIC instead
-of GPIOs; `m5stack-pmic-display` drives them and privately composes the AXP192,
-AXP2101, and AW9523B chip drivers, so neither the PMIC nor the expander is a
-System-visible peripheral. All of them expose Barracuda's stable
+ESP32-S3-BOX-2's ST7789 on its eight-bit parallel bus through
+`mipi-dbi-parallel-display`, and the ESP32-P4 MIPI DSI panels of Tab5 and
+CoreP4X through `tab5-dsi-display` and `corep4x-dsi-display`. The Core2, Core2
+for AWS, Tough, StickC, StickC Plus, Station, CoreS3, CoreS3 SE, and StackChan
+power, reset, and light their ILI9342C, ST7789, or ST7735S LCD through a PMIC
+instead of GPIOs; `m5stack-pmic-display` drives them and privately composes the
+AXP192, AXP2101, and AW9523B chip drivers, so neither the PMIC nor the expander
+is a System-visible peripheral. M5Stack's e-paper panels are the 1.54-inch
+GDEH0154D67 or GDEW0154M09 in CoreInk and AirQ (`epaper-1in54-display`, which
+identifies the panel at start-up), the IT8951E-driven M5Paper
+(`it8951-display`), the directly driven ED047TC1 in PaperS3 and PaperDIY
+(`ed047tc1-display`, `paper-diy-display`) on the same `parallel-output` binding
+as the BOX-2, and the Paper Mono and PaperColor (`paper-mono-display`,
+`paper-color-display`). All of them expose Barracuda's stable
 `DisplayPeripheral` API. Other fixed peripherals remain absent until their reusable implementation is
 implemented and selected in that Board's YAML. ESP32-C5 and ESP32-H2 products
 are intentionally excluded until those Platforms exist in Barracuda.

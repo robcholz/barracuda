@@ -512,13 +512,7 @@ peripherals:
     assert!(rust.contains("test_media::Implementation"));
 }
 
-#[test]
-fn renders_parallel_display_buses() {
-    let root = tempdir().expect("temporary workspace");
-    add_driver(
-        root.path(),
-        "test-parallel",
-        r#"
+const PARALLEL_MANIFEST: &str = r#"
 id: test-parallel
 api-version: 1
 peripheral: display
@@ -526,14 +520,18 @@ implementation:
   package: test-parallel
   crate: test_parallel
   factory: "::{{crate}}::Implementation<{{binding.bus.type}}>"
-  bindings-expression: "{{binding.bus.value}}"
+  bindings-expression: "::{{crate}}::Bindings::new({{binding.bus.value}})"
   config-expression: "()"
 bindings:
   bus:
     kind: parallel-output
 parameters: {}
-"#,
-    );
+"#;
+
+#[test]
+fn renders_a_parallel_output_with_data_command() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-parallel", PARALLEL_MANIFEST);
     let catalog = load_catalog(root.path()).expect("implementation catalog");
     let board = parse(
         r#"
@@ -568,9 +566,52 @@ peripherals:
 
     assert_valid_rust(&rust);
     assert!(rust.contains("hal::parallel_output_dma_buffer!(4096)"));
-    assert!(rust.contains("hal::parallel_output("));
-    assert!(rust.contains("hal::ParallelOutput"));
+    assert!(rust.contains("hal::parallel_output(bindings.display_bus_controller, bindings.display_bus_dma, bindings.display_bus_wr, bindings.display_bus_dc, bindings.display_bus_cs, bindings.display_bus_d0,"));
+    assert!(rust.contains("hal::ParallelOutputBus"));
+    assert!(rust.contains("pin_binding_type!(GPIO12)"));
     assert!(rust.contains("pin_binding_type!(GPIO13)"));
+}
+
+#[test]
+fn renders_a_data_only_parallel_output_with_its_static_dma_buffer() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-parallel", PARALLEL_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: panel-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    parallel-output:
+      source:
+        peripheral: LCD_CAM
+        dma: DMA_CH1
+        wr: GPIO16
+        chip-select: GPIO13
+        data: [GPIO6, GPIO14, GPIO7, GPIO12, GPIO9, GPIO11, GPIO8, GPIO10]
+        frequency-hz: 16000000
+        dma-buffer-bytes: 256
+  devices:
+    panel:
+      implementation: test-parallel
+      bindings: { bus: source }
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved panel Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated panel HAL");
+
+    assert_valid_rust(&rust);
+    assert!(rust.contains("hal::parallel_output_dma_buffer!(256)"));
+    assert!(rust.contains("hal::parallel_output_data_only(bindings.panel_bus_controller, bindings.panel_bus_dma, bindings.panel_bus_wr, bindings.panel_bus_cs, bindings.panel_bus_d0,"));
+    assert!(!rust.contains("panel_bus_dc"));
+    assert!(rust.contains("hal::ParallelOutputBus"));
+    assert!(rust.contains("controller_binding_type!(DMA_CH1)"));
+    assert!(rust.contains("pin_binding_type!(GPIO10)"));
 }
 
 #[test]

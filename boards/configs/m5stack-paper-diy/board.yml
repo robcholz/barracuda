@@ -1,4 +1,5 @@
 name: m5stack-paper-diy
+profile: screen
 hardware:
   chip: esp32s3
   # ESP32-S3-WROOM-1-N16R8.
@@ -11,3 +12,42 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal:
+        # M5GFX board_M5PaperDIY / M5Unified internal I2C: the M5PM1 (0x6E)
+        # at 100 kHz.
+        peripheral: I2C0
+        scl: GPIO42
+        sda: GPIO41
+        frequency-hz: 100000
+    parallel-output:
+      epd-bus:
+        # M5GFX drives the PaperDIY's ED047TC1 through the same Bus_EPD wiring
+        # as the PaperS3: DB0..DB7, CL as the write strobe, SPH as the chip
+        # select, and no data/command line.
+        peripheral: LCD_CAM
+        # DMA_CH0 stays with the runtime I2S pool.
+        dma: DMA_CH1
+        wr: GPIO16
+        chip-select: GPIO13
+        data: [GPIO6, GPIO14, GPIO7, GPIO12, GPIO9, GPIO11, GPIO8, GPIO10]
+        frequency-hz: 16000000
+        dma-buffer-bytes: 256
+  devices:
+    display:
+      implementation: paper-diy-display
+      bindings:
+        bus: epd-bus
+        spv: GPIO17
+        ckv: GPIO18
+        le: GPIO15
+        oe: GPIO45
+        # M5GFX keeps Bus_EPD's pin_pwr on the PaperDIY; the e-paper supply
+        # itself is the M5PM1's G2.
+        pwr: GPIO46
+        i2c: internal
+      parameters:
+        # M5GFX offset_rotation 3: upright portrait, 540 x 960.
+        mounting: deg270

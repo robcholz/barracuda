@@ -1,4 +1,4 @@
-/* The Barracuda website, on the design system (ds/tokens.css, ds/bundle.css). */
+/* The Barracuda website, on the design system (ui/tokens.css, components.css). */
 body{margin:0;background:#F5F5F7}
 .w{font-family:var(--font-sans);font-size:14px;line-height:20px}
 .w *,.w *::before,.w *::after{box-sizing:border-box}
@@ -7,7 +7,12 @@ body{margin:0;background:#F5F5F7}
    translucent strip, and every section below is its own panel. Panels follow the system: background on the
    background-200 page, a border hairline, radius-lg. */
 .w{background:#F5F5F7}
-.w>.bc-site-header{margin-bottom:8px}
+/* The banner and the nav stay stuck to the top together, so Safari tints its toolbar from the banner as it does on
+   the docs. Anchored sections land below them. */
+.w-chrome{position:sticky;top:0;z-index:20}
+.w>.w-chrome{margin-bottom:8px}
+html{scroll-padding-top:calc(var(--topbar-height) + 8px)}
+html:has(.w-chrome>.bc-banner){scroll-padding-top:calc(var(--topbar-height) + 44px)}
 .w>section,.w>footer{margin:0 8px 8px;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
 .w>section.w-hero{border:0;background:#BCD0E2 url(/images/painting.jpg) center 30%/cover}
 /* Text over the painting is a deep slate drawn from its sky, not the system's near-black: the painting holds no

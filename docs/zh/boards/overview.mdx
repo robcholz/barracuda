@@ -57,7 +57,7 @@ exposed-io:
     expansion-2: { pin: GPIO4 }
 ```
 
-每个可选的外设实现都拥有 `peripherals/impl/<peripheral>/<implementation-id>/peripheral.yml`，它声明该实现的绑定、参数、外设 API 和静态构造模板。`cargo board sync` 按约定发现各个实现。`board.yml` 仍然只是硬件数据，不包含 Cargo 包、crate 路径、Rust 类型或平台 feature 注册。选择过程会先解析并渲染完整的组合，再写入选择状态，然后只启用具体的外设实现包。GPIO、SPI、I2C、摄像头采集、并行显示输出和 I2S 流的构造来自独立选择的平台 HAL。生成的 `SelectedBoardHal` 是单态化的；不会添加运行时注册表或 trait 对象。
+每个可选的外设实现都拥有 `peripherals/impl/<peripheral>/<implementation-id>/peripheral.yml`，它声明该实现的绑定、参数、外设 API 和静态构造模板。`cargo board sync` 按约定发现各个实现。`board.yml` 仍然只是硬件数据，不包含 Cargo 包、crate 路径、Rust 类型或平台 feature 注册。选择过程会先解析并渲染完整的组合，再写入选择状态，然后只启用具体的外设实现包。GPIO、SPI、I2C、摄像头采集、并行输出和 I2S 流的构造来自独立选择的平台 HAL。生成的 `SelectedBoardHal` 是单态化的；不会添加运行时注册表或 trait 对象。
 
 开发板 HAL 不取代 `embedded-hal`。它为暴露的物理资源提供一个共享的运行时所有者。功能提供者以原子方式占用引脚，并在需要时占用一个内部选择的控制器，请所选平台配置它们的复用，然后把具体的 `embedded-hal` 或 `embedded-hal-async` 值返回给使用方。它的构造、GPIO 模式和模拟扩展涵盖了 embedded-hal 1.0 没有定义的操作。
 
@@ -143,4 +143,4 @@ M5Stack CoreP4X 选择 `m5stack-corep4x`；它的 480x480 ST7102 DSI 面板由 `
 
 板上配备的 SC202CS 摄像头仍然不在开发板外设集合中，因为 `esp-hal` 目前没有暴露 ESP32-P4 的 MIPI-CSI/ISP 数据面。在有真正的裸机驱动能够拥有该硬件之前，不得宣传它。
 
-所有开发板包都确立开发板身份、正确的 Rust 编译目标和原生的 ESP 分区布局。显示矩阵目前通过 `mipi-dbi-display` 组合 ILI9342C、ST7789 和 GC9A01 SPI LCD，通过 `gdeh0154d67-display` 组合 CoreInk 和 AirQ 中的 GDEH0154D67 电子纸面板，并通过 `tab5-dsi-display` 和 `corep4x-dsi-display` 组合 Tab5 和 CoreP4X 的 ESP32-P4 MIPI DSI 面板。Core2、Core2 for AWS、Tough、StickC、StickC Plus、Station、CoreS3、CoreS3 SE 和 StackChan 通过 PMIC 而不是 GPIO 为其 ILI9342C、ST7789 或 ST7735S LCD 供电、复位和点亮背光；`m5stack-pmic-display` 驱动这些屏幕，并私有地组合 AXP192、AXP2101 和 AW9523B 芯片驱动，因此 PMIC 和扩展芯片都不是 System 可见的外设。它们都暴露 Barracuda 稳定的 `DisplayPeripheral` API。其他固定外设在其可复用实现完成并在该开发板的 YAML 中被选用之前，仍然缺席。ESP32-C5 和 ESP32-H2 产品被有意排除，直到 Barracuda 中有这些平台为止。
+所有开发板包都确立开发板身份、正确的 Rust 编译目标和原生的 ESP 分区布局。显示矩阵目前通过 `mipi-dbi-display` 组合 ILI9342C、ST7789 和 GC9A01 SPI LCD，通过 `mipi-dbi-parallel-display` 组合 ESP32-S3-BOX-2 八位并行总线上的 ST7789，并通过 `tab5-dsi-display` 和 `corep4x-dsi-display` 组合 Tab5 和 CoreP4X 的 ESP32-P4 MIPI DSI 面板。Core2、Core2 for AWS、Tough、StickC、StickC Plus、Station、CoreS3、CoreS3 SE 和 StackChan 通过 PMIC 而不是 GPIO 为其 ILI9342C、ST7789 或 ST7735S LCD 供电、复位和点亮背光；`m5stack-pmic-display` 驱动这些屏幕，并私有地组合 AXP192、AXP2101 和 AW9523B 芯片驱动，因此 PMIC 和扩展芯片都不是 System 可见的外设。M5Stack 的电子墨水屏包括 CoreInk 和 AirQ 中的 1.54 英寸 GDEH0154D67 或 GDEW0154M09（`epaper-1in54-display`，启动时识别屏幕型号），由 IT8951E 驱动的 M5Paper（`it8951-display`），PaperS3 和 PaperDIY 中直接驱动的 ED047TC1（`ed047tc1-display`、`paper-diy-display`，与 BOX-2 使用同一种 `parallel-output` 绑定），以及 Paper Mono 和 PaperColor（`paper-mono-display`、`paper-color-display`）。它们都暴露 Barracuda 稳定的 `DisplayPeripheral` API。其他固定外设在其可复用实现完成并在该开发板的 YAML 中被选用之前，仍然缺席。ESP32-C5 和 ESP32-H2 产品被有意排除，直到 Barracuda 中有这些平台为止。

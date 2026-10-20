@@ -19,8 +19,7 @@ bun run dev
 | --- | --- |
 | `src/content/en.tsx`、`src/content/zh.tsx` | 网站上的全部文字。两种语言在同一个 pull request 里一起改 |
 | `src/content/boards.ts` | 开发板页的列表：`boards/configs/` 里每块开发板一条 |
-| `src/components/` | 页面，用 design system 的组件搭成 |
-| `src/styles/ds/` | design system 的 `tokens.css` 和 `bundle.css`，原样复制自 design system |
+| `src/components/` | 页面，用 `ui/` 里共用的组件搭成 |
 | `src/styles/site.css` | 官网自己的布局，基于 design system 的 token |
 | `public/images/` | 油画、品牌 logo 和开发板插图 |
 | `src/content/repo.ts` | 首页引用的平台、插件和消息通道数量，由仓库生成 |
@@ -29,7 +28,7 @@ bun run dev
 | `src/lib/install/` | 安装页的逻辑：发布压缩包、闪存布局、串口状态行、版本列表和刷写 |
 | `public/install/` | 安装页的开发板插图，浅色和深色各一套 |
 
-指向文档的链接都通过 `src/lib/links.ts` 生成，每个页面都会链接到读者所用语言的文档。所有安装按钮都打开安装页。
+指向文档和 Live Editor 的链接都通过 `src/lib/links.ts` 生成，每个页面都会以读者所用的语言打开它们。所有安装按钮都打开安装页。
 
 ## 安装页
 
@@ -44,7 +43,7 @@ bun run dev
 
 ## 规则
 
-- 用 design system 的组件（`bc-*`）和 token 来画。官网和文档都要用的组件属于 design system；把它新的 `tokens.css` 和 `bundle.css` 复制到 `src/styles/ds/`，再运行 `bun tools/web/docs-tokens.ts`，让文档跟上。
+- 用 design system 的组件（`bc-*`）、token 和图标来画。其他应用也可能用到的组件属于 `ui/`，不要写进 `site.css`。
 - 新增开发板时，在 `src/content/boards.ts` 里加上它。列表和 `boards/configs/` 不一致，或列出的开发板没有文档页时，`bun test tools/web` 会失败。
 - 首页的数量来自 `src/content/repo.ts`。增删平台或插件后重新生成它；它过期时 `bun test tools/web` 会失败：
 
@@ -59,5 +58,8 @@ Vercel 从这个仓库构建站点：
 - **Root Directory**：`website`
 - **Framework Preset**：Next.js（自动识别）
 - **Production branch**：`master`
+- **Include files outside the Root Directory in the Build Step**：打开（默认）
 
 每次推送到 `master` 都会部署站点，每个 pull request 都会得到一个预览链接。
+
+站点还在 `/editor/` 提供 [Live Editor](/zh/apps/live-editor)。`vercel.json` 在 `next build` 之前运行 `apps/live-editor/web/build-site.sh public/editor`：它在构建机器上安装 Rust 和 PocketJS，并把 Live Editor 构建到 `public/editor/`；这个目录不提交。本地的 `bun run build` 不包含 Live Editor。脚本做了什么，见 [Live Editor 内部实现](/zh/tools/live-editor)。

@@ -312,7 +312,7 @@ peripherals:
       primary: true
       bindings: { ... }
     status-panel:
-      implementation: gdeh0154d67-display
+      implementation: epaper-1in54-display
       bindings: { ... }
 
 exposed-io:
@@ -424,8 +424,10 @@ API to Boards with different controller numbering.
 Reusable peripheral implementations import `embedded-hal`, `embedded-hal-async`, and established
 domain ecosystem traits directly. Barracuda defines a narrow binding only when
 the ecosystem has no suitable contract. Current examples are parallel camera
-frame reception and PCM streaming; they live with the peripheral API
-rather than forming a second general-purpose HAL. The selected build keeps
+frame reception, PCM streaming, and the eight-bit Intel 8080-style parallel
+output that feeds both a MIPI DBI panel controller and a directly driven
+e-paper panel's source driver; they live with the peripheral API rather than
+forming a second general-purpose HAL. The selected build keeps
 concrete storage and dispatch statically allocated; consumers do not look up a
 Platform, Board, or peripheral implementation at runtime, and async HAL traits are
 not converted into `dyn` trait objects.
@@ -1016,7 +1018,7 @@ Platform services -> { IP, entropy, partitions } ------------------------+-> Sys
 
 Platform crates do not own peripheral implementations or Board
 composition. They do own their vendor-HAL token vocabulary and GPIO, I2C, SPI,
-camera, parallel display, I2S, and delay constructors. DMA-backed media
+camera, parallel-output, I2S, and delay constructors. DMA-backed media
 resources are composed statically: `camera-capture`, `parallel-output`, and
 `i2s-stream` declarations size storage with `dma-buffer-bytes`, and the selected Platform allocates it at the concrete Board
 call site. Semantic adaptation remains under `peripherals/impl`; reusable

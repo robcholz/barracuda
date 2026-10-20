@@ -11,7 +11,7 @@ The M5Stack Paper DIY is an ESP32-S3 Board from M5Stack.
 - Chip: ESP32-S3
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32s3-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-paper-diy/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,10 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-paper-diy/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | E-paper display, 4.7-inch 540 x 960 portrait, 16 gray levels (ED047TC1, driven directly over the ESP32-S3 parallel bus; supply from the M5PM1) | [`display`](/plugins/vm-display) |
+
+The panel has no controller: Barracuda runs M5GFX's waveforms on the CPU
+and clocks every frame out line by line, so a refresh holds the display until
+it finishes.

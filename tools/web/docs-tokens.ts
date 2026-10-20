@@ -1,10 +1,7 @@
 import { resolve } from "node:path";
 
-/** The design system's tokens as the website carries them. */
-export const TOKENS_CSS = resolve(
-  import.meta.dir,
-  "../../website/src/styles/ds/tokens.css",
-);
+/** The design system's tokens. */
+export const TOKENS_CSS = resolve(import.meta.dir, "../../ui/tokens.css");
 export const DOCS_CSS = resolve(import.meta.dir, "../../docs/style.css");
 
 const BEGIN = "/* tokens:begin";

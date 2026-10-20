@@ -1,0 +1,44 @@
+id: paper-diy-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-paper-diy-display
+  crate: barracuda_paper_diy_display
+  factory: "::{{crate}}::PaperDiyDisplayImplementation<{{binding.bus.type}}, {{binding.spv.type}}, {{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::PaperDiyBindings::new({{binding.bus.value}}, {{binding.spv.value}}, {{binding.ckv.value}}, {{binding.le.value}}, {{binding.oe.value}}, {{binding.pwr.value}}, {{binding.i2c.value}}, {{hal.delay.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::PaperDiyConfig::new({{parameter.m5pm1-address}}, {{parameter.mounting}})"
+bindings:
+  # The ED047TC1 bus and timing lines, as for `ed047tc1-display`.
+  bus:
+    kind: parallel-output
+  spv:
+    kind: digital-output
+    initial: low
+  ckv:
+    kind: digital-output
+    initial: low
+  le:
+    kind: digital-output
+    initial: low
+  oe:
+    kind: digital-output
+    initial: low
+  pwr:
+    kind: digital-output
+    initial: low
+  # Internal bus with the M5PM1, whose G2 switches the e-paper supply.
+  i2c:
+    kind: i2c-device
+parameters:
+  m5pm1-address:
+    type: integer
+    default: 110
+  mounting:
+    type: enum
+    values: [deg0, deg90, deg180, deg270]
+    rust-values:
+      deg0: "::barracuda_peripheral::display::DisplayOrientation::Deg0"
+      deg90: "::barracuda_peripheral::display::DisplayOrientation::Deg90"
+      deg180: "::barracuda_peripheral::display::DisplayOrientation::Deg180"
+      deg270: "::barracuda_peripheral::display::DisplayOrientation::Deg270"
+    default: deg0

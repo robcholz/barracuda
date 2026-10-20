@@ -12,6 +12,14 @@ export function docs(lang: Lang, path = ""): string {
   return `${DOCS}${prefix}${path ? `/${path}` : prefix ? "" : "/"}`;
 }
 
+/**
+ * Live Editor, which this site's build serves (docs/tools/live-editor.mdx, Deploy), opened in the
+ * reader's language.
+ */
+export function editor(lang: Lang): string {
+  return `/editor/?lang=${lang}`;
+}
+
 /** Where every install button goes: the browser installer. */
 export function install(lang: Lang): string {
   return page(lang, "/install/");

@@ -211,7 +211,7 @@ pub enum BindingKind {
     SpiBus,
     /// One data-only SPI waveform output using a Platform-owned controller.
     SpiOutput,
-    /// One parallel output bus.
+    /// One eight-bit Intel 8080-style parallel output.
     ParallelOutput,
     /// One MIPI DSI host.
     DsiHost,
@@ -2745,9 +2745,9 @@ fn render_binding(
             }
             let mut pins = Vec::new();
             let named = [
-                ("wr", output.wr()),
-                ("dc", output.dc()),
-                ("cs", output.chip_select()),
+                Some(("wr", output.wr())),
+                output.dc().map(|dc| ("dc", dc)),
+                Some(("cs", output.chip_select())),
             ];
             let data = output
                 .data()
@@ -2756,6 +2756,7 @@ fn render_binding(
                 .map(|(index, pin)| (format!("d{index}"), pin.as_str()));
             for (name, pin) in named
                 .into_iter()
+                .flatten()
                 .map(|(name, pin)| (name.to_owned(), pin))
                 .chain(data)
             {
@@ -2786,10 +2787,17 @@ fn render_binding(
                 .map(|field| format!("bindings.{field}"))
                 .collect::<Vec<_>>()
                 .join(", ");
+            // A bus without a data/command line has its own constructor, as
+            // SPI devices without one of their data lines do.
+            let constructor = if output.dc().is_some() {
+                "parallel_output"
+            } else {
+                "parallel_output_data_only"
+            };
             Ok((
-                String::from("::barracuda_platform_selected::__platform::hal::ParallelOutput"),
+                String::from("::barracuda_platform_selected::__platform::hal::ParallelOutputBus"),
                 format!(
-                    "::barracuda_platform_selected::__platform::hal::parallel_output(bindings.{controller}, bindings.{dma}, {pin_values}, {}, ::barracuda_platform_selected::__platform::hal::parallel_output_dma_buffer!({}).map_err(GeneratedBoardError::{variant})?).map_err(GeneratedBoardError::{variant})?",
+                    "::barracuda_platform_selected::__platform::hal::{constructor}(bindings.{controller}, bindings.{dma}, {pin_values}, {}, ::barracuda_platform_selected::__platform::hal::parallel_output_dma_buffer!({}).map_err(GeneratedBoardError::{variant})?).map_err(GeneratedBoardError::{variant})?",
                     output.frequency_hz(),
                     output.dma_buffer_bytes()
                 ),

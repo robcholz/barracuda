@@ -6,7 +6,6 @@ description = "Barracuda display implementation for MIPI DBI panels on an eight-
 license = "AGPL-3.0-only"
 
 [dependencies]
-barracuda-board-hal.workspace = true
 barracuda-mipi-dbi-display.workspace = true
 barracuda-peripheral.workspace = true
 embedded-hal.workspace = true

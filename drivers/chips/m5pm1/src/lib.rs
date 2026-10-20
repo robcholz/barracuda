@@ -3,8 +3,22 @@
 //! The M5PM1 is the microcontroller M5Stack's "Stamp Timer Power2" uses for
 //! charging, power rails, and wake sources. Registers and bits follow
 //! M5Unified's `M5PM1_Class` (src/utility/power/M5PM1_Class.inl, MIT
-//! license). This driver covers the rail and housekeeping registers; the
-//! charger, GPIO, and wake functions are left out until a consumer needs them.
+//! license). This driver covers the rail and housekeeping registers and the
+//! five general-purpose pins G0 to G4 with their PWM function, which M5Stack's
+//! Paper boards use for the e-paper supply and the front light; the charger
+//! and wake functions are left out until a consumer needs them.
+//!
+//! | Register | Address |
+//! | --- | --- |
+//! | `PWR_CFG` (bit 1 DC/DC, bit 2 LDO, bit 3 boost) | `06h` |
+//! | `I2C_CFG` | `09h` |
+//! | `WDT_CNT` | `0Ah` |
+//! | `GPIO_MODE` (1 = output) | `10h` |
+//! | `GPIO_OUT` | `11h` |
+//! | `GPIO_DRV` (1 = open drain) | `13h` |
+//! | `GPIO_FUNC0` (G0..G3) / `GPIO_FUNC1` (G4), two bits per pin | `16h`/`17h` |
+//! | `PWMn` (12-bit, bit 12 enable, bit 13 inverted) | `30h` + 2n |
+//! | `PWM_FREQ` (Hz, shared) | `34h`/`35h` |
 
 #![no_std]
 
@@ -16,6 +30,60 @@ pub const DEFAULT_ADDRESS: u8 = 0x6E;
 const POWER_CONFIG: u8 = 0x06;
 const I2C_CONFIG: u8 = 0x09;
 const WATCHDOG_COUNT: u8 = 0x0A;
+const GPIO_MODE: u8 = 0x10;
+const GPIO_OUTPUT: u8 = 0x11;
+const GPIO_DRIVE: u8 = 0x13;
+const GPIO_FUNCTION_LOW: u8 = 0x16;
+const GPIO_FUNCTION_HIGH: u8 = 0x17;
+const PWM0_DUTY: u8 = 0x30;
+const PWM_FREQUENCY: u8 = 0x34;
+
+/// Number of general-purpose pins, G0 to G4.
+pub const GPIO_COUNT: u8 = 5;
+/// Highest 12-bit PWM duty.
+pub const MAX_DUTY: u16 = 0x0FFF;
+/// PWM enable bit in a duty register's high byte.
+const PWM_ENABLE: u8 = 1 << 4;
+/// PWM output-inversion bit in a duty register's high byte.
+const PWM_INVERTED: u8 = 1 << 5;
+
+/// Function of one general-purpose pin (two bits in `GPIO_FUNC0/1`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PinFunction {
+    /// Plain input or output.
+    Gpio = 0b00,
+    /// The pin's special function; PWM on the PWM-capable pins.
+    Special = 0b11,
+}
+
+/// One of the two PWM channels and the pin it drives (M5Unified
+/// `pwm_channel_t`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PwmChannel {
+    /// Channel 0 on G3.
+    Ch0,
+    /// Channel 1 on G4.
+    Ch1,
+}
+
+impl PwmChannel {
+    const fn duty_register(self) -> u8 {
+        // Each channel's duty is a low/high byte pair after PWM0's.
+        match self {
+            Self::Ch0 => PWM0_DUTY,
+            Self::Ch1 => 0x32,
+        }
+    }
+
+    /// Returns the `G` pin number the channel drives.
+    #[must_use]
+    pub const fn pin(self) -> u8 {
+        match self {
+            Self::Ch0 => 3,
+            Self::Ch1 => 4,
+        }
+    }
+}
 
 /// One power rail switched in the power-configuration register.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +111,10 @@ impl Rail {
 pub enum Error<BusError> {
     /// The address is outside the seven-bit I2C range.
     InvalidAddress,
+    /// The pin is outside G0 to G4.
+    InvalidPin,
+    /// The duty exceeds [`MAX_DUTY`].
+    InvalidDuty,
     /// An I2C register operation failed.
     Bus(BusError),
 }
@@ -102,6 +174,126 @@ where
         )
     }
 
+    /// Selects the function of pin `g` (0 to 4).
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-pin or I2C register error.
+    pub fn set_pin_function(
+        &mut self,
+        g: u8,
+        function: PinFunction,
+    ) -> Result<(), Error<I2C::Error>> {
+        if g >= GPIO_COUNT {
+            return Err(Error::InvalidPin);
+        }
+        let (register, shift) = if g < 4 {
+            (GPIO_FUNCTION_LOW, g.wrapping_mul(2))
+        } else {
+            (GPIO_FUNCTION_HIGH, 0)
+        };
+        let mask = 0b11_u8 << shift;
+        let bits = (function as u8) << shift;
+        self.update(register, |value| (value & !mask) | bits)
+    }
+
+    /// Configures `G<g>` (0 to 4) as a push-pull GPIO output driving
+    /// `initial_high`. The level is latched before the pin starts driving.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-pin or I2C register error.
+    pub fn configure_output(&mut self, g: u8, initial_high: bool) -> Result<(), Error<I2C::Error>> {
+        let mask = pin_mask(g)?;
+        self.set_pin_function(g, PinFunction::Gpio)?;
+        self.update(GPIO_OUTPUT, |value| set_bits(value, mask, initial_high))?;
+        self.update(GPIO_DRIVE, |value| value & !mask)?;
+        self.update(GPIO_MODE, |value| value | mask)
+    }
+
+    /// Drives a previously configured `G<g>` (0 to 4) output.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-pin or I2C register error.
+    pub fn set_output(&mut self, g: u8, high: bool) -> Result<(), Error<I2C::Error>> {
+        let mask = pin_mask(g)?;
+        self.update(GPIO_OUTPUT, |value| set_bits(value, mask, high))
+    }
+
+    /// Hands the channel's pin to its PWM function with a push-pull driver.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn configure_pwm_output(&mut self, channel: PwmChannel) -> Result<(), Error<I2C::Error>> {
+        let g = channel.pin();
+        let mask = pin_mask(g)?;
+        self.update(GPIO_DRIVE, |value| value & !mask)?;
+        self.set_pin_function(g, PinFunction::Special)
+    }
+
+    /// Sets the frequency shared by both PWM channels.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn set_pwm_frequency(&mut self, hertz: u16) -> Result<(), Error<I2C::Error>> {
+        let [low, high] = hertz.to_le_bytes();
+        self.i2c
+            .write(self.address, &[PWM_FREQUENCY, low, high])
+            .map_err(Error::Bus)
+    }
+
+    /// Sets one channel's 12-bit duty, its polarity, and whether it runs.
+    /// The channel's pin must be in its PWM function
+    /// ([`M5pm1::configure_pwm_output`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidDuty`] above [`MAX_DUTY`], or an I2C error.
+    pub fn set_pwm_duty(
+        &mut self,
+        channel: PwmChannel,
+        duty: u16,
+        inverted: bool,
+        enabled: bool,
+    ) -> Result<(), Error<I2C::Error>> {
+        if duty > MAX_DUTY {
+            return Err(Error::InvalidDuty);
+        }
+        let [low, mut high] = duty.to_le_bytes();
+        if enabled {
+            high |= PWM_ENABLE;
+        }
+        if inverted {
+            high |= PWM_INVERTED;
+        }
+        self.i2c
+            .write(self.address, &[channel.duty_register(), low, high])
+            .map_err(Error::Bus)
+    }
+
+    /// Stops one channel by clearing its duty's high byte (enable, polarity,
+    /// and the duty's top bits), as M5GFX's Paper Mono front light does for
+    /// brightness zero.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn stop_pwm(&mut self, channel: PwmChannel) -> Result<(), Error<I2C::Error>> {
+        self.write(channel.duty_register().wrapping_add(1), 0x00)
+    }
+
+    fn update(
+        &mut self,
+        register: u8,
+        update: impl FnOnce(u8) -> u8,
+    ) -> Result<(), Error<I2C::Error>> {
+        let value = self.read(register)?;
+        self.write(register, update(value))
+    }
+
     fn read(&mut self, register: u8) -> Result<u8, Error<I2C::Error>> {
         let mut value = [0];
         self.i2c
@@ -117,8 +309,19 @@ where
     }
 }
 
+fn pin_mask<BusError>(g: u8) -> Result<u8, Error<BusError>> {
+    if g >= GPIO_COUNT {
+        return Err(Error::InvalidPin);
+    }
+    1_u8.checked_shl(u32::from(g)).ok_or(Error::InvalidPin)
+}
+
+const fn set_bits(value: u8, mask: u8, high: bool) -> u8 {
+    if high { value | mask } else { value & !mask }
+}
+
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::arithmetic_side_effects)]
 mod tests {
     extern crate std;
 
@@ -126,10 +329,116 @@ mod tests {
 
     use embedded_hal::i2c::{ErrorType, I2c, Operation};
 
-    use super::{Error, M5pm1, Rail};
+    use super::{Error, M5pm1, PwmChannel, Rail};
+
+    #[test]
+    fn epd_supply_pin_matches_m5gfx_paper_diy_bring_up() {
+        // M5GFX board_M5PaperDIY: 0x16 &= !(0b11 << 4), 0x10 |= 1 << 2,
+        // 0x13 &= !(1 << 2), 0x11 |= 1 << 2.
+        let mut bus = Bus {
+            registers: [0xff; 0x40],
+        };
+        bus.registers[0x10] = 0x00;
+        bus.registers[0x11] = 0x00;
+        {
+            let mut controller = M5pm1::new(&mut bus, 0x6e).expect("controller");
+            controller
+                .configure_output(2, true)
+                .expect("G2 output high");
+        }
+        assert_eq!(bus.registers[0x16], 0xcf);
+        assert_eq!(bus.registers[0x10], 0x04);
+        assert_eq!(bus.registers[0x13], 0xfb);
+        assert_eq!(bus.registers[0x11], 0x04);
+    }
+
+    #[test]
+    fn front_light_pwm_matches_m5gfx_paper_mono() {
+        // M5GFX Light_M5PaperMono: G3 push-pull, 0x16 |= 0xC0, 5 kHz, then a
+        // squared 12-bit duty with the enable bit.
+        let mut bus = Bus {
+            registers: [0x00; 0x40],
+        };
+        bus.registers[0x13] = 0xff;
+        {
+            let mut controller = M5pm1::new(&mut bus, 0x6e).expect("controller");
+            controller
+                .configure_pwm_output(PwmChannel::Ch0)
+                .expect("G3 PWM");
+            controller.set_pwm_frequency(5_000).expect("frequency");
+            controller
+                .set_pwm_duty(PwmChannel::Ch0, 0x0fe0, false, true)
+                .expect("duty");
+        }
+        assert_eq!(bus.registers[0x13], 0xf7);
+        assert_eq!(bus.registers[0x16], 0xc0);
+        assert_eq!(&bus.registers[0x34..0x36], &[0x88, 0x13]);
+        assert_eq!(&bus.registers[0x30..0x32], &[0xe0, 0x1f]);
+        {
+            let mut controller = M5pm1::new(&mut bus, 0x6e).expect("controller");
+            controller.stop_pwm(PwmChannel::Ch0).expect("stop");
+            assert!(matches!(
+                controller.configure_output(5, false),
+                Err(Error::InvalidPin)
+            ));
+            assert!(matches!(
+                controller.set_pwm_duty(PwmChannel::Ch0, 0x1000, false, true),
+                Err(Error::InvalidDuty)
+            ));
+        }
+        assert_eq!(bus.registers[0x31], 0x00);
+    }
+
+    #[test]
+    fn second_channel_is_g4_with_polarity_in_its_high_byte() {
+        // M5Unified M5PM1_Class: PWM1 at 0x32/0x33, G4's function in bits
+        // 1:0 of GPIO_FUNC1 (0x17), enable bit 4 and polarity bit 5.
+        let mut bus = Bus {
+            registers: [0x00; 0x40],
+        };
+        bus.registers[0x13] = 0xff;
+        {
+            let mut controller = M5pm1::new(&mut bus, 0x6e).expect("controller");
+            controller
+                .configure_pwm_output(PwmChannel::Ch1)
+                .expect("G4 PWM");
+            controller
+                .set_pwm_duty(PwmChannel::Ch1, 0x0123, true, true)
+                .expect("duty");
+        }
+        assert_eq!(bus.registers[0x13], 0xef);
+        assert_eq!(bus.registers[0x17], 0x03);
+        assert_eq!(bus.registers[0x16], 0x00);
+        assert_eq!(&bus.registers[0x32..0x34], &[0x23, 0x31]);
+    }
+
+    #[test]
+    fn output_latches_its_level_before_driving() {
+        let mut bus = Bus {
+            registers: [0x00; 0x40],
+        };
+        bus.registers[0x16] = 0xff;
+        bus.registers[0x13] = 0xff;
+        bus.registers[0x11] = 0xff;
+        {
+            let mut controller = M5pm1::new(&mut bus, 0x6e).expect("controller");
+            controller
+                .configure_output(0, false)
+                .expect("G0 output low");
+        }
+        assert_eq!(bus.registers[0x16], 0xfc);
+        assert_eq!(bus.registers[0x11], 0xfe);
+        assert_eq!(bus.registers[0x13], 0xfe);
+        assert_eq!(bus.registers[0x10], 0x01);
+        {
+            let mut controller = M5pm1::new(&mut bus, 0x6e).expect("controller");
+            controller.set_output(0, true).expect("G0 high");
+        }
+        assert_eq!(bus.registers[0x11], 0xff);
+    }
 
     struct Bus {
-        registers: [u8; 0x10],
+        registers: [u8; 0x40],
     }
 
     impl ErrorType for Bus {
@@ -143,8 +452,10 @@ mod tests {
         }
 
         fn write(&mut self, _address: u8, bytes: &[u8]) -> Result<(), Self::Error> {
-            if let [register, value] = bytes {
-                self.registers[usize::from(*register)] = *value;
+            if let [register, values @ ..] = bytes {
+                for (offset, value) in values.iter().enumerate() {
+                    self.registers[usize::from(*register) + offset] = *value;
+                }
             }
             Ok(())
         }
@@ -175,7 +486,7 @@ mod tests {
         // M5GFX's CoreP4X bring-up writes 0x09 = 0, 0x0A = 0 and sets bit 3
         // of 0x06; the charger bit 0 stays as it was.
         let mut bus = Bus {
-            registers: [0xff; 0x10],
+            registers: [0xff; 0x40],
         };
         bus.registers[0x06] = 0x01;
         {
@@ -200,7 +511,7 @@ mod tests {
     #[test]
     fn rejects_an_invalid_address() {
         let mut bus = Bus {
-            registers: [0; 0x10],
+            registers: [0; 0x40],
         };
         assert!(matches!(
             M5pm1::new(&mut bus, 0x80),

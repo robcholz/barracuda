@@ -1,0 +1,21 @@
+[package]
+name = "barracuda-driver-ed2208"
+version = "0.1.0"
+edition = "2024"
+description = "Low-level ED2208 E Ink Spectra 6 e-paper controller Driver with M5GFX's six-color dithering"
+license = "AGPL-3.0-only"
+
+[dependencies]
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

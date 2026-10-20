@@ -424,7 +424,7 @@ impl PeripheralIoDefinition {
         self.camera_captures.get(name)
     }
 
-    /// Finds one parallel display write bus reserved by a peripheral
+    /// Finds one eight-bit parallel output reserved by a peripheral
     /// implementation.
     #[must_use]
     pub fn parallel_output(&self, name: &str) -> Option<&ParallelOutputDefinition> {
@@ -842,14 +842,22 @@ impl SdmmcDeviceDefinition {
     }
 }
 
-/// One Intel 8080-style parallel display write bus and its fixed Board wiring.
+/// One eight-bit Intel 8080-style parallel output and its fixed Board wiring:
+/// a write strobe, an active-low chip select asserted for each burst, eight
+/// data lines, and an optional data/command line.
+///
+/// A MIPI DBI panel controller wires all of them and tells commands from
+/// data by `dc`. A directly driven e-paper source driver takes only data: its
+/// source clock is `wr`, its source start pulse is `chip-select`, and `dc` is
+/// left out.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ParallelOutputDefinition {
     peripheral: String,
     dma: String,
     wr: String,
-    dc: String,
+    #[serde(default)]
+    dc: Option<String>,
     #[serde(rename = "chip-select")]
     chip_select: String,
     data: [String; 8],
@@ -875,12 +883,12 @@ impl ParallelOutputDefinition {
     pub fn wr(&self) -> &str {
         &self.wr
     }
-    /// Returns the data/command pin.
+    /// Returns the data/command pin, when the Board wires one.
     #[must_use]
-    pub fn dc(&self) -> &str {
-        &self.dc
+    pub fn dc(&self) -> Option<&str> {
+        self.dc.as_deref()
     }
-    /// Returns the chip-select pin.
+    /// Returns the active-low chip-select pin, asserted for each burst.
     #[must_use]
     pub fn chip_select(&self) -> &str {
         &self.chip_select
@@ -895,7 +903,8 @@ impl ParallelOutputDefinition {
     pub const fn frequency_hz(&self) -> u32 {
         self.frequency_hz
     }
-    /// Returns the statically allocated DMA transfer-buffer capacity.
+    /// Returns the statically allocated DMA buffer capacity, the longest
+    /// burst clocked out under one chip-select assertion.
     #[must_use]
     pub const fn dma_buffer_bytes(&self) -> usize {
         self.dma_buffer_bytes
@@ -906,10 +915,12 @@ impl ParallelOutputDefinition {
             ("peripheral", self.peripheral.as_str()),
             ("dma", self.dma.as_str()),
             ("wr", self.wr.as_str()),
-            ("dc", self.dc.as_str()),
             ("chip-select", self.chip_select.as_str()),
         ] {
             validate_identifier(name, field, value)?;
+        }
+        if let Some(dc) = &self.dc {
+            validate_identifier(name, "dc", dc)?;
         }
         for pin in &self.data {
             validate_identifier(name, "data", pin)?;

@@ -438,6 +438,69 @@ peripherals:
 }
 
 #[test]
+fn parses_a_parallel_output_with_and_without_data_command() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    parallel-output:
+      epd-bus:
+        peripheral: LCD_CAM
+        dma: DMA_CH1
+        wr: GPIO16
+        chip-select: GPIO13
+        data: [GPIO6, GPIO14, GPIO7, GPIO12, GPIO9, GPIO11, GPIO8, GPIO10]
+        frequency-hz: 16000000
+        dma-buffer-bytes: 256
+"#;
+    let board = parse(yaml).expect("valid parallel output");
+    let output = board
+        .peripheral_io()
+        .parallel_output("epd-bus")
+        .expect("parallel output");
+    assert_eq!(
+        (
+            output.wr(),
+            output.dc(),
+            output.chip_select(),
+            output.data()[7].as_str()
+        ),
+        ("GPIO16", None, "GPIO13", "GPIO10")
+    );
+    assert_eq!(
+        (output.frequency_hz(), output.dma_buffer_bytes()),
+        (16_000_000, 256)
+    );
+    assert!(board.peripheral_io().uses_controller("LCD_CAM"));
+    assert!(board.peripheral_io().uses_dma("DMA_CH1"));
+
+    let with_dc = yaml.replace(
+        "chip-select: GPIO13",
+        "dc: GPIO15\n        chip-select: GPIO13",
+    );
+    let board = parse(&with_dc).expect("parallel output with data/command");
+    assert_eq!(
+        board
+            .peripheral_io()
+            .parallel_output("epd-bus")
+            .and_then(|output| output.dc()),
+        Some("GPIO15")
+    );
+
+    let empty = yaml.replace("dma-buffer-bytes: 256", "dma-buffer-bytes: 0");
+    assert_eq!(
+        parse(&empty).unwrap_err(),
+        ConfigError::ZeroDmaBuffer {
+            resource: String::from("epd-bus"),
+        }
+    );
+}
+
+#[test]
 fn rejects_spi_without_a_data_pin() {
     let yaml = r#"
 name: product-a

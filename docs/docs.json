@@ -85,6 +85,7 @@
               {
                 "group": "03 · Apps",
                 "pages": [
+                  "apps/live-editor",
                   "architecture/device-ui",
                   "plugins/app-manager/app-format",
                   "plugins/app-manager/app-api",
@@ -252,6 +253,7 @@
                   "architecture/codestyle",
                   "architecture/agent-oriented-api-design",
                   "architecture/execution-ownership",
+                  "tools/live-editor",
                   {
                     "group": "Testing and bench",
                     "pages": [
@@ -592,6 +594,7 @@
               {
                 "group": "03 · 应用",
                 "pages": [
+                  "zh/apps/live-editor",
                   "zh/architecture/device-ui",
                   "zh/plugins/app-manager/app-format",
                   "zh/plugins/app-manager/app-api",
@@ -759,6 +762,7 @@
                   "zh/architecture/codestyle",
                   "zh/architecture/agent-oriented-api-design",
                   "zh/architecture/execution-ownership",
+                  "zh/tools/live-editor",
                   {
                     "group": "测试与基准",
                     "pages": [
