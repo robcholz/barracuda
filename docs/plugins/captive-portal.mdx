@@ -140,7 +140,7 @@ packager, cross-plugin Bun bundle, or `include_bytes!` asset embedding is added.
 
 The shell is implemented in `resources/web/src/` using TypeScript, semantic
 HTML, and CSS without a browser runtime framework or external fonts/CDNs. Its
-stylesheet is the [design system](/contributing/design-system)'s `tokens.css`
+stylesheet is `ui/`'s `tokens.css`
 and `components.css`, cut by `resources/web/build.ts` to the rules the shell and
 the Plugin pages use, plus the shell's own layout rules (`src/app.css`). Bun emits `index.html`, `app.js`, and `app.css` into
 `filesystem/resources/`. Build tools and test dependencies are managed at the

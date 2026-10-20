@@ -21,7 +21,7 @@ the static site to `website/out/`.
 | --- | --- |
 | `src/content/en.tsx`, `src/content/zh.tsx` | Every word on the site. Change both languages in the same pull request |
 | `src/content/boards.ts` | The boards page's list: one entry per Board in `boards/configs/` |
-| `src/components/` | The pages, built from the [design system](/contributing/design-system)'s components in `ui/` |
+| `src/components/` | The pages, built from the shared components in `ui/` |
 | `src/styles/site.css` | The website's own layout, on the design system's tokens |
 | `public/images/` | The painting, the brand logos, and the board figure |
 | `src/content/repo.ts` | The Platform, Plugin and channel counts the home page quotes, generated from the repository |
@@ -57,7 +57,7 @@ What a release holds is in [Releases](/contributing/releases).
 
 - Draw with the design system's components (`bc-*`), tokens and icons. A
   component another app could use belongs in `ui/`, not in
-  `site.css`; see [Design system](/contributing/design-system).
+  `site.css`.
 - Adding a Board adds its entry to `src/content/boards.ts`. `bun test tools/web`
   fails while the list and `boards/configs/` differ, or a listed Board has no
   docs page.

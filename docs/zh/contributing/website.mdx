@@ -19,7 +19,7 @@ bun run dev
 | --- | --- |
 | `src/content/en.tsx`、`src/content/zh.tsx` | 网站上的全部文字。两种语言在同一个 pull request 里一起改 |
 | `src/content/boards.ts` | 开发板页的列表：`boards/configs/` 里每块开发板一条 |
-| `src/components/` | 页面，用 `ui/` 里 [design system](/zh/contributing/design-system) 的组件搭成 |
+| `src/components/` | 页面，用 `ui/` 里共用的组件搭成 |
 | `src/styles/site.css` | 官网自己的布局，基于 design system 的 token |
 | `public/images/` | 油画、品牌 logo 和开发板插图 |
 | `src/content/repo.ts` | 首页引用的平台、插件和消息通道数量，由仓库生成 |
@@ -43,7 +43,7 @@ bun run dev
 
 ## 规则
 
-- 用 design system 的组件（`bc-*`）、token 和图标来画。其他应用也可能用到的组件属于 `ui/`，不要写进 `site.css`；参见 [Design system](/zh/contributing/design-system)。
+- 用 design system 的组件（`bc-*`）、token 和图标来画。其他应用也可能用到的组件属于 `ui/`，不要写进 `site.css`。
 - 新增开发板时，在 `src/content/boards.ts` 里加上它。列表和 `boards/configs/` 不一致，或列出的开发板没有文档页时，`bun test tools/web` 会失败。
 - 首页的数量来自 `src/content/repo.ts`。增删平台或插件后重新生成它；它过期时 `bun test tools/web` 会失败：
 

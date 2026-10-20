@@ -95,7 +95,7 @@ ID 遵循 `^[a-z0-9]+(?:-[a-z0-9]+)*$`，最长 64 字节。
 `plugins/captive-portal/filesystem/resources/`；贡献者的输出属于
 `plugins/<id>/filesystem/resources/`。通用的镜像打包步骤仍负责只包含已启用插件的贡献。不添加专门针对网页的打包器、跨插件的 Bun 打包或 `include_bytes!` 资源嵌入。
 
-外壳在 `resources/web/src/` 中用 TypeScript、语义化 HTML 和 CSS 实现，不使用浏览器运行时框架或外部字体/CDN。它的样式表是[设计系统](/zh/contributing/design-system)的 `tokens.css` 和 `components.css`，由 `resources/web/build.ts` 裁剪到外壳和插件页面用到的规则，加上外壳自己的布局规则
+外壳在 `resources/web/src/` 中用 TypeScript、语义化 HTML 和 CSS 实现，不使用浏览器运行时框架或外部字体/CDN。它的样式表是 `ui/` 的 `tokens.css` 和 `components.css`，由 `resources/web/build.ts` 裁剪到外壳和插件页面用到的规则，加上外壳自己的布局规则
 （`src/app.css`）。Bun 把 `index.html`、`app.js` 和 `app.css` 输出到
 `filesystem/resources/`。构建工具和测试依赖在仓库根目录管理，位于打包的资源树之外。挂载的卷中没有骨架时返回 404；资源卷不存在时返回 503。System 目前挂载持久化的 `/data` 卷；提供和挂载
 `/resources` 仍是 System/镜像集成方面的要求，而不是本插件执行的工作。
