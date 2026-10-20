@@ -54,6 +54,20 @@ exposed-io:
 
 `peripherals.io` 声明构造期间使用的私有资源。`peripherals.devices` 选择语义实现。`exposed-io` 是开发板唯一可在运行时配置的 I/O 面。一个芯片原生令牌不能既是私有的外设接线，又是暴露 I/O。
 
+有些面板在主机写入的同一根数据线上应答读取。这样的 `spi-device` 把这根线写作 `mosi`，并设置 `three-wire: true`；它的读取随后从 `mosi` 返回。如果设备只能在比写入更慢的时钟下应答，用 `read-frequency-hz` 指定读取时钟：
+
+~~~yaml
+spi-device:
+  display-spi:
+    peripheral: SPI3
+    sck: GPIO17
+    mosi: GPIO21
+    three-wire: true
+    read-frequency-hz: 8000000
+    chip-select: GPIO15
+    frequency-hz: 40000000
+~~~
+
 每个生成的语义槽位都是可选的。没有实时时钟的开发板就没有 `RealTimeClock` 值；有实时时钟的开发板则有 `Some(concrete_clock)`。缺席不需要伪造硬件，存在也不会暴露辅助芯片。
 
 ## 实现清单
