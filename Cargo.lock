@@ -1947,6 +1947,8 @@ dependencies = [
  "barracuda-board-config",
  "barracuda-board-hal",
  "barracuda-bulk-memory",
+ "barracuda-driver-esp-hosted",
+ "barracuda-driver-pi4ioe5v6408",
  "barracuda-peripheral",
  "barracuda-platform",
  "embassy-embedded-hal 0.6.0",

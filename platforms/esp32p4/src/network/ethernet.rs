@@ -1,8 +1,11 @@
 //! Wired RMII Ethernet: the ESP32-P4 EMAC, the Board's PHY, and the IP stack
 //! over them.
 
+#[cfg(not(barracuda_esp32p4_wifi_coprocessor))]
 use embassy_executor::Spawner;
+#[cfg(not(barracuda_esp32p4_wifi_coprocessor))]
 use embassy_futures::join::join;
+#[cfg(not(barracuda_esp32p4_wifi_coprocessor))]
 use embassy_net::{Runner, Stack, StackResources};
 use esp_hal::{
     delay::Delay,
@@ -25,8 +28,8 @@ const PHY_RESET_MS: u32 = 10;
 /// How long the PHY needs after reset before its management registers answer.
 const PHY_READY_MS: u32 = 10;
 
-/// The wired link's IP stack as embassy-net drives it.
-type EthernetLink = Ethernet<'static, Async, GenericPhy>;
+/// The wired link as embassy-net drives it.
+pub(crate) type EthernetLink = Ethernet<'static, Async, GenericPhy>;
 
 /// Chip resources the Board's Ethernet consumes, built by the generated
 /// network bindings from `hardware.ethernet`.
@@ -41,39 +44,23 @@ pub struct EthernetTokens<Pins> {
     pub(crate) phy_address: u8,
 }
 
+#[cfg(not(barracuda_esp32p4_wifi_coprocessor))]
 #[embassy_executor::task]
 async fn run_ethernet(mut runner: Runner<'static, EthernetLink>, stack: Stack<'static>) -> ! {
-    let (never, ()) = join(runner.run(), report_addresses(stack)).await;
+    let (never, ()) = join(runner.run(), super::report_addresses("Ethernet", stack)).await;
     never
 }
 
-/// Logs each address the wired network gives the device, so a person at the
-/// console knows where to reach it.
-async fn report_addresses(stack: Stack<'static>) {
-    loop {
-        stack.wait_config_up().await;
-        if let Some(config) = stack.config_v4() {
-            log::info!("Ethernet is up at {}", config.address.address());
-        }
-        stack.wait_config_down().await;
-        log::info!("Ethernet link is down");
-    }
-}
-
-/// Resets the PHY, brings the EMAC up over the Board's RMII wiring, and
-/// starts the task that runs a DHCP client over it.
+/// Resets the PHY and brings the EMAC up over the Board's RMII wiring.
 ///
 /// # Errors
 ///
-/// Returns an error when the PHY does not answer on its address or the stack
-/// task cannot be allocated.
-pub(super) fn start<Pins: EthernetPinBundle + 'static>(
-    spawner: Spawner,
+/// Returns an error when the PHY does not answer on its address.
+pub(super) fn link<Pins: EthernetPinBundle + 'static>(
     tokens: EthernetTokens<Pins>,
-) -> Result<Stack<'static>, Esp32P4PlatformError> {
+) -> Result<EthernetLink, Esp32P4PlatformError> {
     static STORAGE: ConstStaticCell<EthernetDmaStorage<RECEIVE_SLOTS, TRANSMIT_SLOTS>> =
         ConstStaticCell::new(EthernetDmaStorage::new());
-    static RESOURCES: StaticCell<StackResources<16>> = StaticCell::new();
     static PHY_RESET: StaticCell<Output<'static>> = StaticCell::new();
 
     if let Some(pin) = tokens.phy_reset {
@@ -86,9 +73,7 @@ pub(super) fn start<Pins: EthernetPinBundle + 'static>(
 
     // The ESP32-P4 has no radio, so its factory base MAC is free for the
     // EMAC. Clear the multicast bit in case a custom eFuse value set it.
-    let mut mac = [0; 6];
-    mac.copy_from_slice(esp_hal::efuse::base_mac_address().as_bytes());
-    mac[0] &= !1;
+    let mac = super::base_mac();
     let ethernet = Ethernet::new(
         tokens.eth,
         STORAGE.take(),
@@ -108,17 +93,29 @@ pub(super) fn start<Pins: EthernetPinBundle + 'static>(
         mac[5],
         tokens.phy_address
     );
+    Ok(ethernet)
+}
 
-    // Without a hardware random source the stack seeds its sequence numbers
-    // from the MAC, which differs per device.
-    let seed = mac
-        .iter()
-        .fold(0_u64, |seed, byte| (seed << 8) | u64::from(*byte));
+/// Brings the wired link up, as a Board's only link, and starts the task
+/// that runs a DHCP client over it.
+///
+/// # Errors
+///
+/// Returns an error when the PHY does not answer on its address or the stack
+/// task cannot be allocated.
+#[cfg(not(barracuda_esp32p4_wifi_coprocessor))]
+pub(super) fn start<Pins: EthernetPinBundle + 'static>(
+    spawner: Spawner,
+    tokens: EthernetTokens<Pins>,
+) -> Result<Stack<'static>, Esp32P4PlatformError> {
+    static RESOURCES: StaticCell<StackResources<16>> = StaticCell::new();
+
+    let ethernet = link(tokens)?;
     let (stack, runner) = embassy_net::new(
         ethernet,
         embassy_net::Config::dhcpv4(Default::default()),
         RESOURCES.init(StackResources::new()),
-        seed,
+        super::stack_seed(),
     );
     spawner.spawn(run_ethernet(runner, stack).map_err(|_error| Esp32P4PlatformError::NetworkTask)?);
     Ok(stack)

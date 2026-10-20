@@ -22,7 +22,7 @@ fn a_wired_board_hands_the_entry_its_emac_and_rmii_pins() {
     for id in ["esp32p4-function-ev-board", "m5stack-unit-poep4"] {
         let board = board(id);
         let ethernet = board.hardware().ethernet().expect("wired Ethernet");
-        let rust = network::ethernet_tokens(ethernet).expect("projected tokens");
+        let rust = network::network_tokens(Some(ethernet), None).expect("projected tokens");
 
         // The entry moves the EMAC, the clock input, the eight RMII and
         // management pins, then the PHY reset out of the chip peripherals.
@@ -58,8 +58,8 @@ fn an_internal_reference_clock_takes_its_output_pin_too() {
     )
     .replacen("      reset: GPIO51\n", "", 1);
     let board = parse(&yaml).expect("internal clock Board");
-    let rust = network::ethernet_tokens(board.hardware().ethernet().expect("Ethernet"))
-        .expect("projected tokens");
+    let rust =
+        network::network_tokens(board.hardware().ethernet(), None).expect("projected tokens");
 
     assert!(rust.contains("InternalRefClock<::esp_hal::peripherals::GPIO23<'static>, ::esp_hal::peripherals::GPIO50<'static>>"));
     assert!(rust.contains("InternalRefClock::new(clock_output, clock_input)"));
@@ -76,12 +76,99 @@ fn a_pin_that_is_not_a_chip_token_is_refused() {
     .expect("repository Board")
     .replacen("mdc: GPIO31", "mdc: GPIO31); evil(", 1);
     let board = parse(&yaml).expect("schema-valid Board");
-    assert!(network::ethernet_tokens(board.hardware().ethernet().expect("Ethernet")).is_err());
+    assert!(network::network_tokens(board.hardware().ethernet(), None).is_err());
 }
 
 #[test]
 fn a_board_without_a_link_hands_the_entry_nothing() {
-    assert!(board("m5stack-tab5").hardware().ethernet().is_none());
-    assert!(network::NO_NETWORK_TOKENS.contains("pub struct NetworkTokens;"));
-    assert!(network::NO_NETWORK_TOKENS.contains("$crate::application::NetworkTokens\n"));
+    let board = board("m5stack-stamp-p4");
+    assert!(board.hardware().ethernet().is_none());
+    assert!(board.hardware().wifi_coprocessor().is_none());
+    let rust = network::network_tokens(None, None).expect("projected tokens");
+    assert_eq!(rust, network::NO_NETWORK_TOKENS);
+    assert!(rust.contains("pub struct NetworkTokens;"));
+    assert!(rust.contains("$crate::application::NetworkTokens\n"));
+    assert!(rust.contains("macro_rules! __barracuda_esp32p4_network_power"));
+}
+
+#[test]
+fn a_tab5_hands_the_entry_its_sd_host_co_processor_pins_and_power_switch() {
+    for id in ["m5stack-tab5", "m5stack-tab5x"] {
+        let board = board(id);
+        assert!(board.hardware().ethernet().is_none());
+        let rust = network::network_tokens(None, board.hardware().wifi_coprocessor())
+            .expect("projected tokens");
+
+        // SDHOST, then CLK, CMD, D0-D3, and the C6's enable.
+        assert!(rust.contains(
+            "$crate::application::NetworkTokens::new($peripherals.SDHOST, $peripherals.GPIO12, \
+             $peripherals.GPIO13, $peripherals.GPIO11, $peripherals.GPIO10, $peripherals.GPIO9, \
+             $peripherals.GPIO8, $peripherals.GPIO15)"
+        ));
+        assert!(rust.contains("frequency_hz: 40000000,"));
+        assert!(rust.contains("chip: 0x0d,"));
+        assert!(!rust.contains("ethernet:"));
+        // WLAN_PWR_EN: output 0 of the PI4IOE5V6408 at 44h on I2C0.
+        assert!(rust.contains(
+            "$crate::application::power_coprocessor_through_pi4ioe5v6408(\n            \
+             $peripherals.I2C0.reborrow(),\n            $peripherals.GPIO32.reborrow(),\n            \
+             $peripherals.GPIO31.reborrow(),\n            68,\n            0,\n        );"
+        ));
+    }
+}
+
+#[test]
+fn a_board_with_both_links_hands_the_entry_both() {
+    let board = board("esp32p4-function-ev-board");
+    let rust = network::network_tokens(
+        board.hardware().ethernet(),
+        board.hardware().wifi_coprocessor(),
+    )
+    .expect("projected tokens");
+
+    assert!(rust.contains(
+        "$peripherals.GPIO52, $peripherals.GPIO51, $peripherals.SDHOST, $peripherals.GPIO18, \
+         $peripherals.GPIO19, $peripherals.GPIO14, $peripherals.GPIO15, $peripherals.GPIO16, \
+         $peripherals.GPIO17, $peripherals.GPIO54)"
+    ));
+    assert!(rust
+        .contains("pub(crate) ethernet: crate::network::ethernet::EthernetTokens<BoardRmiiPins>,"));
+    assert!(
+        rust.contains("pub(crate) coprocessor: crate::network::coprocessor::CoprocessorTokens,")
+    );
+    // The C6 on this Board is always powered.
+    assert!(rust.contains("    ($peripherals:ident) => {};"));
+}
+
+#[test]
+fn co_processor_wiring_the_platform_cannot_drive_is_refused() {
+    let tab5 = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../boards/configs/m5stack-tab5/board.yml"),
+    )
+    .expect("repository Board");
+    let project = |from: &str, to: &str| {
+        assert!(tab5.contains(from), "{from}");
+        let board = parse(&tab5.replacen(from, to, 1)).expect("schema-valid Board");
+        network::network_tokens(None, board.hardware().wifi_coprocessor())
+    };
+    // Slot 0 is the SD card's fixed IO_MUX slot.
+    assert!(project("slot: 1", "slot: 0").is_err());
+    // ESP-Hosted has no ESP32-H2 co-processor.
+    assert!(project("chip: esp32c6", "chip: esp32h2").is_err());
+    assert!(project("reset: GPIO15", "reset: GPIO15); evil(").is_err());
+
+    let ev = board("esp32p4-function-ev-board");
+    let shared = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../boards/configs/esp32p4-function-ev-board/board.yml"),
+    )
+    .expect("repository Board")
+    .replacen("reset: GPIO54", "reset: GPIO51", 1);
+    let shared = parse(&shared).expect("schema-valid Board");
+    assert!(network::network_tokens(
+        shared.hardware().ethernet(),
+        shared.hardware().wifi_coprocessor()
+    )
+    .is_err());
+    assert!(ev.hardware().wifi_coprocessor().is_some());
 }

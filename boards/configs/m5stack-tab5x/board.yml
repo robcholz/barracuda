@@ -9,6 +9,31 @@ hardware:
     technology: psram
     interface: hex
     size-bytes: 33554432
+  # ESP32-C6-MINI-1U with M5Stack's factory ESP-Hosted-MCU slave firmware on
+  # SDIO2: CLK GPIO12, CMD GPIO13, D0-D3 GPIO11/10/9/8, and the C6's enable
+  # on GPIO15 (M5Stack's Tab5 pin map, M5Unified `hostedSetPins`, and
+  # Espressif's m5stack_tab5 `CONFIG_ESP_HOSTED_PRIV_SDIO_*` defaults).
+  # 40 MHz is ESP-Hosted's SDIO clock for an ESP32-P4 host. WLAN_PWR_EN is
+  # output P0 of the PI4IOE5V6408 at 44h on the internal bus (M5GFX's Tab5
+  # start-up drives it high; m5stack_tab5 `gpio_expander_2`).
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO12
+      cmd: GPIO13
+      d0: GPIO11
+      d1: GPIO10
+      d2: GPIO9
+      d3: GPIO8
+      frequency-hz: 40000000
+    reset: GPIO15
+    power-enable:
+      expander: pi4ioe5v6408
+      i2c: { peripheral: I2C0, scl: GPIO32, sda: GPIO31 }
+      address: 68
+      pin: 0
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:

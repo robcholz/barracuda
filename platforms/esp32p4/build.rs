@@ -1,5 +1,6 @@
 //! Validates the selected Board against its native ESP-IDF partition table
-//! and projects the network links it declares.
+//! and projects the network links it declares: wired Ethernet and a Wi-Fi
+//! co-processor.
 
 use std::{env, error::Error, fs, path::PathBuf};
 
@@ -31,17 +32,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
 
     println!("cargo:rustc-check-cfg=cfg(barracuda_esp32p4_ethernet)");
-    let ethernet = board
-        .hardware()
-        .ethernet()
-        .filter(|_| board.hardware().chip() == "esp32p4");
-    let network = match ethernet {
-        Some(ethernet) => {
-            println!("cargo:rustc-cfg=barracuda_esp32p4_ethernet");
-            network::ethernet_tokens(ethernet)?
-        }
-        None => String::from(network::NO_NETWORK_TOKENS),
-    };
+    println!("cargo:rustc-check-cfg=cfg(barracuda_esp32p4_wifi_coprocessor)");
+    let active = board.hardware().chip() == "esp32p4";
+    let ethernet = board.hardware().ethernet().filter(|_| active);
+    let coprocessor = board.hardware().wifi_coprocessor().filter(|_| active);
+    if ethernet.is_some() {
+        println!("cargo:rustc-cfg=barracuda_esp32p4_ethernet");
+    }
+    if coprocessor.is_some() {
+        println!("cargo:rustc-cfg=barracuda_esp32p4_wifi_coprocessor");
+    }
+    let network = network::network_tokens(ethernet, coprocessor)?;
     fs::write(output.join("esp32p4_network.rs"), network)?;
 
     // This Platform is an unconditional dependency of the selected-Platform

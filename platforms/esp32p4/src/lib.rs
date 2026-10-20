@@ -165,6 +165,7 @@ mod internal_flash {
     /// Board/HAL bindings consumed by [`Esp32P4Platform`].
     pub struct Esp32P4PlatformBindings {
         ip_stack: Stack<'static>,
+        wifi: crate::network::Wifi,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32P4Flash<'static>>>,
     }
 
@@ -178,15 +179,19 @@ mod internal_flash {
         /// # Errors
         ///
         /// Returns an error when the selected Board does not use ESP32-P4.
-        pub fn from_initialized_services(
+        pub(crate) fn from_initialized_services(
             board: &Board,
-            ip_stack: Stack<'static>,
+            links: crate::network::NetworkLinks,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32P4Flash<'static>>>,
         ) -> Result<Self, Esp32P4PlatformError> {
             if board.hardware().chip() != "esp32p4" {
                 return Err(Esp32P4PlatformError::IncompatibleChip);
             }
-            Ok(Self { ip_stack, flash })
+            Ok(Self {
+                ip_stack: links.ip_stack,
+                wifi: links.wifi,
+                flash,
+            })
         }
     }
 
@@ -223,8 +228,11 @@ mod internal_flash {
 
     impl Platform for Esp32P4Platform {
         type Bindings = Esp32P4PlatformBindings;
-        type Wifi = barracuda_platform::UnavailableWifiDevice;
-        /// esp-hal has no true random number generator for the ESP32-P4.
+        /// The Board's Wi-Fi co-processor, or no radio.
+        type Wifi = crate::network::Wifi;
+        /// esp-hal 1.2 gives the ESP32-P4 no true random number generator:
+        /// its `Rng` is pseudo-random unless an entropy source runs, and it
+        /// has no `TrngSource` for the chip (`rng.trng_supported` is false).
         type Entropy = barracuda_platform::UnavailableEntropy;
         type Partitions = Esp32P4Partitions;
         type Error = Esp32P4PlatformError;
@@ -241,11 +249,16 @@ mod internal_flash {
         ) -> PlatformInitResult<Self> {
             log::info!("initializing ESP32-P4 Platform partitions");
             let partitions = partitions(bindings.flash)?;
+            #[allow(unused_mut)]
+            let mut wifi = bindings.wifi;
+            // A co-processor's capabilities are known once it runs, before
+            // the Wi-Fi Plugin reads them.
+            #[cfg(barracuda_esp32p4_wifi_coprocessor)]
+            wifi.start().await;
             log::info!("initialized ESP32-P4 Platform");
-            let ip_stack = bindings.ip_stack;
             Ok(PlatformResources {
-                ip_stack,
-                wifi: barracuda_platform::UnavailableWifiDevice::new(ip_stack),
+                ip_stack: bindings.ip_stack,
+                wifi,
                 entropy: barracuda_platform::UnavailableEntropy,
                 partitions,
             })
@@ -264,6 +277,9 @@ mod internal_flash {
         /// The Board's Ethernet PHY did not come up.
         #[cfg(barracuda_esp32p4_ethernet)]
         Ethernet(esp_hal::ethernet::Error),
+        /// The SD host rejected the Wi-Fi co-processor's slot.
+        #[cfg(barracuda_esp32p4_wifi_coprocessor)]
+        Sdio(esp_hal::sdmmc::ConfigError),
     }
 
     impl From<PartitionsInsertError> for Esp32P4PlatformError {
@@ -280,12 +296,17 @@ mod internal_flash {
                 Self::NetworkTask => formatter.write_str("failed to allocate ESP32 network task"),
                 #[cfg(barracuda_esp32p4_ethernet)]
                 Self::Ethernet(error) => write!(formatter, "Ethernet PHY failed: {error:?}"),
+                #[cfg(barracuda_esp32p4_wifi_coprocessor)]
+                Self::Sdio(error) => write!(formatter, "Wi-Fi co-processor SDIO slot: {error}"),
             }
         }
     }
 
     impl core::error::Error for Esp32P4PlatformError {}
 }
+
+#[cfg(all(target_arch = "riscv32", barracuda_esp32p4_wifi_coprocessor))]
+pub use network::coprocessor::{CoprocessorFailure, CoprocessorWifi, CoprocessorWifiError};
 
 #[cfg(target_arch = "riscv32")]
 pub use internal_flash::{
