@@ -104,4 +104,4 @@ M5Stack Tab5 选择 `m5stack-tab5`。它的开发板 HAL 使用纯 `esp-hal` 绑
 
 板上配备的 SC202CS 摄像头仍然不在开发板外设集合中，因为 `esp-hal` 目前没有暴露 ESP32-P4 的 MIPI-CSI/ISP 数据面。在有真正的裸机驱动能够拥有该硬件之前，不得宣传它。
 
-所有开发板包都确立开发板身份、正确的 Rust 编译目标和原生的 ESP 分区布局。显示矩阵目前通过 `mipi-dbi-display` 组合 ILI9342C、ST7789 和 GC9A01 SPI LCD，并通过 `gdeh0154d67-display` 组合 CoreInk 和 AirQ 中的 GDEH0154D67 电子纸面板。这两个系列都暴露 Barracuda 稳定的 `DisplayPeripheral` API。其他固定外设在其可复用实现完成并在该开发板的 YAML 中被选用之前，仍然缺席。ESP32-C5 和 ESP32-H2 产品被有意排除，直到 Barracuda 中有这些平台为止。
+所有开发板包都确立开发板身份、正确的 Rust 编译目标和原生的 ESP 分区布局。显示矩阵目前通过 `mipi-dbi-display` 组合 ILI9342C、ST7789 和 GC9A01 SPI LCD，并通过 `gdeh0154d67-display` 组合 CoreInk 和 AirQ 中的 GDEH0154D67 电子纸面板。Core2、Core2 for AWS、Tough、StickC、StickC Plus、Station、CoreS3、CoreS3 SE 和 StackChan 通过 PMIC 而不是 GPIO 为其 ILI9342C、ST7789 或 ST7735S LCD 供电、复位和点亮背光；`m5stack-pmic-display` 驱动这些屏幕，并私有地组合 AXP192、AXP2101 和 AW9523B 芯片驱动，因此 PMIC 和扩展芯片都不是 System 可见的外设。它们都暴露 Barracuda 稳定的 `DisplayPeripheral` API。其他固定外设在其可复用实现完成并在该开发板的 YAML 中被选用之前，仍然缺席。ESP32-C5 和 ESP32-H2 产品被有意排除，直到 Barracuda 中有这些平台为止。

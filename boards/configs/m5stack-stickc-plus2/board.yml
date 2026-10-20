@@ -1,7 +1,33 @@
 name: m5stack-stickc-plus2
+profile: screen
 hardware:
   chip: esp32
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    spi-device:
+      display-spi:
+        # M5GFX StickC Plus2: SPI2_HOST at 40 MHz, write-only.
+        peripheral: SPI2
+        sck: GPIO13
+        mosi: GPIO15
+        chip-select: GPIO5
+        frequency-hz: 40000000
+  devices:
+    display:
+      # ST7789 135x240 at offset (52, 40) in its 240x320 frame; backlight on
+      # GPIO27, active high. GPIO4 is the battery power latch (M5GFX and
+      # M5Unified POWER_HOLD_PIN): the Board switches itself off on battery
+      # unless it stays high.
+      implementation: mipi-dbi-display
+      bindings: { backlight: GPIO27, dc: GPIO14, power-hold: GPIO4, reset: GPIO12, spi: display-spi }
+      parameters:
+        controller: st7789
+        width: 135
+        height: 240
+        offset-x: 52
+        offset-y: 40
+        invert-colors: true

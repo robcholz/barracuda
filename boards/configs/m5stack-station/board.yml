@@ -1,7 +1,41 @@
 name: m5stack-station
+profile: screen
 hardware:
   chip: esp32
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5GFX/M5Unified: the internal bus (I2C_NUM_1, 400 kHz) of the AXP192 at 34h.
+        peripheral: I2C1
+        scl: GPIO22
+        sda: GPIO21
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        # M5GFX Station: SPI2_HOST at 40 MHz, write-only.
+        peripheral: SPI2
+        sck: GPIO18
+        mosi: GPIO23
+        chip-select: GPIO5
+        frequency-hz: 40000000
+  devices:
+    display:
+      # ST7789V2 135x240 at offset (52, 40) in its 240x320 frame, shown
+      # landscape (M5GFX rotation 1). AXP192 LDO2 powers it and LDO3 lights it;
+      # GPIO15 resets it.
+      implementation: m5stack-pmic-display
+      bindings: { dc: GPIO19, i2c: internal-i2c, reset: GPIO15, spi: display-spi }
+      parameters:
+        power-layout: station
+        controller: st7789
+        width: 135
+        height: 240
+        offset-x: 52
+        offset-y: 40
+        invert-colors: true
+        orientation: deg90
