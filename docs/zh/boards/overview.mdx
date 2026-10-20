@@ -108,6 +108,33 @@ hardware:
       rxd1: GPIO30
 ```
 
+`wifi-coprocessor` 记录芯片通过 SDIO 访问的另一颗芯片上的 Wi-Fi 射频，例如 ESP32-P4 开发板，因为这颗芯片自身没有射频。它记录协处理器的 `chip`、它出厂运行的 `firmware`（`esp-hosted-mcu`，即 Espressif 的 ESP-Hosted-MCU）、SD 主机的 `slot` 及其时钟、命令和四根数据引脚与总线时钟、接到协处理器低电平有效复位脚的引脚，以及开发板通过 I/O 扩展芯片切换协处理器电源时，该扩展芯片的型号、I2C 总线、地址和输出。和 `ethernet` 一样，它是原理图上的事实。没有 `wifi-coprocessor-sdio` 绑定的平台会在 `cargo board select` 时拒绝这块开发板，它的引脚也不会同时作为外设绑定或可用引脚。
+
+```yaml
+hardware:
+  chip: esp32p4
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO12
+      cmd: GPIO13
+      d0: GPIO11
+      d1: GPIO10
+      d2: GPIO9
+      d3: GPIO8
+      frequency-hz: 40000000
+    reset: GPIO15
+    power-enable:          # 可选
+      expander: pi4ioe5v6408
+      i2c: { peripheral: I2C0, scl: GPIO32, sda: GPIO31 }
+      address: 68          # 44h
+      pin: 0
+```
+
+开发板可以同时声明 `ethernet` 和 `wifi-coprocessor`，但仍然只有一个 IP 协议栈：网线连通时平台在以太网上运行它，否则在 Wi-Fi 站点上运行，并在切换时重新运行 DHCP。
+
 先选择一次具体的开发板，然后使用普通的构建命令：
 
 ```bash
@@ -139,7 +166,7 @@ Barracuda 为基于工作区当前已实现的每个 ESP 芯片系列的 M5Stack
 
 M5Stack Tab5 选择 `m5stack-tab5`。它的开发板 HAL 使用纯 `esp-hal` 绑定实例化区分硬件版本的 DSI 显示屏和触摸、BMI270 惯性测量、INA226 电源监测和 RX8130CE 实时时钟。显示和触摸实现私下组合 PI4IOE5V6408 芯片驱动，用于各自的复位线；这个扩展芯片不是 System 可见的外设。ES8388/ES7210 音频通路和 microSD 卡槽要等 ESP32-P4 平台有了 I2S 和 SD/MMC 绑定才能声明。`m5stack-tab5x` 身份保持独立，不得仅凭烧录工具报告的 ESP32-P4 芯片版本就替换它。
 
-M5Stack CoreP4X 选择 `m5stack-corep4x`；它的 480x480 ST7102 DSI 面板由 `corep4x-dsi-display` 组合，该实现私下驱动 M5IOE1 扩展芯片控制面板的电源、复位和背光，并驱动 M5PM1 打开 5 V 升压。ESP32-P4-Function-EV-Board 和 M5Stack Unit PoE-P4 在 `hardware.ethernet` 下声明各自的 IP101GRI 以太网 PHY。
+M5Stack CoreP4X 选择 `m5stack-corep4x`；它的 480x480 ST7102 DSI 面板由 `corep4x-dsi-display` 组合，该实现私下驱动 M5IOE1 扩展芯片控制面板的电源、复位和背光，并驱动 M5PM1 打开 5 V 升压。ESP32-P4-Function-EV-Board 和 M5Stack Unit PoE-P4 在 `hardware.ethernet` 下声明各自的 IP101GRI 以太网 PHY。Tab5、Tab5X 和 ESP32-P4-Function-EV-Board 在 `hardware.wifi-coprocessor` 下声明各自的 ESP32-C6 Wi-Fi 协处理器。
 
 板上配备的 SC202CS 摄像头仍然不在开发板外设集合中，因为 `esp-hal` 目前没有暴露 ESP32-P4 的 MIPI-CSI/ISP 数据面。在有真正的裸机驱动能够拥有该硬件之前，不得宣传它。
 

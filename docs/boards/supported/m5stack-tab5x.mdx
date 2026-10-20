@@ -38,8 +38,35 @@ The display and touch implementations reset their controllers through the
 PI4IOE5V6408 expander at `43h`; the expander is not a device of its own.
 The ES8388/ES7210 audio path, the microSD slot, and the SC202CS camera are not
 declared yet: the ESP32-P4 Platform has no I2S, SDMMC, or MIPI CSI binding.
-The Wi-Fi radio is an ESP32-C6 co-processor the Platform does not drive yet,
-so the IP stack has no link on this Board.
+
+## Wi-Fi
+
+The Wi-Fi radio is the ESP32-C6 co-processor, declared under
+`hardware.wifi-coprocessor` in `board.yml`. It runs M5Stack's factory
+ESP-Hosted-MCU firmware. The [ESP32-P4 Platform](/platforms/esp32) does the
+following at startup:
+
+1. Switches on the co-processor's power through output 0 of the PI4IOE5V6408
+   expander at `44h`.
+2. Resets the co-processor.
+3. Talks to it over SDIO at 40 MHz.
+
+The IP stack runs on its Wi-Fi station, and the
+[Wi-Fi Plugin](/plugins/wifi) opens its setup hotspot on the co-processor.
+When a network gives the device an address, the console logs
+`Wi-Fi is up at <address>`.
+
+| Signal | Pin |
+| --- | --- |
+| SDIO CLK / CMD | `GPIO12` / `GPIO13` |
+| SDIO D0 / D1 / D2 / D3 | `GPIO11` / `GPIO10` / `GPIO9` / `GPIO8` |
+| Co-processor reset | `GPIO15` |
+| Co-processor power | PI4IOE5V6408 `44h` output 0 on `I2C0` (`GPIO32` / `GPIO31`) |
+
+The factory firmware version has not been checked against this host on a
+device. If the co-processor does not start, or runs firmware the Platform
+cannot drive, the console logs `Wi-Fi is unavailable: <reason>`. The Board
+then has no network link and no setup hotspot.
 
 ## Plugin settings
 

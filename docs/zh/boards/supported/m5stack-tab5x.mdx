@@ -34,7 +34,26 @@ cargo image deploy
 | `inertial-measurement` | 运动传感器（BMI270） | [`motion`](/zh/plugins/vm-imu) |
 | `power-monitor` | 电源监测（INA226） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 
-显示屏和触摸实现通过 `43h` 处的 PI4IOE5V6408 扩展芯片复位各自的控制器；该扩展芯片本身不是设备。ES8388/ES7210 音频通路、microSD 卡槽和 SC202CS 摄像头尚未声明：ESP32-P4 平台还没有 I2S、SDMMC 或 MIPI CSI 绑定。Wi-Fi 由 ESP32-C6 协处理器提供，平台尚未驱动它，所以这块开发板上的 IP 协议栈没有链路。
+显示屏和触摸实现通过 `43h` 处的 PI4IOE5V6408 扩展芯片复位各自的控制器；该扩展芯片本身不是设备。ES8388/ES7210 音频通路、microSD 卡槽和 SC202CS 摄像头尚未声明：ESP32-P4 平台还没有 I2S、SDMMC 或 MIPI CSI 绑定。
+
+## Wi-Fi
+
+Wi-Fi 射频是 ESP32-C6 协处理器，在 `board.yml` 的 `hardware.wifi-coprocessor` 下声明，运行 M5Stack 出厂的 ESP-Hosted-MCU 固件。[ESP32-P4 平台](/zh/platforms/esp32)在启动时：
+
+1. 通过 `44h` 处 PI4IOE5V6408 扩展芯片的输出 0 打开协处理器的电源。
+2. 复位协处理器。
+3. 以 40 MHz 的 SDIO 与它通信。
+
+IP 协议栈运行在它的 Wi-Fi 站点上，[Wi-Fi 插件](/zh/plugins/wifi)在协处理器上打开配置热点。网络给设备分配地址后，控制台会输出 `Wi-Fi is up at <地址>`。
+
+| 信号 | 引脚 |
+| --- | --- |
+| SDIO CLK / CMD | `GPIO12` / `GPIO13` |
+| SDIO D0 / D1 / D2 / D3 | `GPIO11` / `GPIO10` / `GPIO9` / `GPIO8` |
+| 协处理器复位 | `GPIO15` |
+| 协处理器电源 | `I2C0`（`GPIO32` / `GPIO31`）上 `44h` 处 PI4IOE5V6408 的输出 0 |
+
+出厂固件的版本还没有在实机上与本主机核对过。协处理器没有启动，或运行平台无法驱动的固件时，控制台会输出 `Wi-Fi is unavailable: <原因>`，这时开发板没有网络链路，也没有配置热点。
 
 ## 插件设置
 

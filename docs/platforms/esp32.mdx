@@ -100,11 +100,33 @@ streams, and capacitive touch.
 ESP32-P4 adds the MIPI DSI host (`dsi-host`): the link, the RGB565
 framebuffer in PSRAM that VDMA scans out, DCS commands before and during
 video, and the backlight pin, which it switches on and off because esp-hal has
-no LEDC driver for the ESP32-P4. The chip has no radio, so the IP stack runs
-over the wired Ethernet a Board declares under `hardware.ethernet`: the EMAC
-on the Board's RMII pins, an IEEE 802.3 PHY at its address, and a DHCP client.
-On a Board without it the stack has no link, and the Wi-Fi Plugin opens no
+no LEDC driver for the ESP32-P4.
+
+The ESP32-P4 has no radio. Its IP stack runs on whichever network link the
+Board declares:
+
+- **Wired Ethernet**, under `hardware.ethernet`: the EMAC on the Board's RMII
+  pins, an IEEE 802.3 PHY at its address, and a DHCP client.
+- **A Wi-Fi co-processor**, under `hardware.wifi-coprocessor`: an ESP32-C6
+  running ESP-Hosted-MCU on SD host slot 1. At startup the Platform switches
+  on the co-processor's power if the Board declares a switch, resets it, and
+  checks the INIT event its firmware sends. It logs the firmware version when
+  the firmware reports one. A wrong chip, firmware without Wi-Fi, another RPC
+  version, or an SDIO transfer layout this host does not implement stops the
+  co-processor and logs `Wi-Fi is unavailable: <reason>`. The Wi-Fi Plugin
+  then sees no Wi-Fi capabilities. Otherwise the co-processor provides a
+  station, scanning, and the setup access point.
+- **Both**: one IP stack that uses Ethernet while its link is up and the
+  Wi-Fi station otherwise. It restarts DHCP on every switch. The setup access
+  point is a second stack on the co-processor.
+
+On a Board with neither, the stack has no link and the Wi-Fi Plugin opens no
 setup hotspot.
+
+The ESP32-P4 Platform provides no entropy source. esp-hal 1.2 gives the chip
+no true random number generator: its `Rng` is pseudo-random unless an RF or
+ADC entropy source runs, and the chip has no `TrngSource`. The IP stacks seed
+their sequence numbers from the chip's base MAC.
 
 ## Boards
 

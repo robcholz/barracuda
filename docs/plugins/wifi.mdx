@@ -105,6 +105,13 @@ join, so the system UI's hotspot tile shows the error. The portal's Wi-Fi
 entry reads "Not connected", which is true of Wi-Fi; a wired Board's address
 is logged by its Platform when the link comes up.
 
+An ESP32-P4 Board with a Wi-Fi co-processor, such as the M5Stack Tab5,
+reports the co-processor's capabilities. They are a station, scanning, and an
+access point once the co-processor has started Wi-Fi. They are none when the
+co-processor did not start or runs firmware the Platform cannot drive. In that
+case the Plugin behaves as on a Board without a radio. See
+[ESP32](/platforms/esp32).
+
 The selected ESP32-S3 implementation owns the ESP radio controller and both
 Embassy network interfaces. Platform-owned runners drive station DHCP and the
 AP stack. The Wi-Fi Plugin owns policy, provisioning services and the AP

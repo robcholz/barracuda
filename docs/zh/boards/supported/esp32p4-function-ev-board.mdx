@@ -29,7 +29,7 @@ cargo image deploy
 
 ## 有线以太网
 
-这块开发板的 IP101GRI PHY 在 `board.yml` 的 `hardware.ethernet` 下声明，[ESP32-P4 平台](/zh/platforms/esp32)在它上面运行 IP 协议栈：EMAC 接在 RMII 引脚上，PHY 地址为 1，复位接 `GPIO51`，并运行 DHCP 客户端。插上网线后，控制台会输出 `Ethernet is up at <地址>`；门户在该地址的 8787 端口上应答。
+这块开发板的 IP101GRI PHY 在 `board.yml` 的 `hardware.ethernet` 下声明，[ESP32-P4 平台](/zh/platforms/esp32)在它上面运行 IP 协议栈：EMAC 接在 RMII 引脚上，PHY 地址为 1，复位接 `GPIO51`，并运行 DHCP 客户端。插上网线后，控制台会输出 `network is up at <地址>`；门户在该地址的 8787 端口上应答。
 
 `GPIO35`（BOOT 按键）是 RMII TXD1：以太网运行时该按键不可用。
 
@@ -41,7 +41,21 @@ cargo image deploy
 | CRS_DV / RXD0 / RXD1 | `GPIO28` / `GPIO29` / `GPIO30` |
 | PHY 复位 | `GPIO51` |
 
-平台目前还没有驱动这块开发板上的 Wi-Fi 射频，所以 [Wi-Fi 插件](/zh/plugins/wifi)不会在它上面打开配置热点。
+## Wi-Fi
+
+Wi-Fi 射频是 ESP32-C6-MINI-1 协处理器，在 `board.yml` 的 `hardware.wifi-coprocessor` 下声明，运行 Espressif 出厂的 ESP-Hosted-MCU 固件，据 ESP-Hosted 文档其版本为 0.0.6。平台复位协处理器，并以 40 MHz 的 SDIO 与它通信。[Wi-Fi 插件](/zh/plugins/wifi)在协处理器上打开配置热点。
+
+| 信号 | 引脚 |
+| --- | --- |
+| SDIO CLK / CMD | `GPIO18` / `GPIO19` |
+| SDIO D0 / D1 / D2 / D3 | `GPIO14` / `GPIO15` / `GPIO16` / `GPIO17` |
+| 协处理器复位 | `GPIO54` |
+
+协处理器没有启动，或运行平台无法驱动的固件时，控制台会输出 `Wi-Fi is unavailable: <原因>`，开发板只保留以太网。
+
+## 两条链路，一个 IP 协议栈
+
+这块开发板在两条链路上只有一个 IP 协议栈。网线链路连通时协议栈使用以太网，否则使用 Wi-Fi 站点。每次切换都会让它重新运行 DHCP，所以设备的地址随链路改变。每拿到一个地址，控制台都会输出 `network is up at <地址>`。
 
 ## 插件设置
 

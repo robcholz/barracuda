@@ -761,6 +761,13 @@ Platform owns the execution work required to keep its IP service alive. System
 and Plugins receive the usable IP stack handle, not its runner or
 platform-specific setup objects.
 
+A Board with more than one link, such as wired Ethernet and a Wi-Fi station,
+still yields one `ip_stack`. The Platform runs it over
+`barracuda_platform::FailoverNetworkDriver`, which carries traffic on the
+preferred link while it is up and on the fallback link otherwise. Each switch
+reports the link down once, so the stack restarts DHCP. Choosing a link is
+Platform work; System and Plugins never see which link carries the stack.
+
 ## Logging and tracing
 
 Ordinary diagnostics across Platform, HAL, System, Core, and Plugins use the

@@ -36,7 +36,7 @@ The Board's IP101GRI PHY is declared under `hardware.ethernet` in its
 `board.yml`, and the [ESP32-P4 Platform](/platforms/esp32) runs the IP stack
 over it: the EMAC on the RMII pads, the PHY at address 1 with its reset on
 `GPIO51`, and a DHCP client. Plug in a cable and the console logs
-`Ethernet is up at <address>`; the portal answers there on port 8787.
+`network is up at <address>`; the portal answers there on port 8787.
 
 `GPIO35`, the BOOT button, is RMII TXD1: the button is unusable while Ethernet runs.
 
@@ -48,8 +48,31 @@ over it: the EMAC on the RMII pads, the PHY at address 1 with its reset on
 | CRS_DV / RXD0 / RXD1 | `GPIO28` / `GPIO29` / `GPIO30` |
 | PHY reset | `GPIO51` |
 
-The Board has no Wi-Fi radio the Platform drives yet, so the
-[Wi-Fi Plugin](/plugins/wifi) opens no setup hotspot on it.
+## Wi-Fi
+
+The Wi-Fi radio is the ESP32-C6-MINI-1 co-processor, declared under
+`hardware.wifi-coprocessor` in `board.yml`. It runs Espressif's factory
+ESP-Hosted-MCU firmware, version 0.0.6 according to the ESP-Hosted
+documentation. The Platform resets the co-processor and talks to it over SDIO
+at 40 MHz. The [Wi-Fi Plugin](/plugins/wifi) opens its setup hotspot on the
+co-processor.
+
+| Signal | Pin |
+| --- | --- |
+| SDIO CLK / CMD | `GPIO18` / `GPIO19` |
+| SDIO D0 / D1 / D2 / D3 | `GPIO14` / `GPIO15` / `GPIO16` / `GPIO17` |
+| Co-processor reset | `GPIO54` |
+
+If the co-processor does not start, or runs firmware the Platform cannot
+drive, the console logs `Wi-Fi is unavailable: <reason>` and the Board keeps
+Ethernet alone.
+
+## Two links, one IP stack
+
+The Board has one IP stack over both links. The stack uses Ethernet while the
+cable's link is up and the Wi-Fi station otherwise. Each switch makes it
+restart DHCP, so the device's address changes with the link. The console logs
+`network is up at <address>` for each address it gets.
 
 ## Plugin settings
 
