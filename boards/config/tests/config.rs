@@ -3,7 +3,8 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use barracuda_board_config::{
-    parse, render_rust, ConfigError, PeripheralParameter, PluginSetting, RmiiReferenceClockSource,
+    parse, render_rust, ConfigError, CoprocessorPowerExpander, PeripheralParameter, PluginSetting,
+    RmiiReferenceClockSource, WifiCoprocessorFirmware,
 };
 use std::path::Path;
 
@@ -690,6 +691,118 @@ fn rejects_inconsistent_wired_ethernet() {
             .map(|ethernet| ethernet.rmii().reference_clock().output()),
         Some(Some("GPIO23"))
     );
+}
+
+const COPROCESSOR_BOARD: &str = r#"
+name: coprocessor-board
+hardware:
+  chip: esp32p4
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO12
+      cmd: GPIO13
+      d0: GPIO11
+      d1: GPIO10
+      d2: GPIO9
+      d3: GPIO8
+      frequency-hz: 40000000
+    reset: GPIO15
+    power-enable:
+      expander: pi4ioe5v6408
+      i2c: { peripheral: I2C0, scl: GPIO32, sda: GPIO31 }
+      address: 68
+      pin: 0
+native-layout:
+  artifact: partitions.csv
+"#;
+
+#[test]
+fn parses_a_wifi_coprocessor_as_hardware_facts() {
+    let board = parse(COPROCESSOR_BOARD).expect("valid co-processor");
+    let coprocessor = board.hardware().wifi_coprocessor().expect("co-processor");
+    assert_eq!(coprocessor.chip(), "esp32c6");
+    assert_eq!(
+        coprocessor.firmware(),
+        WifiCoprocessorFirmware::EspHostedMcu
+    );
+    let sdio = coprocessor.sdio();
+    assert_eq!((sdio.slot(), sdio.frequency_hz()), (1, 40_000_000));
+    assert_eq!((sdio.clk(), sdio.cmd()), ("GPIO12", "GPIO13"));
+    assert_eq!(sdio.data(), ["GPIO11", "GPIO10", "GPIO9", "GPIO8"]);
+    assert_eq!(coprocessor.reset(), "GPIO15");
+    let power = coprocessor.power_enable().expect("power switch");
+    assert_eq!(power.expander(), CoprocessorPowerExpander::Pi4ioe5v6408);
+    assert_eq!(
+        (power.i2c_peripheral(), power.scl(), power.sda()),
+        ("I2C0", "GPIO32", "GPIO31")
+    );
+    assert_eq!((power.address(), power.pin()), (0x44, 0));
+    assert_eq!(coprocessor.pins().count(), 9);
+
+    let unpowered = parse(&COPROCESSOR_BOARD.replacen(
+        "    power-enable:\n      expander: pi4ioe5v6408\n      i2c: { peripheral: I2C0, scl: GPIO32, sda: GPIO31 }\n      address: 68\n      pin: 0\n",
+        "",
+        1,
+    ))
+    .expect("co-processor without a power switch");
+    let coprocessor = unpowered
+        .hardware()
+        .wifi_coprocessor()
+        .expect("co-processor");
+    assert!(coprocessor.power_enable().is_none());
+    assert_eq!(coprocessor.pins().count(), 7);
+    assert!(parse(VALID)
+        .expect("Board without a co-processor")
+        .hardware()
+        .wifi_coprocessor()
+        .is_none());
+}
+
+#[test]
+fn rejects_inconsistent_wifi_coprocessors() {
+    let invalid = |from: &str, to: &str| {
+        assert!(COPROCESSOR_BOARD.contains(from), "{from}");
+        parse(&COPROCESSOR_BOARD.replacen(from, to, 1)).unwrap_err()
+    };
+
+    assert!(matches!(
+        invalid("slot: 1", "slot: 2"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert!(matches!(
+        invalid("frequency-hz: 40000000", "frequency-hz: 80000000"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert!(matches!(
+        invalid("d3: GPIO8", "d3: GPIO9"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert!(matches!(
+        invalid("reset: GPIO15", "reset: GPIO12"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert!(matches!(
+        invalid("address: 68", "address: 200"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert!(matches!(
+        invalid("pin: 0", "pin: 8"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert_eq!(
+        invalid("clk: GPIO12", "clk: ''"),
+        ConfigError::EmptyHardwareIdentifier {
+            resource: String::from("wifi-coprocessor"),
+            field: "sdio clk",
+        }
+    );
+    assert!(matches!(
+        invalid("firmware: esp-hosted-mcu", "firmware: esp-at"),
+        ConfigError::Yaml(_)
+    ));
 }
 
 const DSI_BOARD: &str = r#"

@@ -990,6 +990,43 @@ native-layout:
 }
 
 #[test]
+fn only_a_platform_with_sdio_coprocessors_accepts_a_wifi_coprocessor_board() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog = load_catalog(&root).expect("repository Implementation catalog");
+    let board = |chip: &str| {
+        format!(
+            r#"
+name: coprocessor-board
+hardware:
+  chip: {chip}
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio: {{ slot: 1, clk: GPIO12, cmd: GPIO13, d0: GPIO11, d1: GPIO10, d2: GPIO9, d3: GPIO8, frequency-hz: 40000000 }}
+    reset: GPIO15
+native-layout:
+  artifact: partitions.csv
+"#
+        )
+    };
+    let validate = |chip: &str| {
+        let board = parse(&board(chip)).expect("co-processor Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("resolved co-processor Board");
+        let platform = resolve_board_platform(&root, chip, None).expect("repository Platform");
+        validate_platform_hal(&board, &resolved, &platform)
+    };
+
+    assert_eq!(validate("esp32p4"), Ok(()));
+    assert!(matches!(
+        validate("esp32s3"),
+        Err(GenerateError::UnsupportedHalBinding {
+            binding: HalBinding::WifiCoprocessorSdio,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn every_repository_peripheral_composition_resolves_and_generates() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

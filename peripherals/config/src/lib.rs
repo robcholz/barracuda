@@ -1076,6 +1076,14 @@ pub fn validate_platform_hal(
             binding: HalBinding::EthernetRmii,
         });
     }
+    if board.hardware().wifi_coprocessor().is_some()
+        && !platform.hal().supports(HalBinding::WifiCoprocessorSdio)
+    {
+        return Err(GenerateError::UnsupportedHalBinding {
+            platform: platform.name().to_owned(),
+            binding: HalBinding::WifiCoprocessorSdio,
+        });
+    }
     if board.exposed_io().pins().next().is_some() && !platform.hal().supports(HalBinding::Gpio) {
         return Err(GenerateError::UnsupportedHalBinding {
             platform: platform.name().to_owned(),
