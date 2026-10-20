@@ -873,6 +873,7 @@ dependencies = [
  "barracuda-gdeh0154d67-display",
  "barracuda-ina226-power-monitor",
  "barracuda-indicator-led",
+ "barracuda-m5stack-pmic-display",
  "barracuda-mipi-dbi-display",
  "barracuda-ov2640-camera",
  "barracuda-ov3660-camera",
@@ -1077,6 +1078,27 @@ dependencies = [
 
 [[package]]
 name = "barracuda-driver-apa102"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-aw9523"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-axp192"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-axp2101"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
@@ -1650,6 +1672,22 @@ dependencies = [
  "getset",
  "libm",
  "portable-atomic",
+]
+
+[[package]]
+name = "barracuda-m5stack-pmic-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-aw9523",
+ "barracuda-driver-axp192",
+ "barracuda-driver-axp2101",
+ "barracuda-mipi-dbi-display",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
+ "mipidsi",
+ "static_cell",
 ]
 
 [[package]]
@@ -2260,6 +2298,7 @@ dependencies = [
  "barracuda-sound-plugin",
  "barracuda-spi-plugin",
  "barracuda-system-fonts-plugin",
+ "barracuda-system-wifi-plugin",
  "barracuda-time-plugin",
  "barracuda-uart-plugin",
  "barracuda-vm-agent-plugin",

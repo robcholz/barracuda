@@ -1,0 +1,75 @@
+id: m5stack-pmic-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-m5stack-pmic-display
+  crate: barracuda_m5stack_pmic_display
+  factory: "::{{crate}}::M5StackPmicDisplayImplementation<{{binding.spi.type}}, {{binding.dc.type}}, {{parameter.controller}}, {{binding.reset.type}}, {{binding.i2c.type}}, {{hal.delay.type}}, 512>"
+  bindings-expression: "::{{crate}}::PmicDisplayBindings::new({{binding.spi.value}}, {{binding.dc.value}}, {{binding.reset.value}}, {{binding.i2c.value}}, {{hal.delay.value}}, ::{{crate}}::take_transfer_buffer())"
+  config-expression: "::{{crate}}::PmicDisplayConfig::new({{parameter.power-layout}}, ::{{crate}}::MipiDbiDriverConfig::new({{parameter.controller}}, ::{{crate}}::MipiDbiDisplayConfig::new(::{{crate}}::Size::new({{parameter.width}}, {{parameter.height}}), ::barracuda_peripheral::display::PixelFormat::Rgb565, {{parameter.orientation}}).with_offset({{parameter.offset-x}}, {{parameter.offset-y}}).with_color_order({{parameter.color-order}}).with_inverted_colors({{parameter.invert-colors}})))"
+bindings:
+  spi:
+    kind: spi-device
+  dc:
+    kind: digital-output
+    initial: low
+  # Only the StickC and Station layouts wire the LCD reset to a GPIO; the
+  # others reset the panel through the PMIC or the AW9523B expander.
+  reset:
+    kind: digital-output
+    required: false
+    initial: high
+  # Internal bus of the AXP192/AXP2101 at 34h and, on the CoreS3, the
+  # AW9523B at 58h.
+  i2c:
+    kind: i2c-device
+parameters:
+  power-layout:
+    type: enum
+    values: [core2, tough, stickc, station, cores3]
+    rust-values:
+      core2: "::barracuda_m5stack_pmic_display::PowerLayout::Core2"
+      tough: "::barracuda_m5stack_pmic_display::PowerLayout::Tough"
+      stickc: "::barracuda_m5stack_pmic_display::PowerLayout::StickC"
+      station: "::barracuda_m5stack_pmic_display::PowerLayout::Station"
+      cores3: "::barracuda_m5stack_pmic_display::PowerLayout::CoreS3"
+    required: true
+  controller:
+    type: enum
+    values: [ili9342c, st7789, st7735s]
+    rust-values:
+      ili9342c: "::barracuda_m5stack_pmic_display::ILI9342CRgb565"
+      st7789: "::barracuda_m5stack_pmic_display::ST7789"
+      st7735s: "::barracuda_m5stack_pmic_display::ST7735s"
+    required: true
+  width:
+    type: integer
+    required: true
+  height:
+    type: integer
+    required: true
+  offset-x:
+    type: integer
+    default: 0
+  offset-y:
+    type: integer
+    default: 0
+  color-order:
+    type: enum
+    values: [rgb, bgr]
+    rust-values:
+      rgb: "::barracuda_m5stack_pmic_display::MipiDbiColorOrder::Rgb"
+      bgr: "::barracuda_m5stack_pmic_display::MipiDbiColorOrder::Bgr"
+    default: bgr
+  invert-colors:
+    type: boolean
+    default: false
+  orientation:
+    type: enum
+    values: [deg0, deg90, deg180, deg270]
+    rust-values:
+      deg0: "::barracuda_peripheral::display::DisplayOrientation::Deg0"
+      deg90: "::barracuda_peripheral::display::DisplayOrientation::Deg90"
+      deg180: "::barracuda_peripheral::display::DisplayOrientation::Deg180"
+      deg270: "::barracuda_peripheral::display::DisplayOrientation::Deg270"
+    default: deg0

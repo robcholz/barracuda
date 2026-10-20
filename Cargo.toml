@@ -64,6 +64,7 @@ barracuda-es8389-audio-codec = { path = "peripherals/impl/audio-codec/es8389-aud
 barracuda-gdeh0154d67-display = { path = "peripherals/impl/display/gdeh0154d67-display" }
 barracuda-ina226-power-monitor = { path = "peripherals/impl/power-monitor/ina226-power-monitor" }
 barracuda-indicator-led = { path = "peripherals/impl/indicator/indicator-led" }
+barracuda-m5stack-pmic-display = { path = "peripherals/impl/display/m5stack-pmic-display" }
 barracuda-mipi-dbi-display = { path = "peripherals/impl/display/mipi-dbi-display" }
 barracuda-ov2640-camera = { path = "peripherals/impl/camera/ov2640-camera" }
 barracuda-ov3660-camera = { path = "peripherals/impl/camera/ov3660-camera" }
@@ -144,6 +145,9 @@ barracuda-json-writer = { path = "shared/json-writer" }
 barracuda-peripheral = { path = "peripherals/api" }
 barracuda-peripheral-config = { path = "peripherals/config" }
 barracuda-driver-apa102 = { path = "drivers/chips/apa102" }
+barracuda-driver-aw9523 = { path = "drivers/chips/aw9523" }
+barracuda-driver-axp192 = { path = "drivers/chips/axp192" }
+barracuda-driver-axp2101 = { path = "drivers/chips/axp2101" }
 barracuda-driver-bq27220 = { path = "drivers/chips/bq27220" }
 barracuda-driver-cst816t = { path = "drivers/chips/cst816t" }
 barracuda-driver-es8311 = { path = "drivers/chips/es8311" }
