@@ -10,6 +10,13 @@ pub mod hal;
 mod network;
 
 #[cfg(target_arch = "riscv32")]
+mod entropy;
+
+/// ESP-IDF's SAR ADC entropy source settings and sampling loop.
+#[doc(hidden)]
+pub mod entropy_source;
+
+#[cfg(target_arch = "riscv32")]
 #[doc(hidden)]
 pub mod application;
 
@@ -166,6 +173,7 @@ mod internal_flash {
     pub struct Esp32P4PlatformBindings {
         ip_stack: Stack<'static>,
         wifi: crate::network::Wifi,
+        entropy: crate::Esp32P4Entropy,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32P4Flash<'static>>>,
     }
 
@@ -182,6 +190,7 @@ mod internal_flash {
         pub(crate) fn from_initialized_services(
             board: &Board,
             links: crate::network::NetworkLinks,
+            entropy: crate::Esp32P4Entropy,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32P4Flash<'static>>>,
         ) -> Result<Self, Esp32P4PlatformError> {
             if board.hardware().chip() != "esp32p4" {
@@ -190,6 +199,7 @@ mod internal_flash {
             Ok(Self {
                 ip_stack: links.ip_stack,
                 wifi: links.wifi,
+                entropy,
                 flash,
             })
         }
@@ -230,10 +240,8 @@ mod internal_flash {
         type Bindings = Esp32P4PlatformBindings;
         /// The Board's Wi-Fi co-processor, or no radio.
         type Wifi = crate::network::Wifi;
-        /// esp-hal 1.2 gives the ESP32-P4 no true random number generator:
-        /// its `Rng` is pseudo-random unless an entropy source runs, and it
-        /// has no `TrngSource` for the chip (`rng.trng_supported` is false).
-        type Entropy = barracuda_platform::UnavailableEntropy;
+        /// The random number generator while SAR ADC1 noise feeds it.
+        type Entropy = crate::Esp32P4Entropy;
         type Partitions = Esp32P4Partitions;
         type Error = Esp32P4PlatformError;
 
@@ -259,7 +267,7 @@ mod internal_flash {
             Ok(PlatformResources {
                 ip_stack: bindings.ip_stack,
                 wifi,
-                entropy: barracuda_platform::UnavailableEntropy,
+                entropy: bindings.entropy,
                 partitions,
             })
         }
@@ -307,6 +315,9 @@ mod internal_flash {
 
 #[cfg(all(target_arch = "riscv32", barracuda_esp32p4_wifi_coprocessor))]
 pub use network::coprocessor::{CoprocessorFailure, CoprocessorWifi, CoprocessorWifiError};
+
+#[cfg(target_arch = "riscv32")]
+pub use entropy::Esp32P4Entropy;
 
 #[cfg(target_arch = "riscv32")]
 pub use internal_flash::{

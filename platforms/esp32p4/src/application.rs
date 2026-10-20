@@ -109,6 +109,7 @@ pub fn bindings(
     spawner: embassy_executor::Spawner,
     flash_token: esp_hal::peripherals::FLASH<'static>,
     network: NetworkTokens,
+    entropy: crate::Esp32P4Entropy,
 ) -> Result<Esp32P4PlatformBindings, Esp32P4PlatformError> {
     static FLASH: StaticCell<
         Mutex<CriticalSectionRawMutex, RefCell<crate::Esp32P4Flash<'static>>>,
@@ -118,7 +119,7 @@ pub fn bindings(
     // declares, or stays down without one.
     let links = crate::network::start(spawner, network)?;
     let flash = FLASH.init(Mutex::new(RefCell::new(crate::flash(flash_token))));
-    Esp32P4PlatformBindings::from_initialized_services(board, links, flash)
+    Esp32P4PlatformBindings::from_initialized_services(board, links, entropy, flash)
 }
 
 /// Generates the ESP32-P4 async entry around one selected application.
@@ -147,9 +148,10 @@ macro_rules! platform_entry {
             $board_bindings_value: $board_bindings_type,
             flash: $crate::application::__hal::peripherals::FLASH<'static>,
             network: $crate::application::NetworkTokens,
+            entropy: $crate::Esp32P4Entropy,
         ) {
             let $platform_bindings =
-                match $crate::application::bindings($board, $spawner, flash, network) {
+                match $crate::application::bindings($board, $spawner, flash, network, entropy) {
                     Ok(bindings) => bindings,
                     Err(error) => {
                         $crate::application::__println::println!(
@@ -176,6 +178,9 @@ macro_rules! platform_entry {
             #[allow(unused_mut)]
             let mut peripherals =
                 $crate::application::__hal::init($crate::application::__hal::Config::default());
+            // The noise source starts before any task runs and keeps SAR
+            // ADC1 from here on.
+            let entropy = $crate::Esp32P4Entropy::start(peripherals.RNG, peripherals.ADC1);
             // A Board whose Wi-Fi co-processor sits behind a power switch on
             // a shared bus turns it on before the Board takes the bus.
             $crate::__barracuda_esp32p4_network_power!(peripherals);
@@ -192,9 +197,13 @@ macro_rules! platform_entry {
             EXECUTOR
                 .init($crate::application::__rtos::embassy::Executor::new())
                 .run(move |spawner| {
-                    if let Ok(task) =
-                        __barracuda_application_task(spawner, $board_bindings_value, flash, network)
-                    {
+                    if let Ok(task) = __barracuda_application_task(
+                        spawner,
+                        $board_bindings_value,
+                        flash,
+                        network,
+                        entropy,
+                    ) {
                         spawner.spawn(task);
                     } else {
                         $crate::application::__println::println!(
