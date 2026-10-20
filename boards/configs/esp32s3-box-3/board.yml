@@ -1,4 +1,5 @@
 name: esp32s3-box-3
+profile: screen
 hardware:
   chip: esp32s3
   # ESP32-S3-WROOM-1-N16R16V.
@@ -11,3 +12,33 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    spi-device:
+      display-spi:
+        # Espressif esp_boards `esp32_s3_box_3` board_peripherals.yaml
+        # (`spi_display`) and board_devices.yaml (`display_lcd`).
+        peripheral: SPI2
+        sck: GPIO7
+        mosi: GPIO6
+        chip-select: GPIO5
+        frequency-hz: 20000000
+  devices:
+    display:
+      implementation: mipi-dbi-display
+      bindings:
+        backlight: GPIO47
+        dc: GPIO4
+        # Shared with the touch controller's reset; the board drives it active-high.
+        reset: GPIO48
+        spi: display-spi
+      parameters:
+        # Espressif drives the ILI9342C through esp_lcd_ili9341 with the
+        # ILI9342C extended-command key (C8h FF 93 42), MADCTL BGR, and both
+        # axes mirrored.
+        controller: ili9342c
+        width: 320
+        height: 240
+        color-order: bgr
+        orientation: deg180
+        reset-active-high: true

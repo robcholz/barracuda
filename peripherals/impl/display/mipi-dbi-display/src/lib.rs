@@ -58,11 +58,12 @@ pub struct MipiDbiDisplayConfig {
     color_order: MipiDbiColorOrder,
     invert_colors: bool,
     backlight_active_high: Option<bool>,
+    reset_active_high: bool,
 }
 
 impl MipiDbiDisplayConfig {
     /// Creates direct-panel configuration with zero framebuffer offset, BGR
-    /// component order, and normal colors.
+    /// component order, normal colors, and an active-low reset.
     #[must_use]
     pub const fn new(
         size: Size,
@@ -77,7 +78,16 @@ impl MipiDbiDisplayConfig {
             color_order: MipiDbiColorOrder::Bgr,
             invert_colors: false,
             backlight_active_high: None,
+            reset_active_high: false,
         }
+    }
+
+    /// Declares the reset output's active polarity. Most panels reset while
+    /// the line is low; some Boards invert it with a transistor.
+    #[must_use]
+    pub const fn with_reset_active_high(mut self, active_high: bool) -> Self {
+        self.reset_active_high = active_high;
+        self
     }
 
     /// Sets the controller framebuffer offset.
@@ -134,7 +144,7 @@ impl MipiDbiDisplayConfig {
 pub struct MipiDbiDisplayBindings<SPI, DC, RST, BL, DELAY, const BUFFER_SIZE: usize> {
     spi: SPI,
     dc: DC,
-    reset: RST,
+    reset: Option<RST>,
     backlight: Option<BL>,
     delay: DELAY,
     buffer: &'static mut [u8; BUFFER_SIZE],
@@ -144,12 +154,13 @@ impl<SPI, DC, RST, BL, DELAY, const BUFFER_SIZE: usize>
     MipiDbiDisplayBindings<SPI, DC, RST, BL, DELAY, BUFFER_SIZE>
 {
     /// Combines a selected SPI device, control outputs, delay source, and
-    /// statically owned transfer buffer.
+    /// statically owned transfer buffer. A panel without a reset line is
+    /// reset with the DCS software-reset command instead.
     #[must_use]
     pub const fn new(
         spi: SPI,
         dc: DC,
-        reset: RST,
+        reset: Option<RST>,
         backlight: Option<BL>,
         delay: DELAY,
         buffer: &'static mut [u8; BUFFER_SIZE],
@@ -207,7 +218,7 @@ where
     M::ColorFormat: InterfacePixelFormat<DI::Word>,
     RST: OutputPin,
 {
-    inner: MipidsiDisplay<DI, M, RST>,
+    inner: MipidsiDisplay<DI, M, PanelReset<RST>>,
     delay: DELAY,
     backlight: Option<BL>,
     config: MipiDbiDisplayConfig,
@@ -255,7 +266,15 @@ where
             mut delay,
             buffer,
         } = bindings;
-        let interface = SpiInterface::new(spi, dc, buffer);
+        let mut interface = SpiInterface::new(spi, dc, buffer);
+        if reset.is_none() {
+            // Without a reset line, the DCS software reset returns the
+            // controller to its power-on defaults before the model init.
+            interface
+                .send_command(SOFTWARE_RESET, &[])
+                .map_err(|error| MipiDbiInitError::Display(InitError::Interface(error)))?;
+            delay.delay_ms(SOFTWARE_RESET_SETTLE_MS);
+        }
         let size = config.display.size;
         let color_order = match config.display.color_order {
             MipiDbiColorOrder::Rgb => ColorOrder::Rgb,
@@ -267,7 +286,7 @@ where
             ColorInversion::Normal
         };
         let inner = Builder::new(config.model, interface)
-            .reset_pin(reset)
+            .reset_pin(PanelReset::new(reset, config.display.reset_active_high))
             .display_size(size.width as u16, size.height as u16)
             .display_offset(config.display.offset.0, config.display.offset.1)
             .color_order(color_order)
@@ -416,6 +435,53 @@ where
             return Ok(());
         };
         set_backlight(backlight, active_high, on).map_err(MipiDbiControlError::Backlight)
+    }
+}
+
+/// DCS software reset command.
+const SOFTWARE_RESET: u8 = 0x01;
+/// Time the MIPI DCS controllers need after a software reset before sleep-out.
+const SOFTWARE_RESET_SETTLE_MS: u32 = 150;
+
+/// The panel reset line as the active-low pin `mipidsi` pulses: absent lines
+/// do nothing and active-high lines are inverted.
+pub struct PanelReset<RST> {
+    pin: Option<RST>,
+    active_high: bool,
+}
+
+impl<RST> PanelReset<RST> {
+    /// Wraps an optional reset output and its active polarity.
+    #[must_use]
+    pub const fn new(pin: Option<RST>, active_high: bool) -> Self {
+        Self { pin, active_high }
+    }
+}
+
+impl<RST: OutputPin> embedded_hal::digital::ErrorType for PanelReset<RST> {
+    type Error = RST::Error;
+}
+
+impl<RST: OutputPin> OutputPin for PanelReset<RST> {
+    fn set_low(&mut self) -> Result<(), Self::Error> {
+        self.drive(true)
+    }
+
+    fn set_high(&mut self) -> Result<(), Self::Error> {
+        self.drive(false)
+    }
+}
+
+impl<RST: OutputPin> PanelReset<RST> {
+    fn drive(&mut self, asserted: bool) -> Result<(), RST::Error> {
+        let Some(pin) = &mut self.pin else {
+            return Ok(());
+        };
+        if asserted == self.active_high {
+            pin.set_high()
+        } else {
+            pin.set_low()
+        }
     }
 }
 

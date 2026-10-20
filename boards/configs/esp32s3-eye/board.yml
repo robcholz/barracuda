@@ -1,4 +1,5 @@
 name: esp32s3-eye
+profile: screen
 hardware:
   chip: esp32s3
   # ESP32-S3-WROOM-1 with ESP32-S3R8.
@@ -20,6 +21,15 @@ peripherals:
         scl: GPIO5
         sda: GPIO4
         frequency-hz: 400000
+    spi-device:
+      display-spi:
+        # Espressif esp_boards `esp32_s3_eye` board_peripherals.yaml
+        # (`spi_display`) and board_devices.yaml (`display_lcd`).
+        peripheral: SPI3
+        sck: GPIO21
+        mosi: GPIO47
+        chip-select: GPIO44
+        frequency-hz: 80000000
     camera-capture:
       camera-data:
         peripheral: LCD_CAM
@@ -38,3 +48,19 @@ peripherals:
         capture: camera-data
         control: camera-control
       # The official BSP declares both RESET and PWDN as not connected.
+    display:
+      implementation: mipi-dbi-display
+      bindings:
+        # `ledc_backlight` drives GPIO48 with `output_invert: true`.
+        backlight: GPIO48
+        dc: GPIO43
+        spi: display-spi
+      # The panel has no reset line (`reset_gpio_num: -1`); the controller
+      # is reset with the DCS software reset.
+      parameters:
+        controller: st7789
+        width: 240
+        height: 240
+        color-order: rgb
+        invert-colors: true
+        backlight-active-high: false
