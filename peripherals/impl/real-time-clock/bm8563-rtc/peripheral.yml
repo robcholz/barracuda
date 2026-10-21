@@ -1,0 +1,18 @@
+id: bm8563-rtc
+api-version: 1
+peripheral: real-time-clock
+implementation:
+  package: barracuda-bm8563-rtc
+  crate: barracuda_bm8563_rtc
+  factory: "::{{crate}}::Bm8563RtcImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::Bm8563Bindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::Bm8563Config::new({{parameter.address}})"
+# A BM8563 or the NXP PCF8563 it is register-compatible with.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # The chips' fixed address 51h.
+    default: 81

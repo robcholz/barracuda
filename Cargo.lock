@@ -808,6 +808,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-bm8563-rtc"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-bm8563",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-bmi270-imu"
 version = "0.1.0"
 dependencies = [
@@ -869,6 +879,7 @@ dependencies = [
  "barracuda-apa102-led-strip",
  "barracuda-atom-s3-display",
  "barracuda-atom-s3r-display",
+ "barracuda-bm8563-rtc",
  "barracuda-bmi270-imu",
  "barracuda-bq27220-power-monitor",
  "barracuda-capacitive-touch-buttons",
@@ -1165,6 +1176,13 @@ dependencies = [
 
 [[package]]
 name = "barracuda-driver-axp2101"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-bm8563"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
