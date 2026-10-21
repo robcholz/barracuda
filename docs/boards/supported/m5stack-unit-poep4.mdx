@@ -31,6 +31,21 @@ portal run on it; add its devices to
 `boards/configs/m5stack-unit-poep4/board.yml` to drive them. See
 [Peripheral composition](/boards/peripherals).
 
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g53` | `GPIO53` |
+| `grove-g54` | `GPIO54` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g53", "up")
+print(pin:read())
+```
+
 ## Wired Ethernet
 
 The Board's IP101GRI PHY is declared under `hardware.ethernet` in its

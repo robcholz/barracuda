@@ -121,6 +121,20 @@ peripherals:
         # (M5Unified Power_Class, Tab5: `shunt_res = 0.005f`).
         address: 65
         shunt-micro-ohms: 5000
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:
+    # M5Unified `_pin_table_port_bc`.
+    port-a-scl: { pin: GPIO54 }
+    port-a-sda: { pin: GPIO53 }
+    port-b-g17: { pin: GPIO17 }
+    port-b-g52: { pin: GPIO52 }
+    port-c-g6: { pin: GPIO6 }
+    port-c-g7: { pin: GPIO7 }
+    # RS485 (SIT3088) RX, TX, and direction (M5Stack Tab5 pin map).
+    rs485-rx: { pin: GPIO21 }
+    rs485-tx: { pin: GPIO20 }
+    rs485-dir: { pin: GPIO34 }
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.

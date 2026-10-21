@@ -28,6 +28,21 @@ cargo image deploy
 
 这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-unit-poep4/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
 
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g53` | `GPIO53` |
+| `grove-g54` | `GPIO54` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g53", "up")
+print(pin:read())
+```
+
 ## 有线以太网
 
 这块开发板的 IP101GRI PHY 在 `board.yml` 的 `hardware.ethernet` 下声明，[ESP32-P4 平台](/zh/platforms/esp32)在它上面运行 IP 协议栈：EMAC 接在 RMII 引脚上，PHY 地址为 1，复位接 `GPIO51`，并运行 DHCP 客户端。插上网线后，控制台会输出 `Ethernet is up at <地址>`；门户在该地址的 8787 端口上应答。

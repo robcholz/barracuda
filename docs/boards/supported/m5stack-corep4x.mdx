@@ -30,17 +30,32 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | --- | --- | --- |
 | `display` | 2.64-inch 480x480 MIPI DSI display (ST7102) | [`display`](/plugins/vm-display) |
 | `touch` | Touch controller (CST3530) | — |
+| `real-time-clock` | Real-time clock (RX8130CE) | — |
 
 The display implementation powers the panel, releases its reset, and dims its
 backlight through the M5IOE1 expander at `4Fh`, and turns on the 5 V boost of
 the M5PM1 at `6Eh`; neither chip is a device of its own. It also releases the
 touch controller's reset, M5IOE1 G8. The ES8311/ES7210 audio path, the BMI270
-and BMM150 motion sensors, the RX8130CE clock, and the microSD slot are not
-declared yet.
+and BMM150 motion sensors, and the microSD slot are not declared yet.
 
 The IP101GRI Ethernet PHY is not declared either: its RMII pins on the
 CoreP4X are not published, and the ESP32-P4 Platform does not drive the
 ESP32-C6 Wi-Fi co-processor yet, so the IP stack has no link on this Board.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO16` |
+| `port-a-sda` | `GPIO18` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```
 
 ## Plugin settings
 

@@ -51,6 +51,42 @@ toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2s-stream:
+      audio-stream:
+        # ES8311 on I2S0: MCLK G13, BCLK G12, WS G10, DOUT G9, DIN G11 (Espressif
+        # esp32_p4_function_ev_board `i2s_audio_out`). DOUT and DIN are named from
+        # the ESP32-P4's side.
+        peripheral: I2S0
+        dma: DMA_CH0
+        bclk: GPIO12
+        ws: GPIO10
+        dout: GPIO9
+        din: GPIO11
+        mclk: GPIO13
+        sample-rate-hz: 16000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+    i2c-device:
+      codec-control:
+        # Espressif esp32_p4_function_ev_board `i2c_master`: SDA G7, SCL G8.
+        peripheral: I2C0
+        scl: GPIO8
+        sda: GPIO7
+        frequency-hz: 400000
+  devices:
+    audio-codec:
+      # ES8311 at 18h; speaker amplifier enable G53, active high (Espressif
+      # esp32_p4_function_ev_board `audio_dac`, `gpio_pa_control`).
+      implementation: es8311-audio-codec
+      bindings:
+        control: codec-control
+        stream: audio-stream
+        amplifier-enable: GPIO53
+      parameters:
+        address: 24
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.

@@ -46,6 +46,31 @@ SD host, whose slot 1 the Platform drives for the Wi-Fi co-processor, and the
 Platform cannot yet hand slot 0 to a Board device. The SC202CS camera is not
 declared either: the ESP32-P4 Platform has no MIPI CSI binding.
 
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO54` |
+| `port-a-sda` | `GPIO53` |
+| `port-b-g17` | `GPIO17` |
+| `port-b-g52` | `GPIO52` |
+| `port-c-g6` | `GPIO6` |
+| `port-c-g7` | `GPIO7` |
+| `rs485-rx` | `GPIO21` |
+| `rs485-tx` | `GPIO20` |
+| `rs485-dir` | `GPIO34` |
+
+`rs485-tx`, `rs485-rx`, and `rs485-dir` are the UART and direction pins of the
+on-board RS485 transceiver.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```
+
 ## Wi-Fi
 
 The Wi-Fi radio is the ESP32-C6 co-processor, declared under
