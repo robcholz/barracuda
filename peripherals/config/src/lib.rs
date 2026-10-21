@@ -3261,7 +3261,10 @@ fn render_binding(
                 String::from("::barracuda_platform_selected::__platform::hal::I2sConfigError"),
             ));
             Ok((
-                String::from("::barracuda_platform_selected::__platform::hal::PdmI2sStream"),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::PdmI2sStream<::barracuda_platform_selected::__platform::hal::controller_binding_type!({})>",
+                    stream.dma()
+                ),
                 format!(
                     "{{ let (tx_dma, rx_dma) = ::barracuda_platform_selected::__platform::hal::i2s_dma_buffers!({}).map_err(GeneratedBoardError::{variant})?; ::barracuda_platform_selected::__platform::hal::pdm_i2s_stream(bindings.{controller}, bindings.{dma}, {}, {}, tx_dma, rx_dma).map_err(GeneratedBoardError::{variant})? }}",
                     stream.dma_buffer_bytes(),

@@ -14,7 +14,7 @@ mod pdm_stream;
 mod sdmmc;
 
 pub use i2s_stream::{i2s_stream, I2sConfigError, I2sDevice, I2sTransferError};
-pub use pdm_stream::{pdm_i2s_stream, PdmI2sStream};
+pub use pdm_stream::{pdm_i2s_stream, PdmDmaChannel, PdmI2sStream};
 pub use sdmmc::{sdmmc_device_1bit, SdmmcConfigError, SdmmcDevice};
 
 /// The SD host slot a Board's microSD card uses. Slot 0 is the eight-bit
@@ -22,8 +22,7 @@ pub use sdmmc::{sdmmc_device_1bit, SdmmcConfigError, SdmmcDevice};
 /// pins CLK GPIO14, CMD GPIO15, and D0 GPIO2.
 const SDMMC_SLOT: u8 = 1;
 
-/// The DMA channel type a PDM-I2S stream erases its Board-selected channel to.
-pub type PdmDmaChannel<'d> = esp_hal::dma::I2sDmaChannel<'d>;
+pdm_stream::pdm_dma_channels!(DMA_I2S0);
 
 include!("hal.rs");
 

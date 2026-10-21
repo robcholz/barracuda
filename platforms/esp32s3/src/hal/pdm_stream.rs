@@ -14,14 +14,40 @@ use esp_hal::{
     dma::{DmaRxBuf, DmaTxBuf},
     gpio::AnyPin,
     i2s::{
-        master::{Channels, DataFormat, I2s, TdmConfig},
+        master::{Channels, DataFormat, I2s, I2sMasterDmaChannel, TdmConfig},
         pdm::{PdmConfig, PdmRxConfig, PdmSlotMode},
     },
     peripherals::I2S0,
     time::Rate,
 };
 
-use super::{I2sConfigError, I2sTransferError, PdmDmaChannel};
+use super::{I2sConfigError, I2sTransferError};
+
+/// A DMA channel token the stream lends to each transfer's I2S driver.
+pub trait PdmDmaChannel: 'static {
+    /// The channel borrowed for one transfer.
+    type Borrowed<'a>: I2sMasterDmaChannel<'a, I2S0<'a>>;
+
+    /// Lends the channel to one transfer.
+    fn lend(&mut self) -> Self::Borrowed<'_>;
+}
+
+/// Implements [`PdmDmaChannel`] for the DMA channel tokens `I2S0` accepts.
+macro_rules! pdm_dma_channels {
+    ($($channel:ident),* $(,)?) => {
+        $(
+            impl PdmDmaChannel for esp_hal::peripherals::$channel<'static> {
+                type Borrowed<'a> = esp_hal::peripherals::$channel<'a>;
+
+                fn lend(&mut self) -> Self::Borrowed<'_> {
+                    self.reborrow()
+                }
+            }
+        )*
+    };
+}
+
+pub(crate) use pdm_dma_channels;
 
 /// Bytes of one stereo 16-bit frame the amplifier receives per mono sample.
 const TX_FRAME_BYTES: usize = 4;
@@ -31,9 +57,9 @@ const TX_FRAME_BYTES: usize = 4;
 /// The stream carries mono 16-bit PCM. Writes go to both I2S channels, so an
 /// amplifier that plays either channel (the NS4168 picks one with its CTRL
 /// pin) plays every sample.
-pub struct PdmI2sStream {
+pub struct PdmI2sStream<DMA> {
     controller: I2S0<'static>,
-    dma: PdmDmaChannel<'static>,
+    dma: DMA,
     clk: AnyPin<'static>,
     din: Option<AnyPin<'static>>,
     bclk: Option<AnyPin<'static>>,
@@ -53,9 +79,9 @@ pub struct PdmI2sStream {
 /// wired, the amplifier has only one of its lines, or a buffer cannot hold
 /// one frame.
 #[allow(clippy::too_many_arguments)]
-pub fn pdm_i2s_stream(
+pub fn pdm_i2s_stream<DMA: PdmDmaChannel>(
     controller: I2S0<'static>,
-    dma: impl Into<PdmDmaChannel<'static>>,
+    dma: DMA,
     clk: AnyPin<'static>,
     din: Option<AnyPin<'static>>,
     bclk: Option<AnyPin<'static>>,
@@ -63,7 +89,7 @@ pub fn pdm_i2s_stream(
     sample_rate_hz: u32,
     tx_buffer: DmaTxBuf,
     rx_buffer: DmaRxBuf,
-) -> Result<PdmI2sStream, I2sConfigError> {
+) -> Result<PdmI2sStream<DMA>, I2sConfigError> {
     if bclk.is_some() != dout.is_some()
         || (din.is_none() && dout.is_none())
         || tx_buffer.capacity() < TX_FRAME_BYTES
@@ -73,7 +99,7 @@ pub fn pdm_i2s_stream(
     }
     Ok(PdmI2sStream {
         controller,
-        dma: dma.into(),
+        dma,
         clk,
         din,
         bclk,
@@ -89,7 +115,7 @@ pub fn pdm_i2s_stream(
     })
 }
 
-impl PcmStream for PdmI2sStream {
+impl<DMA: PdmDmaChannel> PcmStream for PdmI2sStream<DMA> {
     type Error = I2sTransferError;
 
     fn format(&self) -> PcmFormat {
@@ -107,7 +133,7 @@ impl PcmStream for PdmI2sStream {
             .with_sample_rate(Rate::from_hz(self.format.sample_rate_hz))
             .with_data_format(DataFormat::Data16Channel16)
             .with_channels(Channels::STEREO);
-        let i2s = match I2s::new(self.controller.reborrow(), self.dma.reborrow(), config) {
+        let i2s = match I2s::new(self.controller.reborrow(), self.dma.lend(), config) {
             Ok(i2s) => i2s,
             Err(error) => {
                 self.tx_buffer = Some(buffer);
@@ -160,7 +186,7 @@ impl PcmStream for PdmI2sStream {
             Rate::from_hz(self.format.sample_rate_hz),
             PdmSlotMode::Mono,
         ));
-        let i2s = match I2s::new_pdm(self.controller.reborrow(), self.dma.reborrow(), config) {
+        let i2s = match I2s::new_pdm(self.controller.reborrow(), self.dma.lend(), config) {
             Ok(i2s) => i2s,
             Err(error) => {
                 self.rx_buffer = Some(buffer);
