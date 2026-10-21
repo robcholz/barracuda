@@ -49,11 +49,9 @@ impl<I2C> Ip5306Bindings<I2C> {
 
 /// Initialization failure.
 #[derive(Debug)]
-pub enum Ip5306InitError<BusError> {
+pub enum Ip5306InitError {
     /// The configured address is not a seven-bit I2C address.
     InvalidAddress(u8),
-    /// The chip did not answer the level read.
-    Bus(BusError),
 }
 
 /// Reading failure.
@@ -81,16 +79,16 @@ where
     type Bindings = Ip5306Bindings<I2C>;
     type Config = Ip5306Config;
     type Peripheral = Ip5306PowerMonitor<I2C>;
-    type Error = Ip5306InitError<I2C::Error>;
+    type Error = Ip5306InitError;
 
     async fn initialize(
-        mut bindings: Self::Bindings,
+        bindings: Self::Bindings,
         config: Self::Config,
     ) -> Result<Self::Peripheral, Self::Error> {
+        // No probe: a Board whose IP5306 does not answer still starts, and
+        // its battery reads fail instead.
         let chip =
             Ip5306::new(config.address).ok_or(Ip5306InitError::InvalidAddress(config.address))?;
-        chip.battery_percent(&mut bindings.i2c)
-            .map_err(Ip5306InitError::Bus)?;
         Ok(Ip5306PowerMonitor {
             i2c: bindings.i2c,
             chip,
