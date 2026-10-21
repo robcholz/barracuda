@@ -194,33 +194,27 @@ impl MipiDbiDisplayConfig {
 }
 
 /// Concrete resources consumed during controller initialization.
-pub struct MipiDbiDisplayBindings<SPI, DC, RST, BL, HOLD, DELAY, const BUFFER_SIZE: usize> {
+pub struct MipiDbiDisplayBindings<SPI, DC, RST, BL, DELAY, const BUFFER_SIZE: usize> {
     spi: SPI,
     dc: DC,
     reset: Option<RST>,
     backlight: Option<BL>,
-    power_hold: Option<HOLD>,
     delay: DELAY,
     buffer: &'static mut [u8; BUFFER_SIZE],
 }
 
-impl<SPI, DC, RST, BL, HOLD, DELAY, const BUFFER_SIZE: usize>
-    MipiDbiDisplayBindings<SPI, DC, RST, BL, HOLD, DELAY, BUFFER_SIZE>
+impl<SPI, DC, RST, BL, DELAY, const BUFFER_SIZE: usize>
+    MipiDbiDisplayBindings<SPI, DC, RST, BL, DELAY, BUFFER_SIZE>
 {
     /// Combines a selected SPI device, control outputs, delay source, and
     /// statically owned transfer buffer. A panel without a reset line is
     /// reset with the DCS software-reset command instead.
-    ///
-    /// `power_hold` is a Board power-latch output that its binding already
-    /// drives high. The display keeps it for its whole lifetime so the product
-    /// stays powered on battery.
     #[must_use]
     pub const fn new(
         spi: SPI,
         dc: DC,
         reset: Option<RST>,
         backlight: Option<BL>,
-        power_hold: Option<HOLD>,
         delay: DELAY,
         buffer: &'static mut [u8; BUFFER_SIZE],
     ) -> Self {
@@ -229,7 +223,6 @@ impl<SPI, DC, RST, BL, HOLD, DELAY, const BUFFER_SIZE: usize>
             dc,
             reset,
             backlight,
-            power_hold,
             delay,
             buffer,
         }
@@ -282,8 +275,8 @@ pub enum MipiDbiInitError<I, R, B> {
 
 /// Initialized direct panel implementing Barracuda's stable display API.
 ///
-/// `HOLD` is a Board resource the panel keeps alive with it, such as a
-/// power-latch output, or `()` when there is none.
+/// `HOLD` is a resource the panel keeps alive with it, or `()` when there is
+/// none. A Board's battery power latch is not one: the Platform entry holds it.
 pub struct MipiDbiDisplay<DI, M, RST, BL, DELAY, HOLD = ()>
 where
     DI: Interface,
@@ -383,18 +376,17 @@ where
 }
 
 /// Static factory for all controller models supported by `mipidsi`.
-pub struct MipiDbiDisplayImplementation<SPI, DC, M, RST, BL, HOLD, DELAY, const BUFFER_SIZE: usize>(
+pub struct MipiDbiDisplayImplementation<SPI, DC, M, RST, BL, DELAY, const BUFFER_SIZE: usize>(
     PhantomData<SPI>,
     PhantomData<DC>,
     PhantomData<M>,
     PhantomData<RST>,
     PhantomData<BL>,
-    PhantomData<HOLD>,
     PhantomData<DELAY>,
 );
 
-impl<SPI, DC, M, RST, BL, HOLD, DELAY, const BUFFER_SIZE: usize> PeripheralImplementation
-    for MipiDbiDisplayImplementation<SPI, DC, M, RST, BL, HOLD, DELAY, BUFFER_SIZE>
+impl<SPI, DC, M, RST, BL, DELAY, const BUFFER_SIZE: usize> PeripheralImplementation
+    for MipiDbiDisplayImplementation<SPI, DC, M, RST, BL, DELAY, BUFFER_SIZE>
 where
     SPI: SpiDevice + 'static,
     DC: OutputPin + 'static,
@@ -402,23 +394,16 @@ where
     M::ColorFormat: InterfacePixelFormat<u8>,
     RST: OutputPin + 'static,
     BL: OutputPin + 'static,
-    HOLD: 'static,
     DELAY: DelayNs + 'static,
     SPI::Error: 'static,
     DC::Error: 'static,
     RST::Error: 'static,
     BL::Error: 'static,
 {
-    type Bindings = MipiDbiDisplayBindings<SPI, DC, RST, BL, HOLD, DELAY, BUFFER_SIZE>;
+    type Bindings = MipiDbiDisplayBindings<SPI, DC, RST, BL, DELAY, BUFFER_SIZE>;
     type Config = MipiDbiDriverConfig<M>;
-    type Peripheral = MipiDbiDisplay<
-        SpiInterface<'static, SPI, DC>,
-        M,
-        RST,
-        DigitalBacklight<BL>,
-        DELAY,
-        Option<HOLD>,
-    >;
+    type Peripheral =
+        MipiDbiDisplay<SpiInterface<'static, SPI, DC>, M, RST, DigitalBacklight<BL>, DELAY>;
     type Error = MipiDbiInitError<SpiError<SPI::Error, DC::Error>, RST::Error, BL::Error>;
 
     async fn initialize(
@@ -430,7 +415,6 @@ where
             dc,
             reset,
             backlight,
-            power_hold,
             delay,
             buffer,
         } = bindings;
@@ -439,7 +423,7 @@ where
             SpiInterface::new(spi, dc, buffer),
             reset,
             backlight,
-            power_hold,
+            (),
             delay,
             config,
         )

@@ -29,5 +29,6 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `touch` | 触摸控制器（CHSC6540） | — |
 
-CHSC6540 电容触摸屏尚未声明：目前没有触摸实现能驱动它的控制器。
+显示屏实现的 AXP192 复位脉冲会连同面板一起复位触摸控制器。

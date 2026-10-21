@@ -5,18 +5,14 @@
 use core::marker::PhantomData;
 
 use barracuda_driver_gt911::{Error as Gt911Error, Gt911};
-use barracuda_driver_pi4ioe5v6408::{Error as ExpanderError, Pi4ioe5v6408};
 use barracuda_driver_st712x::St712x;
 use barracuda_peripheral::{
     PeripheralImplementation,
     touch::{Touch, TouchDescriptor},
 };
-use embedded_hal::{delay::DelayNs, i2c::I2c};
+use embedded_hal::i2c::I2c;
 
 pub use barracuda_peripheral::touch::{TouchFrame, TouchPoint};
-
-const CONTROL_EXPANDER_ADDRESS: u8 = 0x43;
-const TOUCH_RESET_PIN: u8 = 5;
 
 /// Touch-controller family discovered at runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,16 +42,15 @@ impl Tab5TouchConfig {
 }
 
 /// Move-only resources consumed by the touch implementation.
-pub struct Tab5TouchBindings<I2C, DELAY> {
+pub struct Tab5TouchBindings<I2C> {
     i2c: I2C,
-    delay: DELAY,
 }
 
-impl<I2C, DELAY> Tab5TouchBindings<I2C, DELAY> {
-    /// Combines the shared I2C device view and startup delay.
+impl<I2C> Tab5TouchBindings<I2C> {
+    /// Takes the shared I2C device view.
     #[must_use]
-    pub const fn new(i2c: I2C, delay: DELAY) -> Self {
-        Self { i2c, delay }
+    pub const fn new(i2c: I2C) -> Self {
+        Self { i2c }
     }
 }
 
@@ -68,8 +63,6 @@ pub enum Tab5TouchInitError<BusError> {
     UnsupportedController,
     /// The final controller probe failed at the bus layer.
     Bus(BusError),
-    /// The private Tab5 touch-reset expander could not be configured.
-    Expander(ExpanderError<BusError>),
 }
 
 /// Touch sampling failure.
@@ -93,14 +86,13 @@ pub struct Tab5Touch<I2C> {
 }
 
 /// Static factory used by generated Board composition.
-pub struct Tab5TouchImplementation<I2C, DELAY>(PhantomData<I2C>, PhantomData<DELAY>);
+pub struct Tab5TouchImplementation<I2C>(PhantomData<I2C>);
 
-impl<I2C, DELAY> PeripheralImplementation for Tab5TouchImplementation<I2C, DELAY>
+impl<I2C> PeripheralImplementation for Tab5TouchImplementation<I2C>
 where
     I2C: I2c + 'static,
-    DELAY: DelayNs + 'static,
 {
-    type Bindings = Tab5TouchBindings<I2C, DELAY>;
+    type Bindings = Tab5TouchBindings<I2C>;
     type Config = Tab5TouchConfig;
     type Peripheral = Tab5Touch<I2C>;
     type Error = Tab5TouchInitError<I2C::Error>;
@@ -113,11 +105,10 @@ where
         if config.st712x_address > 0x7f || config.gt911_address == config.st712x_address {
             return Err(Tab5TouchInitError::InvalidAddresses);
         }
-        Pi4ioe5v6408::new(&mut bindings.i2c, CONTROL_EXPANDER_ADDRESS)
-            .map_err(Tab5TouchInitError::Expander)?
-            .pulse_reset_low(TOUCH_RESET_PIN, 10, 50, &mut bindings.delay)
-            .map_err(Tab5TouchInitError::Expander)?;
-
+        // The display implementation, built first, already took the
+        // controller through reset with its interrupt line strapping the
+        // GT911 to 14h (M5GFX's Tab5 start-up). Another reset here, without
+        // that strap, would move the GT911 to 5Dh.
         if let Ok(Some(controller)) = St712x::probe(&mut bindings.i2c, config.st712x_address) {
             return Ok(Tab5Touch {
                 i2c: bindings.i2c,

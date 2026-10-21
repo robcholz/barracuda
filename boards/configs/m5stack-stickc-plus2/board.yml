@@ -8,6 +8,10 @@ hardware:
     technology: psram
     interface: quad-spi
     size-bytes: 2097152
+  # Battery power latch (M5GFX and M5Unified POWER_HOLD_PIN): the Board
+  # switches itself off on battery once its power button is released unless
+  # GPIO4 is high, so the Platform entry drives it high first.
+  power-hold: GPIO4
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
@@ -25,11 +29,9 @@ peripherals:
   devices:
     display:
       # ST7789 135x240 at offset (52, 40) in its 240x320 frame; backlight on
-      # GPIO27, active high. GPIO4 is the battery power latch (M5GFX and
-      # M5Unified POWER_HOLD_PIN): the Board switches itself off on battery
-      # unless it stays high.
+      # GPIO27, active high.
       implementation: mipi-dbi-display
-      bindings: { backlight: GPIO27, dc: GPIO14, power-hold: GPIO4, reset: GPIO12, spi: display-spi }
+      bindings: { backlight: GPIO27, dc: GPIO14, reset: GPIO12, spi: display-spi }
       parameters:
         controller: st7789
         width: 135

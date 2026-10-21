@@ -41,3 +41,13 @@ peripherals:
         width: 320
         height: 240
         invert-colors: true
+    touch:
+      # CHSC6540 at 2Eh on the internal bus (M5GFX Tough `Touch_CHSC6540`,
+      # interrupt GPIO39, unused: the implementation polls), 320x240. The
+      # display's AXP192 GPIO4 reset pulse resets it with the panel (M5GFX
+      # `lcd_reset`).
+      implementation: chsc6540-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        width: 320
+        height: 240

@@ -8,6 +8,9 @@ hardware:
     technology: psram
     interface: quad-spi
     size-bytes: 8388608
+  # Main power latch (M5Unified POWER_HOLD for board_M5Paper, M5GFX
+  # `M5EPD_MAIN_PWR_PIN 2`).
+  power-hold: GPIO2
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
@@ -35,8 +38,6 @@ peripherals:
         ready: GPIO27
         # E-paper rail enable; M5GFX pulses it as the controller reset.
         panel-power: GPIO23
-        # Main power latch (M5Unified POWER_HOLD for board_M5Paper).
-        power-hold: GPIO2
       parameters:
         width: 960
         height: 540

@@ -32,6 +32,26 @@ extern "C" fn rust_eh_personality() {}
 // `build.rs` from the selected Board's network links.
 include!(concat!(env!("OUT_DIR"), "/esp32p4_network.rs"));
 
+// `__barracuda_power_hold!`, projected by `build.rs` from the selected
+// Board's `hardware.power-hold`.
+include!(concat!(env!("OUT_DIR"), "/power_hold.rs"));
+
+/// Drives a Board's battery power latch high for the life of the firmware.
+///
+/// The latch keeps a battery-powered Board on once its power button is
+/// released, so the entry drives it before anything else is built.
+#[doc(hidden)]
+pub fn hold_power(pin: impl esp_hal::gpio::OutputPin + 'static) {
+    // The driver lives as long as the firmware, so nothing reconfigures the
+    // pin until the chip resets or powers off.
+    static LATCH: StaticCell<esp_hal::gpio::Output<'static>> = StaticCell::new();
+    LATCH.init(esp_hal::gpio::Output::new(
+        pin,
+        esp_hal::gpio::Level::High,
+        esp_hal::gpio::OutputConfig::default(),
+    ));
+}
+
 /// Powers a Board's Wi-Fi co-processor through one output of a PI4IOE5V6408
 /// I2C expander, driving it high.
 ///
@@ -109,6 +129,7 @@ pub fn bindings(
     spawner: embassy_executor::Spawner,
     flash_token: esp_hal::peripherals::FLASH<'static>,
     network: NetworkTokens,
+    entropy: crate::Esp32P4Entropy,
 ) -> Result<Esp32P4PlatformBindings, Esp32P4PlatformError> {
     static FLASH: StaticCell<
         Mutex<CriticalSectionRawMutex, RefCell<crate::Esp32P4Flash<'static>>>,
@@ -118,7 +139,7 @@ pub fn bindings(
     // declares, or stays down without one.
     let links = crate::network::start(spawner, network)?;
     let flash = FLASH.init(Mutex::new(RefCell::new(crate::flash(flash_token))));
-    Esp32P4PlatformBindings::from_initialized_services(board, links, flash)
+    Esp32P4PlatformBindings::from_initialized_services(board, links, entropy, flash)
 }
 
 /// Generates the ESP32-P4 async entry around one selected application.
@@ -147,9 +168,10 @@ macro_rules! platform_entry {
             $board_bindings_value: $board_bindings_type,
             flash: $crate::application::__hal::peripherals::FLASH<'static>,
             network: $crate::application::NetworkTokens,
+            entropy: $crate::Esp32P4Entropy,
         ) {
             let $platform_bindings =
-                match $crate::application::bindings($board, $spawner, flash, network) {
+                match $crate::application::bindings($board, $spawner, flash, network, entropy) {
                     Ok(bindings) => bindings,
                     Err(error) => {
                         $crate::application::__println::println!(
@@ -176,6 +198,12 @@ macro_rules! platform_entry {
             #[allow(unused_mut)]
             let mut peripherals =
                 $crate::application::__hal::init($crate::application::__hal::Config::default());
+            // A battery power latch goes high first, or the Board switches
+            // off when its power button is released.
+            $crate::__barracuda_power_hold!(peripherals);
+            // The noise source starts before any task runs and keeps SAR
+            // ADC1 from here on.
+            let entropy = $crate::Esp32P4Entropy::start(peripherals.RNG, peripherals.ADC1);
             // A Board whose Wi-Fi co-processor sits behind a power switch on
             // a shared bus turns it on before the Board takes the bus.
             $crate::__barracuda_esp32p4_network_power!(peripherals);
@@ -192,9 +220,13 @@ macro_rules! platform_entry {
             EXECUTOR
                 .init($crate::application::__rtos::embassy::Executor::new())
                 .run(move |spawner| {
-                    if let Ok(task) =
-                        __barracuda_application_task(spawner, $board_bindings_value, flash, network)
-                    {
+                    if let Ok(task) = __barracuda_application_task(
+                        spawner,
+                        $board_bindings_value,
+                        flash,
+                        network,
+                        entropy,
+                    ) {
                         spawner.spawn(task);
                     } else {
                         $crate::application::__println::println!(

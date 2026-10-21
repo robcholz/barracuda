@@ -90,7 +90,7 @@ these controllers on a Board's exposed pins:
 | --- | --- | --- | --- | --- |
 | `esp32` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | `ADC1` |
 | `esp32s3` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | `ADC1` |
-| `esp32p4` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | `ADC1` |
+| `esp32p4` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | none |
 | `esp32c3` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 | `esp32c6` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 
@@ -98,7 +98,8 @@ ESP32-S3 adds quad SPI devices, SD/MMC cards, camera capture, an 8-bit
 parallel output (`parallel-output`, the LCD_CAM controller in i8080 mode, with
 or without a data/command line), I2S audio streams, and capacitive touch.
 
-ESP32-P4 adds the MIPI DSI host (`dsi-host`): the link, the RGB565
+ESP32-P4 adds I2S audio streams (`i2s-stream`, through the same adapter as
+the ESP32-S3) and the MIPI DSI host (`dsi-host`): the link, the RGB565
 framebuffer in PSRAM that VDMA scans out, DCS commands before and during
 video, and the backlight pin, which it switches on and off because esp-hal has
 no LEDC driver for the ESP32-P4.
@@ -124,10 +125,14 @@ Board declares:
 On a Board with neither, the stack has no link and the Wi-Fi Plugin opens no
 setup hotspot.
 
-The ESP32-P4 Platform provides no entropy source. esp-hal 1.2 gives the chip
-no true random number generator: its `Rng` is pseudo-random unless an RF or
-ADC entropy source runs, and the chip has no `TrngSource`. The IP stacks seed
-their sequence numbers from the chip's base MAC.
+The ESP32-P4's entropy is its random number generator fed by SAR ADC noise,
+started the way ESP-IDF starts it on this radio-less chip: at startup the
+Platform sets SAR ADC1 sampling an internal channel under the digital
+controller and keeps it running. On chip revision v3.0 and later it also
+starts the LP_TRNG block and reads it, as ESP-IDF does. Each random byte folds
+the generator's output over at least 16 µs. SAR ADC1 then belongs to the
+entropy source, so the ESP32-P4 has no runtime ADC. The IP stacks seed their
+sequence numbers from the chip's base MAC.
 
 ## Boards
 

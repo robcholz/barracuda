@@ -199,6 +199,9 @@ pub enum BindingKind {
     DigitalInput,
     /// A concrete digital output pin.
     DigitalOutput,
+    /// A concrete pin the implementation switches between input and output,
+    /// through Barracuda's `ConfigurableDigitalPin`.
+    Gpio,
     /// One PWM output channel.
     Pwm,
     /// One addressed I2C device.
@@ -1086,6 +1089,12 @@ pub fn validate_platform_hal(
             binding: HalBinding::WifiCoprocessorSdio,
         });
     }
+    if board.hardware().power_hold().is_some() && !platform.hal().supports(HalBinding::PowerHold) {
+        return Err(GenerateError::UnsupportedHalBinding {
+            platform: platform.name().to_owned(),
+            binding: HalBinding::PowerHold,
+        });
+    }
     if board.exposed_io().pins().next().is_some() && !platform.hal().supports(HalBinding::Gpio) {
         return Err(GenerateError::UnsupportedHalBinding {
             platform: platform.name().to_owned(),
@@ -1130,6 +1139,7 @@ const fn hal_binding(kind: BindingKind) -> Option<HalBinding> {
     match kind {
         BindingKind::DigitalInput => Some(HalBinding::DigitalInput),
         BindingKind::DigitalOutput => Some(HalBinding::DigitalOutput),
+        BindingKind::Gpio => Some(HalBinding::Gpio),
         BindingKind::SpiDevice => Some(HalBinding::SpiDevice),
         BindingKind::QuadSpiDevice => Some(HalBinding::QuadSpiDevice),
         BindingKind::SpiBus => Some(HalBinding::SpiBus),
@@ -1920,7 +1930,9 @@ fn render_declaration(
                 .peripheral_io()
                 .quad_spi_device(resource)
                 .map(|spi| spi.peripheral()),
-            BindingKind::DigitalInput | BindingKind::DigitalOutput => Some(resource),
+            BindingKind::DigitalInput | BindingKind::DigitalOutput | BindingKind::Gpio => {
+                Some(resource)
+            }
             _ => None,
         };
         if let Some(native) = native {
@@ -1974,7 +1986,7 @@ fn render_binding(
     state: &mut RenderState,
 ) -> Result<(String, String), GenerateError> {
     match schema.kind() {
-        BindingKind::DigitalInput | BindingKind::DigitalOutput => {
+        BindingKind::DigitalInput | BindingKind::DigitalOutput | BindingKind::Gpio => {
             validate_hardware_identifier(resource)?;
             let field = checked_identifier(
                 &format!("{}_{}", peripheral.name(), role),
@@ -1986,7 +1998,14 @@ fn render_binding(
                     "::barracuda_platform_selected::__platform::hal::pin_binding_type!({resource})"
                 ),
             ));
-            if schema.kind() == BindingKind::DigitalInput {
+            if schema.kind() == BindingKind::Gpio {
+                Ok((
+                    String::from("::barracuda_platform_selected::__platform::hal::ConfigurablePin"),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::configurable_pin(bindings.{field})"
+                    ),
+                ))
+            } else if schema.kind() == BindingKind::DigitalInput {
                 Ok((
                     String::from("::barracuda_platform_selected::__platform::hal::DigitalInput"),
                     format!(

@@ -4,8 +4,8 @@ peripheral: display
 implementation:
   package: barracuda-it8951-display
   crate: barracuda_it8951_display
-  factory: "::{{crate}}::It8951DisplayImplementation<{{binding.spi.type}}, {{binding.ready.type}}, {{binding.panel-power.type}}, {{binding.power-hold.type}}, {{hal.delay.type}}>"
-  bindings-expression: "::{{crate}}::It8951Bindings::new({{binding.spi.value}}, {{binding.ready.value}}, {{binding.panel-power.value}}, {{binding.power-hold.value}}, {{hal.delay.value}})"
+  factory: "::{{crate}}::It8951DisplayImplementation<{{binding.spi.type}}, {{binding.ready.type}}, {{binding.panel-power.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::It8951Bindings::new({{binding.spi.value}}, {{binding.ready.value}}, {{binding.panel-power.value}}, {{hal.delay.value}})"
   config-expression: "::{{crate}}::It8951DisplayConfig::new({{parameter.width}}, {{parameter.height}}, {{parameter.mounting}})"
 bindings:
   # Full-duplex: the controller answers device-information and status reads.
@@ -18,10 +18,6 @@ bindings:
   panel-power:
     kind: digital-output
     initial: low
-  # Main power latch that keeps a battery-powered Board on.
-  power-hold:
-    kind: digital-output
-    initial: high
 parameters:
   # Native panel geometry in the controller's scan direction.
   width:

@@ -44,6 +44,15 @@ peripherals:
       parameters:
         expander-address: 79
         power-address: 110
+    touch:
+      # CST3530 at 58h on the internal bus (M5GFX CoreP4X `Touch_CST3530`,
+      # interrupt GPIO1, unused: the implementation polls), 480x480. Its
+      # reset, M5IOE1 G8, is driven high by the display implementation.
+      implementation: cst3530-touch
+      bindings: { i2c: internal }
+      parameters:
+        width: 480
+        height: 480
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.

@@ -29,5 +29,6 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `touch` | 触摸控制器（FT6336U） | — |
 
-FT6336U 电容触摸屏尚未声明：目前没有触摸实现能驱动它的控制器。
+触摸实现通过 `58h` 处 AW9523B 扩展芯片的 P0_0 释放控制器的复位，该扩展芯片本身不是设备。

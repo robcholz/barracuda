@@ -4,6 +4,8 @@ hardware:
   chip: esp32
   # ESP32-PICO-D4.
   flash-size: 4mb
+  # Battery power latch (M5GFX `POWER_HOLD_PIN 12`, M5Unified POWER_HOLD).
+  power-hold: GPIO12
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
@@ -23,6 +25,5 @@ peripherals:
       bindings:
         busy: GPIO4
         dc: GPIO15
-        power-hold: GPIO12
         reset: GPIO0
         spi: display-spi

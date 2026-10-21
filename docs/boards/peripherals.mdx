@@ -89,6 +89,12 @@ spi-device:
     frequency-hz: 40000000
 ~~~
 
+A line an implementation drives at one moment and reads at another is a `gpio`
+binding: the Board names its pin, and the implementation receives a
+`ConfigurableDigitalPin` it switches between output and input. The Tab5
+display drives the touch interrupt line high while the touch controller leaves
+reset, which straps the GT911 address, and then releases it to the controller.
+
 A panel on an eight-bit Intel 8080 bus is a `parallel-output`: its write
 strobe, data/command and chip-select lines, eight data lines in bit order, the
 strobe clock, and the DMA staging buffer, whose size is the longest burst sent
@@ -149,11 +155,12 @@ Board peripheral.
 On M5Stack Tab5, the PI4IOE5V6408 at `0x43` is hidden this way:
 
 - the audio-codec implementation owns the speaker-amplifier enable pin;
-- the display implementation owns the panel reset pin;
-- the touch implementation owns the touch reset pin;
+- the display implementation owns the panel and touch reset pins: it
+  identifies the panel by the touch controller that answers, so it takes both
+  out of reset, as M5GFX does;
 - the camera implementation owns the sensor reset pin.
 
-All four use `drivers/chips/pi4ioe5v6408`; none exposes the expander, its pins,
+All three use `drivers/chips/pi4ioe5v6408`; none exposes the expander, its pins,
 or a generic system-controller peripheral to System. Other PI4-controlled
 signals must likewise be owned by the concrete semantic service they enable.
 

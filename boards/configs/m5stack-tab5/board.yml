@@ -51,6 +51,23 @@ peripherals:
         data-lanes: 2
         phy-power-channel: 3
         phy-power-millivolts: 2500
+    i2s-stream:
+      audio-stream:
+        # ES8388 DAC and ES7210 microphone ADC on I2S0: MCLK GPIO30, BCLK
+        # GPIO27, WS GPIO29, DOUT GPIO26, DIN GPIO28, 48 kHz with a 256-fs
+        # MCLK (Espressif m5stack_tab5 `i2s_audio_out`). DOUT and DIN are
+        # named from the ESP32-P4 controller's side.
+        peripheral: I2S0
+        dma: DMA_CH0
+        bclk: GPIO27
+        ws: GPIO29
+        dout: GPIO26
+        din: GPIO28
+        mclk: GPIO30
+        sample-rate-hz: 48000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
     i2c-device:
       # The internal bus: SDA GPIO31, SCL GPIO32 (M5Unified, M5GFX,
       # m5stack_tab5 `i2c_master`).
@@ -60,11 +77,20 @@ peripherals:
         sda: GPIO31
         frequency-hz: 400000
   devices:
+    # ES8388 at 10h and ES7210 at 40h on the internal bus (M5Unified
+    # `es8388_i2c_addr`, `es7210_i2c_addr`); the speaker amplifier enable is
+    # P1 of the PI4IOE5V6408 at 43h.
+    audio-codec:
+      implementation: es8388-es7210-audio-codec
+      bindings: { control: internal, stream: audio-stream }
     # 720x1280 MIPI DSI panel: ILI9881C, ST7123, or ST7121 depending on the
-    # unit, detected at start. Its reset is the PI4IOE5V6408 at 43h.
+    # unit, detected at start by its touch controller. Its reset and the
+    # touch reset are P4 and P5 of the PI4IOE5V6408 at 43h.
     display:
       implementation: tab5-dsi-display
-      bindings: { host: panel, i2c: internal }
+      # TP_INT on GPIO23: M5GFX drives it high while the touch controller
+      # leaves reset to strap the GT911 to 14h, then makes it an input.
+      bindings: { host: panel, i2c: internal, touch-interrupt: GPIO23 }
       parameters:
         # GT911 at 14h (ILI9881C units) or the ST712x touch at 55h.
         gt911-address: 20

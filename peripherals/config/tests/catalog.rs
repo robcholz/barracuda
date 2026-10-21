@@ -926,6 +926,54 @@ peripherals:
 }
 
 #[test]
+fn renders_a_gpio_binding_as_a_configurable_platform_pin() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "strapped-touch",
+        r#"
+id: strapped-touch
+api-version: 1
+peripheral: touch
+implementation:
+  package: strapped-touch
+  crate: strapped_touch
+  factory: "::{{crate}}::Implementation<{{binding.strap.type}}>"
+  bindings-expression: "{{binding.strap.value}}"
+  config-expression: "()"
+bindings:
+  strap:
+    kind: gpio
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: strap-board
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  devices:
+    touch:
+      implementation: strapped-touch
+      bindings:
+        strap: GPIO23
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved gpio binding");
+
+    let rust = render_board_hal(&board, &resolved).expect("generated gpio binding");
+    assert_valid_rust(&rust);
+    assert!(rust.contains("__platform::hal::pin_binding_type!(GPIO23)"));
+    assert!(rust.contains("strapped_touch::Implementation<::barracuda_platform_selected::__platform::hal::ConfigurablePin>"));
+    assert!(rust.contains("__platform::hal::configurable_pin(bindings.touch_strap)"));
+}
+
+#[test]
 fn multiple_i2c_peripherals_share_one_static_bus_owner() {
     let root = tempdir().expect("temporary workspace");
     add_driver(

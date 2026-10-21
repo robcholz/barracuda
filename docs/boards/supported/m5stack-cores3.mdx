@@ -29,6 +29,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (FT6336U) | — |
 
-The FT6336U capacitive touch panel is not declared yet: no touch
-implementation drives its controller.
+The touch implementation releases the controller's reset, P0_0 of the AW9523B
+expander at `58h`, which is not a device of its own.

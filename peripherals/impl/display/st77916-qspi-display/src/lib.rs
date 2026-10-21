@@ -200,7 +200,7 @@ where
     ) -> Result<(), BindingError<BUS, DC, RESET, BACKLIGHT, POWER>> {
         self.dc.set_low().map_err(St77916Error::Dc)?;
         self.bus
-            .write(COMMAND_WRITE_OPCODE, u32::from(command) << 8, data)
+            .write_single_line(COMMAND_WRITE_OPCODE, u32::from(command) << 8, data)
             .map_err(St77916Error::Bus)
     }
 
@@ -379,5 +379,115 @@ where
 
     async fn wait_ready(&mut self) -> Result<(), Self::ControlError> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    extern crate std;
+
+    use core::convert::Infallible;
+    use std::vec::Vec;
+
+    use barracuda_board_hal::QuadSpiBus;
+    use barracuda_peripheral::display::DisplayOrientation;
+    use embedded_hal::{
+        delay::DelayNs,
+        digital::{ErrorType, OutputPin},
+    };
+
+    use super::{
+        CASET, COLOR_WRITE_OPCODE, COMMAND_WRITE_OPCODE, MEMORY_WRITE, RASET, St77916Display,
+    };
+
+    /// One recorded QSPI write: whether its payload went on one line, the
+    /// opcode, the address, and the payload.
+    type Write = (bool, u8, u32, Vec<u8>);
+
+    #[derive(Default)]
+    struct Bus(Vec<Write>);
+
+    impl QuadSpiBus for Bus {
+        type Error = Infallible;
+
+        fn write(&mut self, opcode: u8, address: u32, data: &[u8]) -> Result<(), Self::Error> {
+            self.0.push((false, opcode, address, data.to_vec()));
+            Ok(())
+        }
+
+        fn write_single_line(
+            &mut self,
+            opcode: u8,
+            address: u32,
+            data: &[u8],
+        ) -> Result<(), Self::Error> {
+            self.0.push((true, opcode, address, data.to_vec()));
+            Ok(())
+        }
+    }
+
+    struct Pin;
+
+    impl ErrorType for Pin {
+        type Error = Infallible;
+    }
+
+    impl OutputPin for Pin {
+        fn set_low(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn set_high(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    struct Delay;
+
+    impl DelayNs for Delay {
+        fn delay_ns(&mut self, _ns: u32) {}
+    }
+
+    #[test]
+    fn parameters_go_on_one_line_and_only_pixels_on_four() {
+        // esp_lcd_st77916 sends a register's parameters with
+        // esp_lcd_panel_io_tx_param, which esp_lcd's SPI panel IO transmits
+        // on one line, and pixels with tx_color, which alone uses quad mode.
+        let mut display = St77916Display {
+            bus: Bus::default(),
+            dc: Pin,
+            _reset: Pin,
+            backlight: Pin,
+            _power_enable: Pin,
+            delay: Delay,
+            orientation: DisplayOrientation::Deg0,
+        };
+        display
+            .write_pixels(1, 2, 2, 1, &[0x12, 0x34, 0x56, 0x78])
+            .expect("pixels");
+        assert_eq!(
+            display.bus.0,
+            [
+                (
+                    true,
+                    COMMAND_WRITE_OPCODE,
+                    u32::from(CASET) << 8,
+                    std::vec![0, 1, 0, 2]
+                ),
+                (
+                    true,
+                    COMMAND_WRITE_OPCODE,
+                    u32::from(RASET) << 8,
+                    std::vec![0, 2, 0, 2]
+                ),
+                (
+                    false,
+                    COLOR_WRITE_OPCODE,
+                    u32::from(MEMORY_WRITE) << 8,
+                    std::vec![0x12, 0x34, 0x56, 0x78],
+                ),
+            ]
+        );
     }
 }

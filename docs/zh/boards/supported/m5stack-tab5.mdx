@@ -28,13 +28,14 @@ cargo image deploy
 
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
+| `audio-codec` | 音频编解码器（ES8388 扬声器 DAC、ES7210 麦克风 ADC） | [`audio`](/zh/plugins/vm-audio) |
 | `display` | 720x1280 MIPI DSI 显示屏（ILI9881C、ST7123 或 ST7121，启动时识别） | [`display`](/zh/plugins/vm-display) |
 | `touch` | 触摸控制器（GT911 或面板自带的 ST712x） | — |
 | `real-time-clock` | 实时时钟（RX8130CE） | — |
 | `inertial-measurement` | 运动传感器（BMI270） | [`motion`](/zh/plugins/vm-imu) |
 | `power-monitor` | 电源监测（INA226） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 
-显示屏和触摸实现通过 `43h` 处的 PI4IOE5V6408 扩展芯片复位各自的控制器；该扩展芯片本身不是设备。ES8388/ES7210 音频通路、microSD 卡槽和 SC202CS 摄像头尚未声明：ESP32-P4 平台还没有 I2S、SDMMC 或 MIPI CSI 绑定。
+显示屏实现通过 `43h` 处的 PI4IOE5V6408 扩展芯片复位面板和触摸控制器，该扩展芯片本身不是设备。与 M5GFX 一样，复位期间它把触摸中断线（GPIO23）保持为高电平，使 GT911 应答于 `14h`，然后根据应答的触摸控制器识别面板。音频编解码器实现通过同一个扩展芯片打开扬声器功放。microSD 卡槽尚未声明：它位于 SD 主机的槽位 0，而平台用槽位 1 驱动 Wi-Fi 协处理器，平台目前还不能把槽位 0 交给开发板设备。SC202CS 摄像头也尚未声明：ESP32-P4 平台没有 MIPI CSI 绑定。
 
 ## Wi-Fi
 

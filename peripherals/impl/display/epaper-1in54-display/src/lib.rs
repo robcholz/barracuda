@@ -96,32 +96,23 @@ impl PanelController {
 }
 
 /// Move-only resources consumed by the implementation.
-pub struct Epaper1in54Bindings<SPI, BUSY, DC, RST, POWER, DELAY> {
+pub struct Epaper1in54Bindings<SPI, BUSY, DC, RST, DELAY> {
     spi: SPI,
     busy: BUSY,
     dc: DC,
     reset: RST,
-    power_hold: POWER,
     delay: DELAY,
 }
 
-impl<SPI, BUSY, DC, RST, POWER, DELAY> Epaper1in54Bindings<SPI, BUSY, DC, RST, POWER, DELAY> {
+impl<SPI, BUSY, DC, RST, DELAY> Epaper1in54Bindings<SPI, BUSY, DC, RST, DELAY> {
     /// Combines the selected SPI device and panel control signals.
     #[must_use]
-    pub const fn new(
-        spi: SPI,
-        busy: BUSY,
-        dc: DC,
-        reset: RST,
-        power_hold: POWER,
-        delay: DELAY,
-    ) -> Self {
+    pub const fn new(spi: SPI, busy: BUSY, dc: DC, reset: RST, delay: DELAY) -> Self {
         Self {
             spi,
             busy,
             dc,
             reset,
-            power_hold,
             delay,
         }
     }
@@ -129,7 +120,7 @@ impl<SPI, BUSY, DC, RST, POWER, DELAY> Epaper1in54Bindings<SPI, BUSY, DC, RST, P
 
 /// Initialization or display-control failure.
 #[derive(Debug)]
-pub enum Epaper1in54Error<SPI, DC, BUSY, RST, POWER> {
+pub enum Epaper1in54Error<SPI, DC, BUSY, RST> {
     /// Panel SPI transaction failed.
     Spi(SPI),
     /// The data/command output failed.
@@ -138,8 +129,6 @@ pub enum Epaper1in54Error<SPI, DC, BUSY, RST, POWER> {
     Busy(BUSY),
     /// The reset output failed.
     Reset(RST),
-    /// The Board power-hold output rejected the requested state.
-    Power(POWER),
     /// `BUSY` never settled after reset, so no controller was identified.
     PanelNotDetected,
     /// The controller stayed busy past its timeout.
@@ -150,8 +139,8 @@ pub enum Epaper1in54Error<SPI, DC, BUSY, RST, POWER> {
     OrientationUnsupported,
 }
 
-impl<SPI, DC, BUSY, RST, POWER> From<jd79653a::Error<SPI, DC, BUSY>>
-    for Epaper1in54Error<SPI, DC, BUSY, RST, POWER>
+impl<SPI, DC, BUSY, RST> From<jd79653a::Error<SPI, DC, BUSY>>
+    for Epaper1in54Error<SPI, DC, BUSY, RST>
 {
     fn from(error: jd79653a::Error<SPI, DC, BUSY>) -> Self {
         match error {
@@ -164,12 +153,11 @@ impl<SPI, DC, BUSY, RST, POWER> From<jd79653a::Error<SPI, DC, BUSY>>
 }
 
 /// Error type of one concrete display.
-pub type ErrorOf<SPI, BUSY, DC, RST, POWER> = Epaper1in54Error<
+pub type ErrorOf<SPI, BUSY, DC, RST> = Epaper1in54Error<
     <SPI as embedded_hal::spi::ErrorType>::Error,
     <DC as embedded_hal::digital::ErrorType>::Error,
     <BUSY as embedded_hal::digital::ErrorType>::Error,
     <RST as embedded_hal::digital::ErrorType>::Error,
-    <POWER as embedded_hal::digital::ErrorType>::Error,
 >;
 
 enum Panel<SPI, BUSY, DC, RST, DELAY>
@@ -192,17 +180,15 @@ where
 }
 
 /// Initialized buffered 1.54-inch e-paper display.
-pub struct Epaper1in54Display<SPI, BUSY, DC, RST, POWER, DELAY>
+pub struct Epaper1in54Display<SPI, BUSY, DC, RST, DELAY>
 where
     SPI: SpiDevice,
     BUSY: InputPin,
     DC: OutputPin,
     RST: OutputPin,
-    POWER: OutputPin,
     DELAY: DelayNs,
 {
     panel: Panel<SPI, BUSY, DC, RST, DELAY>,
-    power_hold: POWER,
     delay: DELAY,
     framebuffer: Display1in54,
     /// The image last presented, which the next JD79653A update loads as the
@@ -212,8 +198,8 @@ where
 }
 
 /// Static implementation factory.
-pub struct Epaper1in54DisplayImplementation<SPI, BUSY, DC, RST, POWER, DELAY>(
-    PhantomData<(SPI, BUSY, DC, RST, POWER, DELAY)>,
+pub struct Epaper1in54DisplayImplementation<SPI, BUSY, DC, RST, DELAY>(
+    PhantomData<(SPI, BUSY, DC, RST, DELAY)>,
 );
 
 fn reset_pulse<RST: OutputPin>(
@@ -253,25 +239,23 @@ fn detect<BUSY: InputPin>(
     Ok(None)
 }
 
-impl<SPI, BUSY, DC, RST, POWER, DELAY> PeripheralImplementation
-    for Epaper1in54DisplayImplementation<SPI, BUSY, DC, RST, POWER, DELAY>
+impl<SPI, BUSY, DC, RST, DELAY> PeripheralImplementation
+    for Epaper1in54DisplayImplementation<SPI, BUSY, DC, RST, DELAY>
 where
     SPI: SpiDevice + 'static,
     BUSY: InputPin + 'static,
     DC: OutputPin + 'static,
     RST: OutputPin + 'static,
-    POWER: OutputPin + 'static,
     DELAY: DelayNs + 'static,
     SPI::Error: 'static,
     BUSY::Error: 'static,
     DC::Error: 'static,
     RST::Error: 'static,
-    POWER::Error: 'static,
 {
-    type Bindings = Epaper1in54Bindings<SPI, BUSY, DC, RST, POWER, DELAY>;
+    type Bindings = Epaper1in54Bindings<SPI, BUSY, DC, RST, DELAY>;
     type Config = ();
-    type Peripheral = Epaper1in54Display<SPI, BUSY, DC, RST, POWER, DELAY>;
-    type Error = ErrorOf<SPI, BUSY, DC, RST, POWER>;
+    type Peripheral = Epaper1in54Display<SPI, BUSY, DC, RST, DELAY>;
+    type Error = ErrorOf<SPI, BUSY, DC, RST>;
 
     async fn initialize(
         bindings: Self::Bindings,
@@ -282,10 +266,8 @@ where
             mut busy,
             dc,
             mut reset,
-            mut power_hold,
             mut delay,
         } = bindings;
-        power_hold.set_high().map_err(Epaper1in54Error::Power)?;
         // M5GFX resets before identifying: a panel in deep sleep would not
         // answer otherwise.
         reset_pulse(&mut reset, &mut delay).map_err(Epaper1in54Error::Reset)?;
@@ -310,7 +292,6 @@ where
         };
         Ok(Epaper1in54Display {
             panel,
-            power_hold,
             delay,
             framebuffer: Display1in54::default(),
             displayed: [0xFF; FRAME_BYTES],
@@ -318,13 +299,12 @@ where
     }
 }
 
-impl<SPI, BUSY, DC, RST, POWER, DELAY> Epaper1in54Display<SPI, BUSY, DC, RST, POWER, DELAY>
+impl<SPI, BUSY, DC, RST, DELAY> Epaper1in54Display<SPI, BUSY, DC, RST, DELAY>
 where
     SPI: SpiDevice,
     BUSY: InputPin,
     DC: OutputPin,
     RST: OutputPin,
-    POWER: OutputPin,
     DELAY: DelayNs,
 {
     /// Returns the controller identified at start-up.
@@ -357,14 +337,12 @@ fn jd_window(region: Option<Rectangle>) -> Window {
     .unwrap_or(Window::FULL)
 }
 
-impl<SPI, BUSY, DC, RST, POWER, DELAY> OriginDimensions
-    for Epaper1in54Display<SPI, BUSY, DC, RST, POWER, DELAY>
+impl<SPI, BUSY, DC, RST, DELAY> OriginDimensions for Epaper1in54Display<SPI, BUSY, DC, RST, DELAY>
 where
     SPI: SpiDevice,
     BUSY: InputPin,
     DC: OutputPin,
     RST: OutputPin,
-    POWER: OutputPin,
     DELAY: DelayNs,
 {
     fn size(&self) -> Size {
@@ -372,14 +350,12 @@ where
     }
 }
 
-impl<SPI, BUSY, DC, RST, POWER, DELAY> DrawTarget
-    for Epaper1in54Display<SPI, BUSY, DC, RST, POWER, DELAY>
+impl<SPI, BUSY, DC, RST, DELAY> DrawTarget for Epaper1in54Display<SPI, BUSY, DC, RST, DELAY>
 where
     SPI: SpiDevice,
     BUSY: InputPin,
     DC: OutputPin,
     RST: OutputPin,
-    POWER: OutputPin,
     DELAY: DelayNs,
 {
     type Color = Color;
@@ -404,17 +380,15 @@ where
     }
 }
 
-impl<SPI, BUSY, DC, RST, POWER, DELAY> Display
-    for Epaper1in54Display<SPI, BUSY, DC, RST, POWER, DELAY>
+impl<SPI, BUSY, DC, RST, DELAY> Display for Epaper1in54Display<SPI, BUSY, DC, RST, DELAY>
 where
     SPI: SpiDevice,
     BUSY: InputPin,
     DC: OutputPin,
     RST: OutputPin,
-    POWER: OutputPin,
     DELAY: DelayNs,
 {
-    type ControlError = ErrorOf<SPI, BUSY, DC, RST, POWER>;
+    type ControlError = ErrorOf<SPI, BUSY, DC, RST>;
     type RenderError = Infallible;
 
     fn descriptor(&self) -> DisplayDescriptor {
@@ -475,11 +449,6 @@ where
     }
 
     async fn set_power(&mut self, power: DisplayPower) -> Result<(), Self::ControlError> {
-        if power == DisplayPower::On {
-            self.power_hold
-                .set_high()
-                .map_err(Epaper1in54Error::Power)?;
-        }
         match &mut self.panel {
             Panel::Ssd1681 { epd, spi } => match power {
                 DisplayPower::On => epd
@@ -510,9 +479,6 @@ where
                     *asleep = true;
                 }
             },
-        }
-        if power == DisplayPower::Off {
-            self.power_hold.set_low().map_err(Epaper1in54Error::Power)?;
         }
         Ok(())
     }

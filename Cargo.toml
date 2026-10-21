@@ -62,7 +62,9 @@ barracuda-bmi270-imu = { path = "peripherals/impl/inertial-measurement/bmi270-im
 barracuda-bq27220-power-monitor = { path = "peripherals/impl/power-monitor/bq27220-power-monitor" }
 barracuda-capacitive-touch-buttons = { path = "peripherals/impl/buttons/capacitive-touch-buttons" }
 barracuda-chain-captain-display = { path = "peripherals/impl/display/chain-captain-display" }
+barracuda-chsc6540-touch = { path = "peripherals/impl/touch/chsc6540-touch" }
 barracuda-corep4x-dsi-display = { path = "peripherals/impl/display/corep4x-dsi-display" }
+barracuda-cst3530-touch = { path = "peripherals/impl/touch/cst3530-touch" }
 barracuda-cst816t-touch = { path = "peripherals/impl/touch/cst816t-touch" }
 barracuda-ed047tc1-display = { path = "peripherals/impl/display/ed047tc1-display" }
 barracuda-epaper-1in54-display = { path = "peripherals/impl/display/epaper-1in54-display" }
@@ -70,6 +72,7 @@ barracuda-es8311-audio-codec = { path = "peripherals/impl/audio-codec/es8311-aud
 barracuda-es8311-es7210-audio-codec = { path = "peripherals/impl/audio-codec/es8311-es7210-audio-codec" }
 barracuda-es8388-es7210-audio-codec = { path = "peripherals/impl/audio-codec/es8388-es7210-audio-codec" }
 barracuda-es8389-audio-codec = { path = "peripherals/impl/audio-codec/es8389-audio-codec" }
+barracuda-ft5x06-touch = { path = "peripherals/impl/touch/ft5x06-touch" }
 barracuda-ina226-power-monitor = { path = "peripherals/impl/power-monitor/ina226-power-monitor" }
 barracuda-indicator-led = { path = "peripherals/impl/indicator/indicator-led" }
 barracuda-it8951-display = { path = "peripherals/impl/display/it8951-display" }
@@ -165,6 +168,8 @@ barracuda-driver-axp192 = { path = "drivers/chips/axp192" }
 barracuda-driver-axp2101 = { path = "drivers/chips/axp2101" }
 barracuda-driver-bq27220 = { path = "drivers/chips/bq27220" }
 barracuda-driver-co5300 = { path = "drivers/chips/co5300" }
+barracuda-driver-chsc6540 = { path = "drivers/chips/chsc6540" }
+barracuda-driver-cst3530 = { path = "drivers/chips/cst3530" }
 barracuda-driver-cst816t = { path = "drivers/chips/cst816t" }
 barracuda-driver-es8311 = { path = "drivers/chips/es8311" }
 barracuda-driver-esp-hosted = { path = "drivers/chips/esp-hosted" }
@@ -173,6 +178,7 @@ barracuda-driver-es8388 = { path = "drivers/chips/es8388" }
 barracuda-driver-es8389 = { path = "drivers/chips/es8389" }
 barracuda-driver-ed047tc1 = { path = "drivers/chips/ed047tc1" }
 barracuda-driver-ed2208 = { path = "drivers/chips/ed2208" }
+barracuda-driver-ft5x06 = { path = "drivers/chips/ft5x06" }
 barracuda-driver-gt911 = { path = "drivers/chips/gt911" }
 barracuda-driver-ili9881c = { path = "drivers/chips/ili9881c" }
 barracuda-driver-ina226 = { path = "drivers/chips/ina226" }

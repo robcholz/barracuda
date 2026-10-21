@@ -5,6 +5,9 @@ use std::{env, error::Error, fs, path::PathBuf};
 use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
 use esp_idf_part::{AppType, DataType, Flags, Partition, PartitionTable, SubType, Type};
 
+#[path = "../esp32/build_power_hold.rs"]
+mod power_hold;
+
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=BARRACUDA_LOG_LEVEL");
     let log_level = generated_log_level()?;
@@ -24,6 +27,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
+
+    // The Board's battery power latch, which the entry drives high. An
+    // inactive Platform gets a macro that does nothing.
+    println!("cargo:rerun-if-changed=../esp32/build_power_hold.rs");
+    let power_hold = board
+        .hardware()
+        .power_hold()
+        .filter(|_| board.hardware().chip() == "esp32s3");
+    fs::write(
+        output.join("power_hold.rs"),
+        power_hold::power_hold_macro(power_hold)?,
+    )?;
 
     // This Platform is an unconditional dependency of the selected-Platform
     // composition, so its build script runs for every selected Board, not only

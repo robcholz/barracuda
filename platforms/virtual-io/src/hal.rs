@@ -586,6 +586,15 @@ pub fn digital_output(pin: VirtualPinToken, initial: DigitalLevel) -> DigitalOut
     }
 }
 
+/// A pin a peripheral implementation switches between input and output.
+pub type ConfigurablePin = VirtualDigitalPin;
+
+/// Hands a virtual pin to the implementation that configures it.
+#[must_use]
+pub fn configurable_pin(pin: VirtualPinToken) -> ConfigurablePin {
+    VirtualDigitalPin::new(pin.hardware, pin.pin)
+}
+
 /// Reads a virtual pin as a floating input.
 #[must_use]
 pub fn digital_input(pin: VirtualPinToken) -> DigitalInput {

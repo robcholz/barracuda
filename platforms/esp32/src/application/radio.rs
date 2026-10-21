@@ -29,6 +29,26 @@ pub use esp_rtos as __rtos;
 #[doc(hidden)]
 pub use static_cell::StaticCell as __StaticCell;
 
+// `__barracuda_power_hold!`, projected by `build.rs` from the selected
+// Board's `hardware.power-hold`.
+include!(concat!(env!("OUT_DIR"), "/power_hold.rs"));
+
+/// Drives a Board's battery power latch high for the life of the firmware.
+///
+/// The latch keeps a battery-powered Board on once its power button is
+/// released, so the entry drives it before anything else is built.
+#[doc(hidden)]
+pub fn hold_power(pin: impl esp_hal::gpio::OutputPin + 'static) {
+    // The driver lives as long as the firmware, so nothing reconfigures the
+    // pin until the chip resets or powers off.
+    static LATCH: StaticCell<esp_hal::gpio::Output<'static>> = StaticCell::new();
+    LATCH.init(esp_hal::gpio::Output::new(
+        pin,
+        esp_hal::gpio::Level::High,
+        esp_hal::gpio::OutputConfig::default(),
+    ));
+}
+
 // Panic-abort builds still emit references from `.eh_frame` sections. No
 // unwinding reaches this symbol.
 #[allow(unsafe_code)]
@@ -151,6 +171,9 @@ macro_rules! platform_entry {
             $crate::application::initialize_allocator();
             let peripherals =
                 $crate::application::__hal::init($crate::application::__hal::Config::default());
+            // A battery power latch goes high first, or the Board switches
+            // off when its power button is released.
+            $crate::__barracuda_power_hold!(peripherals);
             $crate::__initialize_bulk_memory!($board, peripherals);
             let $board_bindings_value = $board_bindings!(peripherals);
             let flash = peripherals.FLASH;
