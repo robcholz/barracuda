@@ -247,6 +247,9 @@ fn mount_node(ui: &mut Ui, node: &Node, parent: NodeId, anchor: NodeId) -> Insta
     }
 }
 
+/// How far text may run past its room, in pixels, before it wraps.
+const WRAP_SLACK: f32 = 0.5;
+
 /// Shows `text` on `node` broken into lines that fit its room; returns
 /// whether the shown text changed.
 fn wrap_text(ui: &mut Ui, node: NodeId, text: &str, wrapped_at: &mut Option<f32>) -> bool {
@@ -262,20 +265,22 @@ fn wrap_text(ui: &mut Ui, node: NodeId, text: &str, wrapped_at: &mut Option<f32>
         core.layout_unrounded_of(parent),
         core.resolved_style(parent),
     ) {
+        // A border is drawn over the box and takes no room.
         (Some((_, _, parent_width, _)), Some(outer)) => {
             let edge = |value: f32| if value.is_nan() { 0.0 } else { value };
             parent_width
                 - edge(outer.padding[1])
                 - edge(outer.padding[3])
-                - 2.0 * edge(outer.border_width)
                 - edge(style.margin[1])
                 - edge(style.margin[3])
         }
         _ => f32::INFINITY,
     };
     // A box narrower than its parent's inside was sized by something other
-    // than its text; one as wide takes the parent's width.
-    let limit = if width < room { width } else { room };
+    // than its text; one as wide takes the parent's width. Half a pixel of
+    // slack keeps a box sized by its own text from breaking it over float
+    // error.
+    let limit = if width < room { width } else { room } + WRAP_SLACK;
     if *wrapped_at == Some(limit) {
         return false;
     }

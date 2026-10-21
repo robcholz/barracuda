@@ -96,10 +96,14 @@ fn a_flex_share_wraps_at_its_share() {
     let document = shown(200.0, "Standby", label, "80%");
     let shown = texts(&document);
     let (wrapped, (_, _, width, _)) = &shown[1];
-    let (_, (value_x, _, _, _)) = &shown[2];
+    let (_, (_, _, value, _)) = &shown[2];
     assert!(wrapped.contains('\n'), "{wrapped:?}");
-    // The label keeps to the room the value leaves, 8 px of gap before it.
-    assert!(*width + 8.0 <= *value_x + 0.5, "{width} then {value_x}");
+    // The label keeps to the room the value's box leaves: 160 px inside the
+    // column, less 8 px of gap and the box's 28 px of padding.
+    assert!(
+        *width + 8.0 + value + 28.0 <= 160.5,
+        "{width} beside {value}"
+    );
 }
 
 #[test]
@@ -117,6 +121,14 @@ fn a_wider_display_wraps_less_and_new_text_rewraps() {
         lines(&document),
         lines(&shown(200.0, LONG, "Volume", "80%"))
     );
+}
+
+#[test]
+fn a_box_sized_by_its_text_keeps_it_on_one_line() {
+    // The value's bordered, padded box is as wide as its text.
+    let document = shown(200.0, "Standby", "Volume", "Thanks!");
+    let shown = texts(&document);
+    assert_eq!(shown[2].0, "Thanks!");
 }
 
 #[test]
