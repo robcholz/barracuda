@@ -28,6 +28,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 | Device | What it is | Lua package |
 | --- | --- | --- |
+| `audio-codec` | Audio codec (ES8388 speaker DAC, ES7210 microphone ADC) | [`audio`](/plugins/vm-audio) |
 | `display` | 720x1280 MIPI DSI display (ILI9881C, ST7123, or ST7121, detected at start) | [`display`](/plugins/vm-display) |
 | `touch` | Touch controller (GT911 or the panel's ST712x) | — |
 | `real-time-clock` | Real-time clock (RX8130CE) | — |
@@ -39,8 +40,11 @@ the PI4IOE5V6408 expander at `43h`, which is not a device of its own. As M5GFX
 does, it holds the touch interrupt line (GPIO23) high meanwhile, so a GT911
 answers at `14h`, and then identifies the panel by the touch controller that
 answers.
-The ES8388/ES7210 audio path, the microSD slot, and the SC202CS camera are not
-declared yet: the ESP32-P4 Platform has no I2S, SDMMC, or MIPI CSI binding.
+The audio codec implementation switches the speaker amplifier on through the
+same expander. The microSD slot is not declared yet: it is on slot 0 of the
+SD host, whose slot 1 the Platform drives for the Wi-Fi co-processor, and the
+Platform cannot yet hand slot 0 to a Board device. The SC202CS camera is not
+declared either: the ESP32-P4 Platform has no MIPI CSI binding.
 
 ## Wi-Fi
 

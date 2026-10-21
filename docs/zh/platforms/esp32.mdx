@@ -81,7 +81,7 @@ cargo image deploy
 
 ESP32-S3 还支持四线 SPI 设备、SD/MMC 卡、摄像头采集、8 位并行输出（`parallel-output`，即 i8080 模式下的 LCD_CAM 控制器，可带或不带数据/命令线）、I2S 音频流和电容触摸。
 
-ESP32-P4 还支持 MIPI DSI 主机（`dsi-host`）：链路、位于 PSRAM、由 VDMA 扫描输出的 RGB565 帧缓冲、视频开始前和进行中的 DCS 命令，以及背光引脚。由于 esp-hal 没有 ESP32-P4 的 LEDC 驱动，背光只能开关。
+ESP32-P4 还支持 I2S 音频流（`i2s-stream`，与 ESP32-S3 使用同一个适配层）和 MIPI DSI 主机（`dsi-host`）：链路、位于 PSRAM、由 VDMA 扫描输出的 RGB565 帧缓冲、视频开始前和进行中的 DCS 命令，以及背光引脚。由于 esp-hal 没有 ESP32-P4 的 LEDC 驱动，背光只能开关。
 
 ESP32-P4 没有射频。它的 IP 协议栈运行在开发板声明的网络链路上：
 
