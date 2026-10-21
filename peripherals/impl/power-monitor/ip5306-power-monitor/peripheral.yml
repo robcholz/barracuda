@@ -1,0 +1,20 @@
+id: ip5306-power-monitor
+api-version: 1
+peripheral: power-monitor
+implementation:
+  package: barracuda-ip5306-power-monitor
+  crate: barracuda_ip5306_power_monitor
+  factory: "::{{crate}}::Ip5306PowerMonitorImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::Ip5306Bindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::Ip5306Config::new({{parameter.address}})"
+# The battery level and charger state of an Injoinic IP5306 power-bank SoC.
+# It has no voltage or current reading, so a measurement fails and only the
+# battery state, in 25 % steps, is reported. The implementation only reads.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # The IP5306's fixed address 75h.
+    default: 117

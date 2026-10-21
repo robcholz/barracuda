@@ -3,20 +3,25 @@
 //! The M5PM1 is the microcontroller M5Stack's "Stamp Timer Power2" uses for
 //! charging, power rails, and wake sources. Registers and bits follow
 //! M5Unified's `M5PM1_Class` (src/utility/power/M5PM1_Class.inl, MIT
-//! license). This driver covers the rail and housekeeping registers and the
+//! license). This driver covers the rail and housekeeping registers, the
 //! five general-purpose pins G0 to G4 with their PWM function, which M5Stack's
-//! Paper boards use for the e-paper supply and the front light; the charger
-//! and wake functions are left out until a consumer needs them.
+//! Paper boards use for the e-paper supply and the front light, and the
+//! battery voltage and power-source readings; the charger and wake functions
+//! are left out until a consumer needs them.
 //!
 //! | Register | Address |
 //! | --- | --- |
+//! | `PWR_SRC` (bit 0 VIN, bit 1 5 V in/out, bit 2 battery) | `04h` |
 //! | `PWR_CFG` (bit 1 DC/DC, bit 2 LDO, bit 3 boost) | `06h` |
 //! | `I2C_CFG` | `09h` |
 //! | `WDT_CNT` | `0Ah` |
 //! | `GPIO_MODE` (1 = output) | `10h` |
 //! | `GPIO_OUT` | `11h` |
+//! | `GPIO_IN` | `12h` |
 //! | `GPIO_DRV` (1 = open drain) | `13h` |
+//! | `GPIO_PUPD0` (G0..G3) / `GPIO_PUPD1` (G4), two bits per pin | `14h`/`15h` |
 //! | `GPIO_FUNC0` (G0..G3) / `GPIO_FUNC1` (G4), two bits per pin | `16h`/`17h` |
+//! | `VBAT` (millivolts, little-endian) | `22h`/`23h` |
 //! | `PWMn` (12-bit, bit 12 enable, bit 13 inverted) | `30h` + 2n |
 //! | `PWM_FREQ` (Hz, shared) | `34h`/`35h` |
 
@@ -27,12 +32,17 @@ use embedded_hal::i2c::I2c;
 /// Factory I2C address.
 pub const DEFAULT_ADDRESS: u8 = 0x6E;
 
+const POWER_SOURCE: u8 = 0x04;
 const POWER_CONFIG: u8 = 0x06;
 const I2C_CONFIG: u8 = 0x09;
 const WATCHDOG_COUNT: u8 = 0x0A;
 const GPIO_MODE: u8 = 0x10;
 const GPIO_OUTPUT: u8 = 0x11;
+const GPIO_INPUT: u8 = 0x12;
 const GPIO_DRIVE: u8 = 0x13;
+const GPIO_PULL_LOW: u8 = 0x14;
+const GPIO_PULL_HIGH: u8 = 0x15;
+const BATTERY_VOLTAGE: u8 = 0x22;
 const GPIO_FUNCTION_LOW: u8 = 0x16;
 const GPIO_FUNCTION_HIGH: u8 = 0x17;
 const PWM0_DUTY: u8 = 0x30;
@@ -82,6 +92,41 @@ impl PwmChannel {
             Self::Ch0 => 3,
             Self::Ch1 => 4,
         }
+    }
+}
+
+/// Bias of one general-purpose input (two bits in `GPIO_PUPD0/1`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pull {
+    /// No bias.
+    None = 0b00,
+    /// Pull-up.
+    Up = 0b01,
+    /// Pull-down.
+    Down = 0b10,
+}
+
+/// The supplies present, from `PWR_SRC` (M5Unified `pwr_src_t`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PowerSource(u8);
+
+impl PowerSource {
+    /// Whether external power reaches the VIN input.
+    #[must_use]
+    pub const fn vin(self) -> bool {
+        self.0 & 0b001 != 0
+    }
+
+    /// Whether external power reaches the 5 V input/output.
+    #[must_use]
+    pub const fn five_volt(self) -> bool {
+        self.0 & 0b010 != 0
+    }
+
+    /// Whether the battery node is powered.
+    #[must_use]
+    pub const fn battery(self) -> bool {
+        self.0 & 0b100 != 0
     }
 }
 
@@ -211,6 +256,57 @@ where
         self.update(GPIO_MODE, |value| value | mask)
     }
 
+    /// Configures `G<g>` (0 to 4) as a GPIO input with `pull`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-pin or I2C register error.
+    pub fn configure_input(&mut self, g: u8, pull: Pull) -> Result<(), Error<I2C::Error>> {
+        let mask = pin_mask(g)?;
+        self.set_pin_function(g, PinFunction::Gpio)?;
+        let (register, shift) = if g < 4 {
+            (GPIO_PULL_LOW, g.wrapping_mul(2))
+        } else {
+            (GPIO_PULL_HIGH, 0)
+        };
+        let field = 0b11_u8 << shift;
+        let bits = (pull as u8) << shift;
+        self.update(register, |value| (value & !field) | bits)?;
+        self.update(GPIO_MODE, |value| value & !mask)
+    }
+
+    /// Reads the level of `G<g>` (0 to 4).
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-pin or I2C register error.
+    pub fn input_is_high(&mut self, g: u8) -> Result<bool, Error<I2C::Error>> {
+        let mask = pin_mask(g)?;
+        Ok(self.read(GPIO_INPUT)? & mask != 0)
+    }
+
+    /// Reads the battery voltage in millivolts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn battery_millivolts(&mut self) -> Result<u16, Error<I2C::Error>> {
+        let mut bytes = [0; 2];
+        self.i2c
+            .write_read(self.address, &[BATTERY_VOLTAGE], &mut bytes)
+            .map_err(Error::Bus)?;
+        Ok(u16::from_le_bytes(bytes))
+    }
+
+    /// Reads which supplies are present.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn power_source(&mut self) -> Result<PowerSource, Error<I2C::Error>> {
+        Ok(PowerSource(self.read(POWER_SOURCE)? & 0b111))
+    }
+
     /// Drives a previously configured `G<g>` (0 to 4) output.
     ///
     /// # Errors
@@ -329,7 +425,7 @@ mod tests {
 
     use embedded_hal::i2c::{ErrorType, I2c, Operation};
 
-    use super::{Error, M5pm1, PwmChannel, Rail};
+    use super::{Error, M5pm1, Pull, PwmChannel, Rail};
 
     #[test]
     fn epd_supply_pin_matches_m5gfx_paper_diy_bring_up() {
@@ -437,6 +533,34 @@ mod tests {
         assert_eq!(bus.registers[0x11], 0xff);
     }
 
+    #[test]
+    fn charge_status_input_and_battery_readings_match_m5unified() {
+        // M5Unified PaperDIY: G3 a GPIO input with a pull-up (CHG_STAT).
+        let mut bus = Bus {
+            registers: [0x00; 0x40],
+        };
+        bus.registers[0x10] = 0xff;
+        bus.registers[0x16] = 0xff;
+        bus.registers[0x12] = 0b0000_0100;
+        bus.registers[0x04] = 0b1111_0101;
+        bus.registers[0x22] = 0x6c;
+        bus.registers[0x23] = 0x0e;
+        let mut controller = M5pm1::new(&mut bus, 0x6e).expect("controller");
+        controller.configure_input(3, Pull::Up).expect("G3 input");
+        assert!(!controller.input_is_high(3).expect("G3"));
+        assert!(controller.input_is_high(2).expect("G2"));
+        assert_eq!(controller.battery_millivolts().expect("VBAT"), 3_692);
+        let source = controller.power_source().expect("source");
+        assert!(source.vin() && !source.five_volt() && source.battery());
+        assert!(matches!(
+            controller.configure_input(5, Pull::None),
+            Err(Error::InvalidPin)
+        ));
+        assert_eq!(bus.registers[0x16], 0x3f);
+        assert_eq!(bus.registers[0x14], 0b0100_0000);
+        assert_eq!(bus.registers[0x10], 0xf7);
+    }
+
     struct Bus {
         registers: [u8; 0x40],
     }
@@ -466,8 +590,10 @@ mod tests {
             bytes: &[u8],
             read: &mut [u8],
         ) -> Result<(), Self::Error> {
-            if let ([register], [value]) = (bytes, read) {
-                *value = self.registers[usize::from(*register)];
+            if let [register] = bytes {
+                for (offset, value) in read.iter_mut().enumerate() {
+                    *value = self.registers[usize::from(*register) + offset];
+                }
             }
             Ok(())
         }

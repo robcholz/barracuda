@@ -1,0 +1,35 @@
+id: m5pm1-power-monitor
+api-version: 1
+peripheral: power-monitor
+implementation:
+  package: barracuda-m5pm1-power-monitor
+  crate: barracuda_m5pm1_power_monitor
+  factory: "::{{crate}}::M5pm1PowerMonitorImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::M5pm1PowerMonitorBindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::M5pm1PowerMonitorConfig::new({{parameter.address}}, {{parameter.charge-status}})"
+# The battery voltage of an M5Stack M5PM1 power controller. The
+# implementation owns the battery-voltage and power-source registers and,
+# when the Board wires the charger's status to one, that M5PM1 pin; the
+# rails and other pins stay with the implementations that use them.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 6Eh, the M5PM1's factory address.
+    default: 110
+  # The M5PM1 pin the charger's active-low CHG_STAT drives, or `none` when
+  # the Board does not route it to the M5PM1. Without it, the battery reads
+  # as charging while VIN is present and the cell is below its full voltage.
+  charge-status:
+    type: enum
+    values: [none, g0, g1, g2, g3, g4]
+    rust-values:
+      none: "None"
+      g0: "Some(0)"
+      g1: "Some(1)"
+      g2: "Some(2)"
+      g3: "Some(3)"
+      g4: "Some(4)"
+    default: none

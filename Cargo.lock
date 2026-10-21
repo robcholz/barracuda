@@ -808,6 +808,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-axp192-axp2101-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-axp192",
+ "barracuda-driver-axp2101",
+ "barracuda-driver-ina3221",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-bm8563-rtc"
 version = "0.1.0"
 dependencies = [
@@ -879,6 +891,7 @@ dependencies = [
  "barracuda-apa102-led-strip",
  "barracuda-atom-s3-display",
  "barracuda-atom-s3r-display",
+ "barracuda-axp192-axp2101-power-monitor",
  "barracuda-bm8563-rtc",
  "barracuda-bmi270-imu",
  "barracuda-bq27220-power-monitor",
@@ -901,7 +914,9 @@ dependencies = [
  "barracuda-icm42607-imu",
  "barracuda-ina226-power-monitor",
  "barracuda-indicator-led",
+ "barracuda-ip5306-power-monitor",
  "barracuda-it8951-display",
+ "barracuda-m5pm1-power-monitor",
  "barracuda-m5stack-pmic-display",
  "barracuda-mipi-dbi-display",
  "barracuda-mipi-dbi-parallel-display",
@@ -1325,6 +1340,20 @@ version = "0.1.0"
 
 [[package]]
 name = "barracuda-driver-ina226"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ina3221"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ip5306"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
@@ -1906,6 +1935,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-ip5306-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-ip5306",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-it8951-display"
 version = "0.1.0"
 dependencies = [
@@ -1964,6 +2003,16 @@ dependencies = [
  "getset",
  "libm",
  "portable-atomic",
+]
+
+[[package]]
+name = "barracuda-m5pm1-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-m5pm1",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

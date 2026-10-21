@@ -3,6 +3,14 @@
 //! Register layout follows the AXP2101 datasheet (REG03H chip ID, REG90H LDO
 //! on/off control, REG92H through REG97H ALDO/BLDO voltages, REG99H DLDO1
 //! voltage), cross-checked against M5Stack's `M5Unified` `AXP2101_Class`.
+//!
+//! The registers fall into two groups with separate owners on a shared bus.
+//! The LDO registers above power and reset a Board's other devices. The
+//! measurement registers belong to whoever reads the battery: the status
+//! registers REG00H/REG01H, the ADC channel enable REG30H, the battery
+//! detection control REG68H, the battery voltage REG34H/35H (14 bits in
+//! millivolts), and the fuel gauge's state of charge REGA4H. No method
+//! touches registers of both groups. The AXP2101 has no battery-current ADC.
 
 #![no_std]
 
@@ -14,6 +22,16 @@ pub const ADDRESS: u8 = 0x34;
 const CHIP_ID: u8 = 0x03;
 const CHIP_ID_AXP2101: u8 = 0x4a;
 const LDO_ENABLE: u8 = 0x90;
+const POWER_STATUS_1: u8 = 0x00;
+const POWER_STATUS_2: u8 = 0x01;
+const ADC_CHANNEL_ENABLE: u8 = 0x30;
+const BATTERY_VOLTAGE: u8 = 0x34;
+const BATTERY_DETECTION: u8 = 0x68;
+const BATTERY_PERCENT: u8 = 0xa4;
+/// REG30H bit 0: the battery voltage ADC channel.
+const VBAT_ADC: u8 = 1 << 0;
+/// REG68H bit 0: battery detection, which the fuel gauge needs.
+const BATTERY_DETECTION_ENABLE: u8 = 1 << 0;
 /// Voltage registers keep their setting in bits 4:0; bits 7:5 are reserved.
 const VOLTAGE_FIELD: u8 = 0x1f;
 
@@ -63,6 +81,28 @@ impl Ldo {
             Self::Dldo1 => (0x99, 3300),
         }
     }
+}
+
+/// Charger state from REG01H bits 6:5 (M5Unified `getChargeStatus`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChargeDirection {
+    /// `01`: current flows into the battery.
+    Charging,
+    /// `10`: the battery supplies the system.
+    Discharging,
+    /// `00` or `11`: neither.
+    Standby,
+}
+
+/// Battery state from REG00H and REG01H.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BatteryStatus {
+    /// Whether the battery charges, discharges, or neither.
+    pub direction: ChargeDirection,
+    /// REG00H bit 5: VBUS is good.
+    pub vbus_present: bool,
+    /// REG00H bit 3: a battery is connected.
+    pub battery_present: bool,
 }
 
 /// AXP2101 register or configuration failure.
@@ -151,6 +191,58 @@ where
         Ok(())
     }
 
+    /// Switches on the battery voltage ADC channel and battery detection,
+    /// leaving the other channels and bits as they are.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn enable_battery_measurement(&mut self) -> Result<(), Error<I2C::Error>> {
+        self.update(ADC_CHANNEL_ENABLE, |value| value | VBAT_ADC)?;
+        self.update(BATTERY_DETECTION, |value| value | BATTERY_DETECTION_ENABLE)
+    }
+
+    /// Reads the charge direction and the supply and battery flags.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn battery_status(&mut self) -> Result<BatteryStatus, Error<I2C::Error>> {
+        let status_1 = self.read(POWER_STATUS_1)?;
+        let status_2 = self.read(POWER_STATUS_2)?;
+        Ok(BatteryStatus {
+            direction: match (status_2 >> 5) & 0b11 {
+                0b01 => ChargeDirection::Charging,
+                0b10 => ChargeDirection::Discharging,
+                _ => ChargeDirection::Standby,
+            },
+            vbus_present: status_1 & (1 << 5) != 0,
+            battery_present: status_1 & (1 << 3) != 0,
+        })
+    }
+
+    /// Reads the battery voltage in millivolts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn battery_millivolts(&mut self) -> Result<u16, Error<I2C::Error>> {
+        let mut value = [0; 2];
+        self.i2c
+            .write_read(self.address, &[BATTERY_VOLTAGE], &mut value)
+            .map_err(Error::Bus)?;
+        Ok(u16::from_be_bytes([value[0] & 0x3f, value[1]]))
+    }
+
+    /// Reads the fuel gauge's state of charge in percent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn battery_percent(&mut self) -> Result<u8, Error<I2C::Error>> {
+        self.read(BATTERY_PERCENT)
+    }
+
     fn update(
         &mut self,
         register: u8,
@@ -203,7 +295,7 @@ mod tests {
         i2c::{ErrorType, I2c, Operation},
     };
 
-    use super::{ADDRESS, Axp2101, Error, LDO_ENABLE, Ldo};
+    use super::{ADDRESS, Axp2101, BatteryStatus, ChargeDirection, Error, LDO_ENABLE, Ldo};
 
     struct Bus {
         registers: [u8; 0x100],
@@ -240,8 +332,11 @@ mod tests {
                         self.registers[usize::from(*reg)] = *value;
                         self.writes.push((*reg, *value));
                     }
-                    Operation::Read([value]) => {
-                        *value = self.registers[usize::from(register.expect("register"))];
+                    Operation::Read(values) => {
+                        let start = usize::from(register.expect("register"));
+                        for (offset, value) in values.iter_mut().enumerate() {
+                            *value = self.registers[start + offset];
+                        }
                     }
                     _ => {}
                 }
@@ -351,5 +446,32 @@ mod tests {
             .collect();
         assert_eq!(enables, [0x08, 0x0a]);
         assert_eq!(delay.elapsed_ms, 130);
+    }
+
+    #[test]
+    fn reads_the_battery_through_the_measurement_registers_only() {
+        let mut bus = Bus::default();
+        bus.registers[0x30] = 0x02;
+        bus.registers[0x00] = 0b0010_1000;
+        bus.registers[0x01] = 0b0010_0000;
+        // 3.987 V; the top two bits of REG34H are not part of the value.
+        bus.registers[0x34] = 0xcf;
+        bus.registers[0x35] = 0x93;
+        bus.registers[0xa4] = 87;
+        {
+            let mut pmic = Axp2101::new(&mut bus, ADDRESS).expect("valid address");
+            pmic.enable_battery_measurement().expect("enable");
+            assert_eq!(
+                pmic.battery_status().expect("status"),
+                BatteryStatus {
+                    direction: ChargeDirection::Charging,
+                    vbus_present: true,
+                    battery_present: true,
+                }
+            );
+            assert_eq!(pmic.battery_millivolts().expect("voltage"), 3_987);
+            assert_eq!(pmic.battery_percent().expect("percent"), 87);
+        }
+        assert_eq!(bus.writes, [(0x30, 0x03), (0x68, 0x01)]);
     }
 }
