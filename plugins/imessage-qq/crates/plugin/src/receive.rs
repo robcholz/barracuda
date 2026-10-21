@@ -396,9 +396,7 @@ impl<Storage: PluginStorage> QQChannel<Storage> {
         let url = match settings.sender.gateway_url().await {
             Ok(url) => url,
             Err(ChannelError::Authentication) => {
-                return Err(ReceiveError::halt(
-                    "QQ rejected the credentials",
-                ))
+                return Err(ReceiveError::halt("QQ rejected the credentials"))
             }
             Err(ChannelError::Transport { message }) => {
                 return Err(ReceiveError::new(format!(

@@ -21,7 +21,7 @@ mod view;
 pub use document::{Document, DocumentAssets, DocumentError, ViewEvent};
 pub use microts::{NodeId, Ui, pocketjs_core};
 pub use program::{
-    BinaryOp, Branch, Cast, Element, Expr, ForEach, Handler, MAX_NODES, Node, Program, Slot,
-    TextPart,
+    BinaryOp, Branch, Cast, Element, Expr, ForEach, Handler, Layout, MAX_NODES, Node, Program,
+    Slot, TextPart,
 };
 pub use value::{Key, StructType, Type, Value, ValueError};

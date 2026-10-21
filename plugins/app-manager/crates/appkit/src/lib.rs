@@ -33,7 +33,7 @@ pub use bundle::{
     FORMAT_VERSION, InvalidApp, MANIFEST_FILE, MAX_PERMISSIONS, MAX_SOURCE_BYTES, MAX_VIEW_BYTES,
     WORKSPACE_APPS,
 };
-pub use device::{API_LEVEL, Device, requirement};
+pub use device::{API_LEVEL, Device, ViewTarget, requirement};
 pub use manager::{
     AppError, AppExit, AppManager, BuiltinError, GRACE, MAX_APP_RUNS, MAX_EXIT_OUTPUT_LINES,
     MAX_SUSPENDED, RunningApp,

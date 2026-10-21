@@ -79,7 +79,8 @@ directory without `.bapp` as invalid.
 | `view.program` | with view | the BVIR view program                                      |
 | `view.styles`  | with view | the compiled stylesheet                                    |
 | `view.fonts`   | no       | up to 16 baked font atlases; defaults to none               |
-| `view.size`    | no       | `[width, height]`, the smallest display the view fits; the build writes it from `pocket.json`. The view is laid out at the display's size |
+| `view.size`    | no       | `[width, height]`, the smallest display the view fits, in view pixels; the build writes it from `pocket.json`. The view is laid out at the display's size |
+| `view.target`  | no       | `{"size": [width, height], "density": 1}`, the display the view was built for; only a display of that size in view pixels and that density, 1 through 4, runs it. A build for one display writes it |
 | `api`          | no       | the version of the `app` package the app is written for; defaults to `1` |
 | `requires`     | no       | up to 16 stable packages the app cannot run without, each `name` or `name@version` with the least version it needs |
 | `uses`         | no       | up to 16 stable packages it uses when the device has them, written as in `requires` |
@@ -186,14 +187,42 @@ updates and restarts, and is never visible to other apps.
 
 ## Views
 
-`view.program`, `view.styles`, `view.fonts`, and `view.size` are build
-outputs: the MicroTS compiler turns `app.tsx` and its `app.d.ts` contract
-into View IR, `ui-link` links it into BVIR, and the font baker produces the
-atlases. A source manifest has no `view`. A display's shape is not part of
-the manifest: a view is designed to work on round and rectangular displays
-alike. An Agent that
-cannot run that toolchain writes a headless app, or copies the view files of
-an existing build next to its own entry program.
+`view.program`, `view.styles`, `view.fonts`, `view.size`, and `view.target`
+are build outputs: the MicroTS compiler turns `app.tsx` and its `app.d.ts`
+contract into View IR, `ui-link` links it into BVIR, and the font baker
+produces the atlases. A source manifest has no `view`. A display's shape is
+not part of the manifest: a view is designed to work on round and rectangular
+displays alike. An Agent that cannot run that toolchain writes a headless app,
+or copies the view files of an existing build next to its own entry program.
+
+### Building for a display
+
+A view is written once, for any display: it fills its parent and lays its
+content out with flexbox, as [App API](/plugins/app-manager/app-api#views-and-the-display)
+describes. An ordinary build makes one container for every display at least
+`view.size`, and the device lays the view out when it runs.
+
+A build for one display does part of that work ahead of time. Following
+PocketJS's platform contracts, the build resolves the app's `pocket.json`
+against the display, its size in view pixels and its density, the way
+`app.device().display` reports them, into a plan, and compiles with it:
+
+- every `layout-baked` subtree of the view is solved for that size in
+  PocketJS's own core, built for WebAssembly from the same PocketJS commit the
+  device runs, so the rects are the ones the device would compute; BVIR
+  carries them, and the device assigns them instead of solving them;
+- the app's own font atlases are baked at the display's density;
+- the manifest records the display as `view.target`, and any other display
+  lists the app as unable to run.
+
+```sh
+POCKETJS_ROOT=~/src/pocketjs bun plugins/app-manager/resources/build-app.ts \
+  --target 360x360@1 my-app my-app.bapp
+```
+
+A build without `--target` refuses a view with a `layout-baked` subtree,
+because its rects depend on the display. Builtin apps and the system view are
+built without one, so one image serves every Board's display.
 
 ## Example: a headless app an Agent can install
 

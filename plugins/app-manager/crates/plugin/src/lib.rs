@@ -151,7 +151,7 @@ where
         let ui = self
             .display
             .take()
-            .map(|display| Ui::new(display, self.touch.take()));
+            .map(|display| Ui::new(display, self.touch.take(), config::DISPLAY_DENSITY));
         let device = Device {
             board: self.board,
             display: ui.as_ref().map(Ui::display),

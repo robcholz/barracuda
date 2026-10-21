@@ -82,6 +82,31 @@
             "minimum": 1,
             "maximum": 4096
           }
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "size": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4096
+              }
+            },
+            "density": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4
+            }
+          },
+          "required": [
+            "size",
+            "density"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

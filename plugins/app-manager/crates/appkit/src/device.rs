@@ -46,6 +46,28 @@ impl Device {
     }
 }
 
+/// The display a view was built for: its build solved parts of the layout for
+/// this size, in view pixels, and drew its own atlases at this density, so it
+/// runs only on a display with both.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+pub struct ViewTarget {
+    /// `[width, height]` in view pixels.
+    pub size: [u32; 2],
+    /// Display pixels per view pixel along each axis.
+    pub density: u8,
+}
+
+impl core::fmt::Display for ViewTarget {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let [width, height] = self.size;
+        write!(f, "{width}×{height}")?;
+        if self.density != 1 {
+            write!(f, " @{}x", self.density)?;
+        }
+        Ok(())
+    }
+}
+
 /// A `requires` or `uses` entry: the package's name and, after `@`, the
 /// least version of its interface the app needs, 1 when it names none, and 0
 /// when the version is not a number.
@@ -98,7 +120,16 @@ pub(crate) fn incompatibility(
             return Some(String::from("This device has no display"));
         };
         // A view lays out at the display's size: the size it names is the
-        // least it needs.
+        // least it needs. One built for a display runs only on that display.
+        if let Some(target) = app.view_target {
+            let here = ViewTarget {
+                size: [display.width, display.height],
+                density: display.density,
+            };
+            if target != here {
+                return Some(format!("Built for {target} display (device has {here})"));
+            }
+        }
         if let Some([width, height]) = app.view_size
             && (display.width < width || display.height < height)
         {
@@ -158,6 +189,7 @@ pub(crate) fn describe(device: &Device, packages: &Packages) -> Value {
         "display": device.display.map(|display| json!({
             "width": display.width,
             "height": display.height,
+            "density": display.density,
         })),
         "touch": device.touch,
         "capabilities": capabilities,

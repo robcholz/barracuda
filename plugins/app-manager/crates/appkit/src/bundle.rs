@@ -9,7 +9,7 @@
 //! removing it.
 
 use crate::AppError;
-use crate::device::{self, Device, Packages};
+use crate::device::{self, Device, Packages, ViewTarget};
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
@@ -128,9 +128,12 @@ pub struct AppInfo {
     pub permissions: Vec<String>,
     /// The Boards the app is for; empty when it is for any.
     pub boards: Vec<String>,
-    /// The size its view was built for, if it says.
+    /// The smallest display its view fits, if it says.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view_size: Option<[u32; 2]>,
+    /// The display its view was built for, if its build named one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_target: Option<ViewTarget>,
     /// The name of the system icon the app is shown with, if it picked one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
@@ -197,6 +200,8 @@ struct ViewFiles {
     fonts: Vec<String>,
     #[serde(default)]
     size: Option<[u32; 2]>,
+    #[serde(default)]
+    target: Option<ViewTarget>,
 }
 
 /// Where a container's files are: directory `dir` in `filesystem`.
@@ -358,6 +363,7 @@ async fn read_container(
             permissions: manifest.permissions,
             boards: manifest.boards,
             view_size: manifest.view.as_ref().and_then(|view| view.size),
+            view_target: manifest.view.as_ref().and_then(|view| view.target),
             icon: manifest.icon,
             incompatible: None,
         },

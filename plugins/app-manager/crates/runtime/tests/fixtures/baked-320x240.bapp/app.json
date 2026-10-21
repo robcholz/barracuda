@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "baked",
+  "name": "Baked",
+  "version": "0.1.0",
+  "api": 1,
+  "view": {
+    "program": "view.bvir",
+    "styles": "styles.bin",
+    "size": [
+      240,
+      240
+    ],
+    "target": {
+      "size": [
+        320,
+        240
+      ],
+      "density": 1
+    }
+  }
+}

@@ -16,10 +16,15 @@
 //!
 //! A type is a tag (`0` bool, `1` i32, `2` f32, `3` f64, `4` string,
 //! `5` array + element type, `6` struct + `u16` index of an earlier struct).
+//!
+//! An element's flags say whether it has a dynamic style (bit 0), is
+//! focusable (1), has a press handler (2), static text (3), a static rect
+//! (4), which follows the style as four `f32`s (x, y, width, height), or a
+//! formula rect (5).
 
 use crate::program::{
-    BinaryOp, Branch, Cast, Element, Expr, ForEach, Handler, MAX_NODES, Node, Program, Slot,
-    TextPart,
+    BinaryOp, Branch, Cast, Element, Expr, ForEach, Handler, Layout, MAX_NODES, Node, Program,
+    Slot, TextPart,
 };
 use crate::value::{StructType, Type, Value};
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
@@ -239,8 +244,15 @@ impl Writer {
                 let flags = u8::from(element.dynamic_style.is_some())
                     | (u8::from(element.focusable) << 1)
                     | (u8::from(element.press.is_some()) << 2)
-                    | (u8::from(element.static_text.is_some()) << 3);
+                    | (u8::from(element.static_text.is_some()) << 3)
+                    | (u8::from(matches!(element.layout, Layout::Static { .. })) << 4)
+                    | (u8::from(element.layout == Layout::Formula) << 5);
                 self.out.push(flags);
+                if let Layout::Static { x, y, w, h } = element.layout {
+                    for value in [x, y, w, h] {
+                        self.out.extend_from_slice(&value.to_le_bytes());
+                    }
+                }
                 if let Some(expr) = &element.dynamic_style {
                     self.expr(expr);
                 }
@@ -562,9 +574,24 @@ impl<'a> Reader<'a> {
         }
         let style = i32::from_le_bytes(self.array()?);
         let flags = self.u8()?;
-        if flags & !0b1111 != 0 {
+        if flags & !0b11_1111 != 0 || flags & 0b11_0000 == 0b11_0000 {
             return Err(FormatError::Invalid("element flags"));
         }
+        let layout = if flags & 0b1_0000 != 0 {
+            let mut rect = [0.0; 4];
+            for value in &mut rect {
+                *value = f32::from_le_bytes(self.array()?);
+                if !value.is_finite() {
+                    return Err(FormatError::Invalid("element rect"));
+                }
+            }
+            let [x, y, w, h] = rect;
+            Layout::Static { x, y, w, h }
+        } else if flags & 0b10_0000 != 0 {
+            Layout::Formula
+        } else {
+            Layout::Live
+        };
         let dynamic_style = if flags & 1 != 0 {
             Some(self.expr()?)
         } else {
@@ -609,6 +636,7 @@ impl<'a> Reader<'a> {
         Ok(Element {
             kind,
             style,
+            layout,
             dynamic_style,
             props,
             static_text,

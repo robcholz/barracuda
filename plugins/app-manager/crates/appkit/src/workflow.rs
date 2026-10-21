@@ -240,6 +240,7 @@ mod tests {
                 permissions: vec!["gpio".into()],
                 boards: vec!["espressif-esp-vocat-v1-2".into()],
                 view_size: Some([360, 360]),
+                view_target: None,
                 icon: Some("lamp".into()),
                 incompatible: Some("This device has no light".into()),
             },

@@ -108,6 +108,30 @@ pub enum Node {
     For(Box<ForEach>),
 }
 
+/// How an element's rect is produced.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum Layout {
+    /// The layout solver places it.
+    #[default]
+    Live,
+    /// The build solved it for the display the view was built for: the rect,
+    /// relative to the parent, never changes, and the element and its
+    /// children stay out of the solver.
+    Static {
+        /// Left edge.
+        x: f32,
+        /// Top edge.
+        y: f32,
+        /// Width.
+        w: f32,
+        /// Height.
+        h: f32,
+    },
+    /// An absolutely positioned leaf whose rect follows its own inset and
+    /// size, without the solver.
+    Formula,
+}
+
 /// A rendered element.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Element {
@@ -115,6 +139,8 @@ pub struct Element {
     pub kind: u8,
     /// The compiled style id.
     pub style: i32,
+    /// How its rect is produced.
+    pub layout: Layout,
     /// A style id chosen at runtime.
     pub dynamic_style: Option<Expr>,
     /// Numeric properties as (property id, value).

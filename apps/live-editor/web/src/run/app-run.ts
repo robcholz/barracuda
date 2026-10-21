@@ -398,7 +398,7 @@ export class AppRun {
           api: 1,
           board: "live-editor-preview",
           display: display
-            ? { width: display.width, height: display.height }
+            ? { width: display.width, height: display.height, density: 1 }
             : null,
           touch: !!display,
           capabilities: { notify: 2 },

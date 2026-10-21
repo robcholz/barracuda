@@ -50,7 +50,7 @@ local capabilities = {}
 for name in pairs(device.capabilities) do capabilities[#capabilities + 1] = name end
 table.sort(capabilities)
 print(device.api, device.board, device.display.width, device.display.height,
-  device.touch, table.concat(capabilities, ","))
+  device.display.density, device.touch, table.concat(capabilities, ","))
 "#;
 
 async fn put(fs: &ScopedVfs, path: &str, bytes: &[u8]) {
@@ -95,6 +95,15 @@ async fn filesystem() -> ScopedVfs {
         &format!(r#","view":{{{VIEW},"size":[360,360]}}"#),
     )
     .await;
+    // Built for this display.
+    offer(
+        &fs,
+        "fitted",
+        &format!(
+            r#","view":{{{VIEW},"size":[240,240],"target":{{"size":[360,360],"density":1}}}}"#
+        ),
+    )
+    .await;
     // A smaller view lays out at the display's size.
     offer(
         &fs,
@@ -118,6 +127,19 @@ async fn filesystem() -> ScopedVfs {
     )
     .await;
     offer(&fs, "photo", r#","requires":["camera"]"#).await;
+    // Built for another display, or for this size at another density.
+    offer(
+        &fs,
+        "tailored",
+        &format!(r#","view":{{{VIEW},"target":{{"size":[320,240],"density":1}}}}"#),
+    )
+    .await;
+    offer(
+        &fs,
+        "sharp",
+        &format!(r#","view":{{{VIEW},"target":{{"size":[360,360],"density":2}}}}"#),
+    )
+    .await;
     offer(&fs, "serial", r#","permissions":["serial"]"#).await;
     // Breaks the app format.
     offer(&fs, "loose", r#","permissions":["pins"]"#).await;
@@ -172,6 +194,7 @@ async fn scenario(spawner: Spawner) {
         display: Some(DisplayInfo {
             width: 360,
             height: 360,
+            density: 1,
             round: true,
         }),
         touch: true,
@@ -196,6 +219,7 @@ async fn scenario(spawner: Spawner) {
         [
             ("dim", Some("Needs system update (light v2, device has v1)")),
             ("elsewhere", Some("Only for other-board, third-board")),
+            ("fitted", None),
             ("full", None),
             ("lamp", None),
             ("large", Some("Display too small (needs 480×480)")),
@@ -203,7 +227,15 @@ async fn scenario(spawner: Spawner) {
             ("photo", Some("This device has no camera")),
             ("plain", None),
             ("serial", Some("This device doesn't support serial")),
+            (
+                "sharp",
+                Some("Built for 360×360 @2x display (device has 360×360)")
+            ),
             ("small", None),
+            (
+                "tailored",
+                Some("Built for 320×240 display (device has 360×360)")
+            ),
             ("unknown", Some("This device has no teleport")),
         ]
     );
@@ -227,7 +259,7 @@ async fn scenario(spawner: Spawner) {
     }
 
     // Incompatible apps do not open.
-    for id in ["later", "dim", "elsewhere", "photo", "serial"] {
+    for id in ["later", "dim", "elsewhere", "photo", "serial", "tailored"] {
         assert_eq!(
             manager.open(id).await.err(),
             Some(AppError::Incompatible),
@@ -248,7 +280,7 @@ async fn scenario(spawner: Spawner) {
         exit.output,
         [
             "true\ttrue\tfalse\ttrue\tfalse",
-            "1\ttest-board\t360\t360\ttrue\tlight",
+            "1\ttest-board\t360\t360\t1\ttrue\tlight",
         ],
         "{exit:?}"
     );

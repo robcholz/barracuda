@@ -67,6 +67,29 @@
           "minItems": 2,
           "maxItems": 2
         },
+        "view_target": {
+          "type": "object",
+          "properties": {
+            "size": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "density": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "size",
+            "density"
+          ],
+          "additionalProperties": false
+        },
         "icon": {
           "type": "string"
         },

@@ -72,7 +72,7 @@ Rules the linker enforces:
 - Events: handler names with their arguments; app:active (first event of a view app), app:inactive, app:background (save now), app:foreground, app:terminate (save and return), app:tick (with app.events({ every = ms }), at least 100 ms), app:back (after app.navigation(depth) reported a page deeper than 0).
 - view:set(name, value) checks the value against the contract and returns true, or nil and a message. An i32 needs an integer (3, not 3.5). Structs are tables with the field names; arrays are sequences.
 - app.kv.get/set/delete/keys keep booleans, numbers, strings and tables (arrays, or string keys) across runs: at most 16 KiB of JSON. app.fs.read/write/append/list/exists/remove/mkdir keep text files up to 64 KiB.
-- app.device() describes the device: display = { width, height }, touch, capabilities.
+- app.device() describes the device: display = { width, height, density }, touch, capabilities.
 - notify (requires "notify@2" in the manifest): notify.post(title, body) and notify.ask(title, body, allow, deny), which waits for the person.
 - Board packages such as light and camera are not in the preview; require them only when the person asks, name them in permissions with boards, and say they work on the device only.
 - Failures return nil and a message; wrap calls that must succeed in assert. Return to app.events() promptly: a program busy for 5 s is stopped, and one not back within 1 s of app:background or app:terminate is cancelled.
