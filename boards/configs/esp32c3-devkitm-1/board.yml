@@ -7,3 +7,13 @@ toolchain:
   target: riscv32imc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  devices:
+    # BOOT on GPIO9, active low, with the pull-up Espressif's esp_boards
+    # `esp32_c3_devkitm_1` enables.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO9
+      parameters:
+        pull: up

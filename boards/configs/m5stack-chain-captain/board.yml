@@ -41,3 +41,16 @@ peripherals:
         expander: internal-i2c
       parameters:
         expander-address: 79
+    # The battery behind the M5PM1 at 6Eh. Its charge status is on the
+    # M5IOE1 (G3), which the implementation does not read.
+    power-monitor:
+      implementation: m5pm1-power-monitor
+      bindings: { i2c: internal-i2c }
+    # Buttons A, B, C on GPIO1, GPIO4, GPIO5, active low with the Board's
+    # pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO1
+        button-2: GPIO4
+        button-3: GPIO5

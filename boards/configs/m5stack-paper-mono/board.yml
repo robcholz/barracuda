@@ -39,3 +39,15 @@ peripherals:
         dc: GPIO17
         busy: GPIO18
         i2c: internal
+    # The battery behind the M5PM1 at 6Eh the display also uses. The IP2315
+    # charger that reports charging is not read.
+    power-monitor:
+      implementation: m5pm1-power-monitor
+      bindings: { i2c: internal }
+    # Buttons A (GPIO2) and B (GPIO3), active low with the Board's pull-ups
+    # (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO2
+        button-2: GPIO3

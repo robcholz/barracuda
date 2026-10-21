@@ -7,3 +7,24 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_ex_in` board_M5Capsule: SCL G10 / SDA G8.
+        peripheral: I2C1
+        scl: GPIO10
+        sda: GPIO8
+        frequency-hz: 400000
+  devices:
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # Buttons A (GPIO42) and B (GPIO0), active low with the Board's pull-ups
+    # (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO42
+        button-2: GPIO0

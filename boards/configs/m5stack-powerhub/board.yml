@@ -11,3 +11,12 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  devices:
+    # Button A on GPIO11, active low with the Board's pull-up (M5Unified
+    # `M5Unified::update`). Button B is read through the STM32 co-processor
+    # and is not declared.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO11

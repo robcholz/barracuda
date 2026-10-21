@@ -10,6 +10,13 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_ex_in` (AtomS3): SCL G39 / SDA G38.
+        peripheral: I2C1
+        scl: GPIO39
+        sda: GPIO38
+        frequency-hz: 400000
     spi-device:
       display-spi:
         # M5GFX `board_M5AtomS3`: SPI3, SCLK G17, MOSI G21 as the one
@@ -31,3 +38,13 @@ peripherals:
         reset: GPIO34
         # M5GFX drives the backlight with non-inverted PWM on G16.
         backlight: GPIO16
+    # MPU6886 at 68h (M5Unified `IMU_Class::begin`).
+    inertial-measurement:
+      implementation: mpu6886-imu
+      bindings: { i2c: internal-i2c }
+    # The button under the screen, GPIO41, active low with the Board's pull-up
+    # (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO41

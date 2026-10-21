@@ -53,6 +53,11 @@ peripherals:
       parameters:
         width: 480
         height: 480
+    # The battery behind the M5PM1 at 6Eh the display also uses. Its charge
+    # status is on the M5IOE1 (G6), which the implementation does not read.
+    power-monitor:
+      implementation: m5pm1-power-monitor
+      bindings: { i2c: internal }
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.

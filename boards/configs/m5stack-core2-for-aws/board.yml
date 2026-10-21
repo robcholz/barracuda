@@ -53,3 +53,18 @@ peripherals:
       parameters:
         width: 320
         height: 280
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # MPU6886 at 68h (M5Unified `IMU_Class::begin`).
+    inertial-measurement:
+      implementation: mpu6886-imu
+      bindings: { i2c: internal-i2c }
+    # The battery behind the AXP192 or AXP2101 the display also uses; on
+    # v1.1 an INA3221 at 40h senses its current (M5Unified
+    # `Power_Class::getBatteryCurrent`).
+    power-monitor:
+      implementation: axp192-axp2101-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters: { ina3221-battery-current: true }

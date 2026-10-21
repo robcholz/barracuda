@@ -7,3 +7,13 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  devices:
+    # BOOT on GPIO0, active low, with the pull-up Espressif's esp_boards
+    # `esp32_devkitc` enables.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO0
+      parameters:
+        pull: up

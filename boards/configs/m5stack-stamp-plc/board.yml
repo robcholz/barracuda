@@ -47,3 +47,10 @@ peripherals:
         expander-address: 67
         backlight-pin: 7
         backlight-active-high: false
+    # Buttons A, B, C on P2, P1, P0 of the PI4IOE5V6408 at 43h the
+    # display's backlight also uses, active low with the expander's
+    # pull-ups (M5Unified `M5Unified::begin` and `update`).
+    buttons:
+      implementation: pi4ioe5v6408-buttons
+      bindings: { i2c: internal-i2c }
+      parameters: { button-1: p2, button-2: p1, button-3: p0 }

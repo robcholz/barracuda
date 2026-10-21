@@ -14,6 +14,14 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_ex_in` board_M5Stack: the internal bus, SCL G22 /
+        # SDA G21 at 400 kHz, is also Port A.
+        peripheral: I2C1
+        scl: GPIO22
+        sda: GPIO21
+        frequency-hz: 400000
     spi-device:
       display-spi:
         peripheral: SPI3
@@ -26,3 +34,21 @@ peripherals:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO32, dc: GPIO27, reset: GPIO33, spi: display-spi }
       parameters: { controller: ili9342c, width: 320, height: 240, invert-colors: true }
+    # IP5306 at 75h (M5Unified `Power_Class::begin`, board_M5Stack): battery
+    # level in 25 % steps and charger state only.
+    power-monitor:
+      implementation: ip5306-power-monitor
+      bindings: { i2c: internal-i2c }
+    # MPU6886 at 68h, or an MPU9250 on units built before mid-2019 (M5Unified
+    # `IMU_Class::begin`); the implementation identifies which by WHO_AM_I.
+    inertial-measurement:
+      implementation: mpu6886-imu
+      bindings: { i2c: internal-i2c }
+    # Buttons A, B, C on GPIO39, GPIO38, GPIO37, active low with the Board's
+    # pull-ups (M5Unified `M5Unified::update`); GPIO34-39 have no internal bias.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO39
+        button-2: GPIO38
+        button-3: GPIO37

@@ -10,6 +10,13 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_ex_in` board_M5Dial: SCL G12 / SDA G11.
+        peripheral: I2C1
+        scl: GPIO12
+        sda: GPIO11
+        frequency-hz: 400000
     spi-device:
       display-spi:
         peripheral: SPI2
@@ -34,3 +41,23 @@ peripherals:
         invert-colors: true
         orientation: deg0
         width: 240
+    # FT3267 at 38h (M5GFX board_M5Dial `Touch_FT5x06`, 0..239 x 0..239).
+    # It leaves reset at power-on; the interrupt (GPIO14) is unused: the
+    # implementation polls.
+    touch:
+      implementation: ft5x06-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        width: 240
+        height: 240
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # Buttons A (the knob's press, GPIO42) and B (GPIO0), active low with
+    # the Board's pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO42
+        button-2: GPIO0

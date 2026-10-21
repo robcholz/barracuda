@@ -14,3 +14,17 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_ex_in` board_M5TimerCam: SCL G14 / SDA G12.
+        peripheral: I2C1
+        scl: GPIO14
+        sda: GPIO12
+        frequency-hz: 400000
+  devices:
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }

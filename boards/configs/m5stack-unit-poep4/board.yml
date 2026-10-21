@@ -32,6 +32,14 @@ toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  devices:
+    # The button on GPIO45, active low with the Board's pull-up (M5Unified
+    # `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO45
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.
