@@ -7,6 +7,26 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    pdm-i2s-stream:
+      audio:
+        # M5Unified `_begin_audio` (board_M5AtomVoice): the SPM1423 PDM
+        # microphone (clock GPIO33, data GPIO23) and the NS4168 amplifier
+        # (BCK GPIO19, LRCK GPIO33, data GPIO22) share GPIO33, so one I2S
+        # controller serves them in turn.
+        peripheral: I2S0
+        dma: DMA_I2S0
+        clk: GPIO33
+        din: GPIO23
+        bclk: GPIO19
+        dout: GPIO22
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
+  devices:
+    audio:
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: audio }
 exposed-io:
   pins:
     # Grove port G26/G32 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).

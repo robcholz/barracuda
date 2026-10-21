@@ -24,9 +24,23 @@ peripherals:
         peripheral: SPI2
         sck: GPIO7
         mosi: GPIO8
+        # The microSD card's data out; the LCD only listens.
+        miso: GPIO9
         chip-select: GPIO12
         frequency-hz: 40000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5StampPLC): the microSD card
+        # shares the LCD's bus with its own chip select, GPIO10.
+        peripheral: SPI2
+        sck: GPIO7
+        mosi: GPIO8
+        miso: GPIO9
+        chip-select: GPIO10
+        frequency-hz: 20000000
   devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
     display:
       # 1.14-inch ST7789V2; M5GFX `Light_M5StackStampPLC` switches its
       # backlight with PI4IOE5V6408 (0x43) output 7, lit while low.

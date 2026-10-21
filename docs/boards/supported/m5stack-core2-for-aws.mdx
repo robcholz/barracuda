@@ -30,10 +30,14 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `touch` | Touch controller (FT6336U) | — |
+| `audio` | Audio (NS4168 amplifier, SPM1423 PDM microphone) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
 
 The touch panel reports a 320x280 span: the strip below the screen holds the
 three touch keys. The display implementation's PMIC power-up resets the touch
 controller with the panel.
+
+The microSD card shares the display's SPI bus through its own chip select.
 
 ## Exposed pins
 

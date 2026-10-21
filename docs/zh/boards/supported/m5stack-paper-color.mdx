@@ -31,8 +31,11 @@ cargo image deploy
 | `display` | 彩色电子墨水屏，4 英寸 400 x 600，六色（E Ink Spectra 6，ED2208 控制器） | [`display`](/zh/plugins/vm-display) |
 | `audio-codec` | 音频编解码器（ES8311 和 ES7210） | [`audio`](/zh/plugins/vm-audio) |
 | `real-time-clock` | 实时时钟（RX8130CE） | — |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
 
 Spectra 6 不支持局部刷新：每次刷新都会重绘整块屏幕，耗时 10 到 20 秒。
+
+microSD 卡通过自己的片选与电子纸面板共用 SPI 总线。
 
 ## 可用引脚
 

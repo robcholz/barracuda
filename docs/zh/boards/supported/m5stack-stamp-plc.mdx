@@ -31,6 +31,9 @@ cargo image deploy
 | `display` | 显示屏（MIPI DBI，背光接在 PI4IOE5V6408 扩展芯片上） | [`display`](/zh/plugins/vm-display) |
 | `power-monitor` | 电源监测（INA226） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `real-time-clock` | 实时时钟（RX8130CE） | — |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
+
+microSD 卡通过自己的片选与显示屏共用 SPI 总线。
 
 ## 可用引脚
 

@@ -30,6 +30,8 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `status-led` | Indicator LED | — |
+| `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `microphone` | Microphone (SPM1423 PDM) | [`audio`](/plugins/vm-audio) |
 
 The Platform entry drives `GPIO4`, the battery power latch
 (`hardware.power-hold`), high before anything else is built, so the Board

@@ -105,6 +105,55 @@ sdmmc-device:
 
 这个绑定由平台构建。在 ESP32-S3 上，开发板组合取得 SD 主机并构建卡的槽位。在 ESP32-P4 上，由于 Wi-Fi 协处理器的链路使用另一个槽位，SD 主机归平台所有：平台入口只构建一次主机，把槽位 0 与芯片外设一起交给开发板组合，存储卡实现收到的就是这个槽位。
 
+当多个设备共用一条总线（例如 LCD 和 microSD 卡）时，多个 `spi-device` 声明可以使用同一个 SPI 控制器。它们写明相同的 `sck`、`mosi` 和 `miso`，以及各自的 `chip-select` 和 `frequency-hz`；组合只构建一次总线，并交给每个实现一个会选中自身、应用自己时钟的设备。M5Stack Core2 的显示屏和存储卡：
+
+~~~yaml
+spi-device:
+  display-spi:
+    peripheral: SPI3
+    sck: GPIO18
+    mosi: GPIO23
+    miso: GPIO38
+    chip-select: GPIO5
+    frequency-hz: 40000000
+  card-spi:
+    peripheral: SPI3
+    sck: GPIO18
+    mosi: GPIO23
+    miso: GPIO38
+    chip-select: GPIO4
+    frequency-hz: 20000000
+~~~
+
+SPI 上的 microSD 卡（`spi-sd-fat-removable-storage`）还会修改其设备的时钟，并在释放片选的情况下输出时钟，这是 SD 规范在识别存储卡时的要求；平台的 SPI 设备类型通过 `SpiDeviceControl` 提供这些操作。
+
+`analog-input` 是一个 ADC 通道：控制器和引脚。多个输入可以使用同一个控制器；组合会启用每个通道、只构建一次转换器，并把各自的通道交给每个实现，通道读取校准后的毫伏值（`AnalogVoltageInput`）。ESP32-S3-Korvo-2 的按键阶梯和电池：
+
+~~~yaml
+analog-input:
+  button-ladder:
+    peripheral: ADC1
+    pin: GPIO5
+  battery-sense:
+    peripheral: ADC1
+    pin: GPIO6
+~~~
+
+`pdm-i2s-stream` 是同一个 I2S 控制器上的 PDM 麦克风和 I2S 功放，每次只工作在一个方向：`clk` 是麦克风的时钟，同时也是功放的字选择，`din` 是麦克风的数据，`bclk` 和 `dout` 是功放的线路。只有其中一种器件的产品省略另一种的线路。数据流以 `sample-rate-hz` 传输单声道 16 位 PCM；平台按 `dma-buffer-bytes` 分配 DMA 缓冲区。M5Stack Atom Echo：
+
+~~~yaml
+pdm-i2s-stream:
+  audio:
+    peripheral: I2S0
+    dma: DMA_I2S0
+    clk: GPIO33
+    din: GPIO23
+    bclk: GPIO19
+    dout: GPIO22
+    sample-rate-hz: 16000
+    dma-buffer-bytes: 4096
+~~~
+
 每个生成的语义槽位都是可选的。没有实时时钟的开发板就没有 `RealTimeClock` 值；有实时时钟的开发板则有 `Some(concrete_clock)`。缺席不需要伪造硬件，存在也不会暴露辅助芯片。
 
 ## 实现清单

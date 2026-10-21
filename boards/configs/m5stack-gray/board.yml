@@ -15,9 +15,24 @@ peripherals:
         peripheral: SPI3
         sck: GPIO18
         mosi: GPIO23
+        # The microSD card's data out; the LCD only listens.
+        miso: GPIO19
         chip-select: GPIO14
         frequency-hz: 40000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5Stack): the microSD card shares
+        # the LCD's bus with its own chip select, GPIO4. 20 MHz stays within
+        # the SD default-speed mode's 25 MHz.
+        peripheral: SPI3
+        sck: GPIO18
+        mosi: GPIO23
+        miso: GPIO19
+        chip-select: GPIO4
+        frequency-hz: 20000000
   devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO32, dc: GPIO27, reset: GPIO33, spi: display-spi }

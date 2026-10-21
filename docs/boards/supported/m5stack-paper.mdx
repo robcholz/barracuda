@@ -29,8 +29,12 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | E-paper display, 4.7-inch 540 x 960 portrait, 16 gray levels (IT8951E controller) | [`display`](/plugins/vm-display) |
+| `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
 
 The Platform entry drives `GPIO2`, the main power latch (`hardware.power-hold`), high before anything else is built, so the Board stays on without USB power once its power button is released.
+
+The microSD card shares the e-paper controller's SPI bus through its own chip select.
 
 ## Exposed pins
 

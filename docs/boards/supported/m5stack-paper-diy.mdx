@@ -29,6 +29,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | E-paper display, 4.7-inch 540 x 960 portrait, 16 gray levels (ED047TC1, driven directly over the ESP32-S3 parallel bus; supply from the M5PM1) | [`display`](/plugins/vm-display) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
 
 The panel has no controller: Barracuda runs M5GFX's waveforms on the CPU
 and clocks every frame out line by line, so a refresh holds the display until

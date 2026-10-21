@@ -14,6 +14,29 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # esp-bsp `esp-box-3.h`: BSP_I2C_SCL GPIO18, BSP_I2C_SDA GPIO8; the
+        # ES8311 (18h) and ES7210 (40h) answer on it.
+        peripheral: I2C0
+        scl: GPIO18
+        sda: GPIO8
+        frequency-hz: 100000
+    i2s-stream:
+      audio-stream:
+        # esp-bsp `esp-box-3.h`: MCLK GPIO2, SCLK GPIO17, LCLK GPIO45, DOUT
+        # GPIO15 to the ES8311, DSIN GPIO16 from the ES7210.
+        peripheral: I2S0
+        dma: DMA_CH1
+        bclk: GPIO17
+        ws: GPIO45
+        dout: GPIO15
+        din: GPIO16
+        mclk: GPIO2
+        sample-rate-hz: 48000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
     spi-device:
       display-spi:
         # Espressif esp_boards `esp32_s3_box_3` board_peripherals.yaml
@@ -24,6 +47,11 @@ peripherals:
         chip-select: GPIO5
         frequency-hz: 20000000
   devices:
+    audio-codec:
+      # The codecs run from the 3.3 V rail; BSP_POWER_AMP_IO (GPIO46)
+      # enables the speaker amplifier.
+      implementation: es8311-es7210-audio-codec
+      bindings: { control: internal-i2c, stream: audio-stream, amplifier-enable: GPIO46 }
     display:
       implementation: mipi-dbi-display
       bindings:

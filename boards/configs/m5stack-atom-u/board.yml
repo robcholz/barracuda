@@ -14,7 +14,20 @@ peripherals:
         # SK6812 on GPIO27 (M5Unified `_pin_table_other0` (RGBLED)).
         data: GPIO27
         frequency-hz: 2400000
+    pdm-i2s-stream:
+      microphone:
+        # M5Unified `_begin_audio` (board_M5AtomU): the SPM1423 PDM
+        # microphone, clock GPIO5 and data GPIO19.
+        peripheral: I2S0
+        dma: DMA_I2S0
+        clk: GPIO5
+        din: GPIO19
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
   devices:
+    microphone:
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: microphone }
     led-strip:
       implementation: ws2812-spi-led-strip
       bindings:

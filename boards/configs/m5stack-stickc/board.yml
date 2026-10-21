@@ -25,7 +25,24 @@ peripherals:
         mosi: GPIO15
         chip-select: GPIO5
         frequency-hz: 27000000
+    pdm-i2s-stream:
+      microphone:
+        # M5Unified `_begin_audio`: the SPM1423 PDM microphone, clock GPIO0
+        # and data GPIO34, on I2S0 (the ESP32's PDM receiver).
+        peripheral: I2S0
+        dma: DMA_I2S0
+        clk: GPIO0
+        din: GPIO34
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
   devices:
+    microphone:
+      # SPM1423 PDM microphone, powered by AXP192 LDOio0 at 2.8 V (M5Unified
+      # `_microphone_enabled_cb_stickc`).
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: microphone, pmic: internal-i2c }
+      parameters:
+        pmic-power: stickc-microphone
     display:
       # ST7735S 80x160 at offset (26, 1) in its 132x162 frame, mounted upside
       # down (M5GFX offset_rotation 2). AXP192 LDO3 powers it and LDO2 lights

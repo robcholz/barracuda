@@ -31,7 +31,31 @@ peripherals:
         data: [GPIO41, GPIO42, GPIO46, GPIO45]
         chip-select: GPIO39
         frequency-hz: 80000000
+    i2s-stream:
+      audio-stream:
+        # M5Unified `_begin_audio` (board_M5StopWatch): MCLK GPIO18, BCK
+        # GPIO17, WS GPIO15, data out GPIO21, data in GPIO16.
+        peripheral: I2S0
+        dma: DMA_CH1
+        bclk: GPIO17
+        ws: GPIO15
+        dout: GPIO21
+        din: GPIO16
+        mclk: GPIO18
+        sample-rate-hz: 16000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
   devices:
+    audio-codec:
+      # ES8311 (18h) on the internal bus; the M5IOE1's G3 switches the audio
+      # supply and its G10 the AW8737A amplifier (M5Unified
+      # `_speaker_enabled_cb_stopwatch`).
+      implementation: es8311-audio-codec
+      bindings: { control: internal-i2c, stream: audio-stream }
+      parameters:
+        m5ioe1-supply-pin: 3
+        m5ioe1-amplifier-pin: 10
     display:
       # 1.75-inch 466 x 466 round AMOLED on a CO5300; reset and supply
       # enables on the M5IOE1 at 0x4F.

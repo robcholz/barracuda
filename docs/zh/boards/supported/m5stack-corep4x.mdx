@@ -31,6 +31,8 @@ cargo image deploy
 | `display` | 2.64 英寸 480x480 MIPI DSI 显示屏（ST7102） | [`display`](/zh/plugins/vm-display) |
 | `touch` | 触摸控制器（CST3530） | — |
 | `real-time-clock` | 实时时钟（RX8130CE） | — |
+| `audio-codec` | 音频编解码器（ES8311 和 ES7210） | [`audio`](/zh/plugins/vm-audio) |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
 
 显示屏实现通过 `4Fh` 处的 M5IOE1 扩展芯片为面板上电、释放复位并调节背光亮度，并打开 `6Eh` 处 M5PM1 的 5 V 升压；这两颗芯片本身都不是设备。它还会释放触摸控制器的复位（M5IOE1 G8）。ES8311/ES7210 音频通路、BMI270 和 BMM150 运动传感器以及 microSD 卡槽尚未声明。
 

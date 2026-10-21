@@ -31,9 +31,12 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `touch` | Touch controller (FT6336U) | — |
 | `inertial-measurement` | IMU (BMI270) | [`motion`](/plugins/vm-imu) |
+| `audio-codec` | Audio codec (AW88298 amplifier, ES7210 microphone ADC) | [`audio`](/plugins/vm-audio) |
 
 The touch implementation releases the controller's reset, P0_0 of the AW9523B
 expander at `58h`, which is not a device of its own.
+
+The microSD slot is not declared: its MISO, GPIO35, is also the display's D/C line, which the shared SPI bus cannot switch between the two.
 
 ## Exposed pins
 

@@ -30,8 +30,11 @@ cargo image deploy
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 | `touch` | 触摸控制器（FT6336U） | — |
+| `audio-codec` | 音频编解码器（AW88298 功放、ES7210 麦克风 ADC） | [`audio`](/zh/plugins/vm-audio) |
 
 触摸实现通过 `58h` 处 AW9523B 扩展芯片的 P0_0 释放控制器的复位，该扩展芯片本身不是设备。
+
+microSD 卡槽没有声明：它的 MISO（GPIO35）同时是显示屏的 D/C 线，共享的 SPI 总线无法在两者之间切换。
 
 ## 可用引脚
 

@@ -16,7 +16,43 @@ peripherals:
         scl: GPIO10
         sda: GPIO8
         frequency-hz: 400000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` Capsule: the battery on ADC1 GPIO6
+        # through a divider of two (`_adc_ratio = 2.0f`).
+        peripheral: ADC1
+        pin: GPIO6
+    pdm-i2s-stream:
+      microphone:
+        # M5Unified `_begin_audio` Capsule and Espressif's board files: the
+        # PDM microphone, clock GPIO40 and data GPIO41.
+        peripheral: I2S0
+        dma: DMA_CH1
+        clk: GPIO40
+        din: GPIO41
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
+    spi-device:
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5Capsule).
+        peripheral: SPI2
+        sck: GPIO14
+        mosi: GPIO12
+        miso: GPIO39
+        chip-select: GPIO11
+        frequency-hz: 20000000
   devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    microphone:
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: microphone }
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 2
     inertial-measurement:
       implementation: bmi270-imu
       bindings: { i2c: internal-i2c }

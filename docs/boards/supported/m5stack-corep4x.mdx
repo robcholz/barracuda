@@ -31,6 +31,8 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `display` | 2.64-inch 480x480 MIPI DSI display (ST7102) | [`display`](/plugins/vm-display) |
 | `touch` | Touch controller (CST3530) | — |
 | `real-time-clock` | Real-time clock (RX8130CE) | — |
+| `audio-codec` | Audio codec (ES8311 and ES7210) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
 
 The display implementation powers the panel, releases its reset, and dims its
 backlight through the M5IOE1 expander at `4Fh`, and turns on the 5 V boost of

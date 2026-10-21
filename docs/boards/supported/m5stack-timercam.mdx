@@ -29,6 +29,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `status-led` | Indicator LED | — |
+| `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
 
 The Platform entry drives `GPIO33`, the battery power latch (`hardware.power-hold`), high before anything else is built, so the Board stays on without USB power.
 

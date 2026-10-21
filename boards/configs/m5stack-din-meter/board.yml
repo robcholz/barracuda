@@ -17,7 +17,18 @@ peripherals:
         mosi: GPIO5
         chip-select: GPIO7
         frequency-hz: 40000000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` (DinMeter, Cardputer, Cardputer-ADV):
+        # the battery on ADC1 GPIO10 through a divider of two.
+        peripheral: ADC1
+        pin: GPIO10
   devices:
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 2
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO9, dc: GPIO4, reset: GPIO8, spi: display-spi }

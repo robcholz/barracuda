@@ -41,7 +41,21 @@ peripherals:
         data: [GPIO11, GPIO9, GPIO8, GPIO10, GPIO12, GPIO18, GPIO17, GPIO16]
         xclk-frequency-hz: 16000000
         dma-buffer-bytes: 65536
+    analog-input:
+      button-ladder:
+        # Espressif board manager `esp32_s3_eye`: `adc_button_group` on ADC1
+        # channel 0, GPIO1.
+        peripheral: ADC1
+        pin: GPIO1
   devices:
+    buttons:
+      # BUTTON_4, BUTTON_3, BUTTON_2, BUTTON_1 in button-index order
+      # (`voltage_range`, `max_voltage` 3000 mV).
+      implementation: adc-ladder-buttons
+      bindings: { sense: button-ladder }
+      parameters:
+        levels-millivolts: "380 820 1980 2410"
+        idle-millivolts: 3000
     camera:
       implementation: ov2640-camera
       bindings:

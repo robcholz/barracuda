@@ -15,7 +15,20 @@ toolchain:
 native-layout:
   artifact: partitions.csv
 peripherals:
+  io:
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` TimerCam: the battery on ADC1 GPIO38
+        # with `_adc_ratio = 1.513f`.
+        peripheral: ADC1
+        pin: GPIO38
   devices:
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 1513
+        divider-denominator: 1000
     status-led:
       implementation: indicator-led
       bindings:

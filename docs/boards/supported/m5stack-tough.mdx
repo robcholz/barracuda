@@ -30,9 +30,15 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `touch` | Touch controller (CHSC6540) | — |
+| `audio` | Speaker (NS4168 amplifier) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
 
 The display implementation's AXP192 reset pulse resets the touch controller
 with the panel.
+
+The microSD card shares the display's SPI bus through its own chip select.
+
+The microphone is not declared: M5Unified drives a PDM microphone on GPIO34, while Espressif's board files describe an analog one there.
 
 ## Exposed pins
 

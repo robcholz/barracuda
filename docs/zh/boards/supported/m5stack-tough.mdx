@@ -30,8 +30,14 @@ cargo image deploy
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 | `touch` | 触摸控制器（CHSC6540） | — |
+| `audio` | 扬声器（NS4168 功放） | [`audio`](/zh/plugins/vm-audio) |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
 
 显示屏实现的 AXP192 复位脉冲会连同面板一起复位触摸控制器。
+
+microSD 卡通过自己的片选与显示屏共用 SPI 总线。
+
+麦克风没有声明：M5Unified 在 GPIO34 上驱动 PDM 麦克风，而乐鑫的开发板文件描述的是那里的模拟麦克风。
 
 ## 可用引脚
 

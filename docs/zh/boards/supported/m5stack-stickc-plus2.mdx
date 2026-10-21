@@ -30,6 +30,8 @@ cargo image deploy
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 | `status-led` | 指示 LED | — |
+| `battery` | 电池电压（ADC 电阻分压） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `microphone` | 麦克风（SPM1423 PDM） | [`audio`](/zh/plugins/vm-audio) |
 
 平台入口在构建任何其他部分之前就把电池电源锁存脚 `GPIO4`（`hardware.power-hold`）驱动为高电平，因此不接 USB 时松开电源键后开发板也会保持开机。
 

@@ -29,6 +29,9 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
+
+The microSD card shares the display's SPI bus through its own chip select.
 
 ## Exposed pins
 

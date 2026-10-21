@@ -29,7 +29,30 @@ peripherals:
         miso: GPIO13
         chip-select: GPIO15
         frequency-hz: 10000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5Paper): the microSD card shares
+        # the e-paper controller's bus with its own chip select, GPIO4.
+        peripheral: SPI2
+        sck: GPIO14
+        mosi: GPIO12
+        miso: GPIO13
+        chip-select: GPIO4
+        frequency-hz: 20000000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` M5Paper: the battery on ADC1 GPIO35
+        # through a divider of two (`_adc_ratio = 2.0f`).
+        peripheral: ADC1
+        pin: GPIO35
   devices:
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 2
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
     display:
       implementation: it8951-display
       bindings:
