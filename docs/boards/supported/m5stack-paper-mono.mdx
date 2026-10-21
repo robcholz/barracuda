@@ -29,5 +29,11 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | E-paper display, 3.97-inch 480 x 800, 4 gray levels, with front light (SSD1677) | [`display`](/plugins/vm-display) |
-| `inertial-measurement` | IMU (BMI270) | [`motion`](/plugins/vm-imu) |
+| `inertial-measurement` | Motion sensor (BMI270) | [`motion`](/plugins/vm-imu) |
 | `real-time-clock` | Real-time clock (RX8130CE) | — |
+| `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `buttons` | Buttons A and B (GPIO2, GPIO3) | — |
+
+The M5PM1 measures the battery voltage only. This Board does not route the
+charger's status to it, so the battery reads as charging while VIN is present
+and the cell is below 4.1 V.

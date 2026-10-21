@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-icm42607-imu"
+version = "0.1.0"
+edition = "2024"
+description = "ICM-42607-P and ICM-42670-P six-axis IMU implementation over embedded-hal I2C"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-icm42607.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

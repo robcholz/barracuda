@@ -57,6 +57,19 @@ peripherals:
         # M5GFX pulses GPIO12 as the panel reset (`_pin_reset(GPIO_NUM_12)`).
         reset: GPIO12
         i2c: internal
+    # The battery behind the M5PM1 at 6Eh the display also uses; M5Unified
+    # reads no charge status on this Board.
+    power-monitor:
+      implementation: m5pm1-power-monitor
+      bindings: { i2c: internal }
+    # Buttons A, B, C on GPIO10, GPIO9, GPIO1, active low with the Board's
+    # pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO10
+        button-2: GPIO9
+        button-3: GPIO1
     audio-codec:
       # ES8311 at 18h and ES7210 at 40h on the internal bus; codec power G45 and
       # speaker amplifier G46, both active high (M5Unified

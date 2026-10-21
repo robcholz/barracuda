@@ -15,6 +15,14 @@ peripherals:
         data: GPIO48
         frequency-hz: 2400000
   devices:
+    # BOOT on GPIO0, active low, with the pull-up Espressif's esp_boards
+    # `esp32_s3_devkitm_1` enables.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO0
+      parameters:
+        pull: up
     led-strip:
       implementation: ws2812-spi-led-strip
       bindings:

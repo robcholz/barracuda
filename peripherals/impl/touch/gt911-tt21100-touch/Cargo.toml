@@ -1,0 +1,29 @@
+[package]
+name = "barracuda-gt911-tt21100-touch"
+version = "0.1.0"
+edition = "2024"
+description = "Touch implementation that identifies a Goodix GT911 or a Parade TT21100"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-gt911.workspace = true
+barracuda-driver-tt21100.workspace = true
+barracuda-gt911-touch.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

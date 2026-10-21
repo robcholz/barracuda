@@ -16,8 +16,9 @@ peripherals:
   io:
     i2c-device:
       internal-i2c:
-        # Internal bus SCL G42, SDA G41 (M5Unified; Espressif m5stack_papers3).
-        peripheral: I2C0
+        # Internal bus SCL G42, SDA G41 at 400 kHz, shared by touch, clock and IMU
+        # (M5GFX board_M5PaperS3; M5Unified; Espressif m5stack_papers3).
+        peripheral: I2C1
         scl: GPIO42
         sda: GPIO41
         frequency-hz: 400000
@@ -51,6 +52,21 @@ peripherals:
       parameters:
         # M5GFX offset_rotation 3: upright portrait, 540 x 960.
         mounting: deg270
+    # GT911 (M5GFX board_M5PaperS3 `Touch_GT911`, 0..539 x 0..959, which
+    # needs no rotation for the upright portrait display). The
+    # implementation tries 14h, then 5Dh, as M5GFX does; the interrupt
+    # (GPIO48) is unused: it polls.
+    touch:
+      implementation: gt911-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 20
+        width: 540
+        height: 960
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
     inertial-measurement:
       implementation: bmi270-imu
       bindings: { i2c: internal-i2c }

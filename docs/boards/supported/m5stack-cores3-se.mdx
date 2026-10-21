@@ -30,9 +30,17 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `touch` | Touch controller (FT6336U) | — |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `power-monitor` | Battery gauge (AXP2101) | [`power_monitor`](/plugins/vm-power-monitor) |
 
 The touch implementation releases the controller's reset, P0_0 of the AW9523B
 expander at `58h`, which is not a device of its own.
+
+The battery gauge shares the PMIC with the display: it reads only the PMIC's
+measurement registers, and the display keeps its regulators.
+
+The AXP2101 measures no battery current, so `measure` reports the battery
+voltage with zero current.
 
 ## Exposed pins
 

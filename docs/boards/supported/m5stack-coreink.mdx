@@ -30,6 +30,8 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | --- | --- | --- |
 | `display` | E-paper display, 1.54-inch 200 x 200 (GDEH0154D67 or GDEW0154M09, identified at start-up) | [`display`](/plugins/vm-display) |
 | `status-led` | Indicator LED | — |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `buttons` | Rocker up, press, down, top button, power button (GPIO37, GPIO38, GPIO39, GPIO5, GPIO27) | — |
 
 The Platform entry drives `GPIO12`, the battery power latch (`hardware.power-hold`), high before anything else is built, so the Board stays on without USB power once its power button is released.
 

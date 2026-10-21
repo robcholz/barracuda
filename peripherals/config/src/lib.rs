@@ -2041,6 +2041,12 @@ fn optional_binding_type(
         BindingKind::DigitalOutput => Ok(String::from(
             "::barracuda_platform_selected::__platform::hal::DigitalOutput",
         )),
+        BindingKind::DigitalInput => Ok(String::from(
+            "::barracuda_platform_selected::__platform::hal::DigitalInput",
+        )),
+        BindingKind::Gpio => Ok(String::from(
+            "::barracuda_platform_selected::__platform::hal::ConfigurablePin",
+        )),
         _ => Err(GenerateError::UnsupportedBindingKind {
             implementation: peripheral.implementation().id().to_owned(),
             binding: role.to_owned(),

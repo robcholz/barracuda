@@ -7,6 +7,14 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  devices:
+    # The button on GPIO39, active low with the Board's pull-up (M5Unified
+    # `M5Unified::update`); GPIO39 has no internal bias.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO39
 exposed-io:
   pins:
     # Grove port G32/G33 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).

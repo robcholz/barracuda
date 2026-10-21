@@ -29,6 +29,11 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `led-strip` | LED strip (WS2812) | [`light`](/plugins/vm-led-strip) |
+| `inertial-measurement` | Motion sensor (MPU6886, or BMI270 on later units) | [`motion`](/plugins/vm-imu) |
+| `buttons` | Button (GPIO39) | — |
+
+The motion sensor implementation reads the MPU6886 identity and falls back to
+the BMI270, as M5Unified does; both are mounted with X and Z inverted.
 
 ## Exposed pins
 

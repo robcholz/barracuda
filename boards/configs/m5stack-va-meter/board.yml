@@ -22,6 +22,13 @@ peripherals:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO38, dc: GPIO34, reset: GPIO33, spi: display-spi }
       parameters: { controller: st7789, width: 240, height: 240, invert-colors: true }
+    # Buttons A (GPIO2) and B (GPIO0), active low with the Board's pull-ups
+    # (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO2
+        button-2: GPIO0
 exposed-io:
   pins:
     # Grove port G8/G9 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).

@@ -10,6 +10,13 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_ex_in` board_M5UnitC6L: SCL G8 / SDA G10.
+        peripheral: I2C0
+        scl: GPIO8
+        sda: GPIO10
+        frequency-hz: 400000
     spi-device:
       display-spi:
         # M5GFX `board_M5UnitC6L`: SCLK G20, MOSI G21, OLED CS G6 at 40 MHz.
@@ -33,6 +40,12 @@ peripherals:
         height: 48
         column-offset: 32
         com-pins: 18
+    # The button on P0 of the PI4IOE5V6408 at 43h, active low with the
+    # expander's pull-up (M5Unified `Power_Class::begin` and `update`).
+    buttons:
+      implementation: pi4ioe5v6408-buttons
+      bindings: { i2c: internal-i2c }
+      parameters: { button-1: p0 }
 exposed-io:
   pins:
     # Grove port G4/G5 (M5Unified `_pin_table_port_bc`).

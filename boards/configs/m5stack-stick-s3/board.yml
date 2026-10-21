@@ -16,11 +16,12 @@ peripherals:
   io:
     i2c-device:
       internal-i2c:
-        # Internal bus SCL G48, SDA G47 (M5Unified).
+        # M5Unified `_pin_table_i2c_ex_in` board_M5StickS3: SCL G48 / SDA G47,
+        # at the M5PM1's 100 kHz (M5Unified `M5PM1_Class`).
         peripheral: I2C0
         scl: GPIO48
         sda: GPIO47
-        frequency-hz: 400000
+        frequency-hz: 100000
     spi-device:
       display-spi:
         peripheral: SPI3
@@ -39,6 +40,19 @@ peripherals:
         offset-x: 52
         offset-y: 40
         invert-colors: true
+    # The battery behind the M5PM1 at 6Eh; the charger's status is M5PM1 G0
+    # (M5Unified `Power_Class::isCharging`).
+    power-monitor:
+      implementation: m5pm1-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters: { charge-status: g0 }
+    # Buttons A (GPIO11) and B (GPIO12), active low with the Board's
+    # pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO11
+        button-2: GPIO12
     inertial-measurement:
       implementation: bmi270-imu
       bindings: { i2c: internal-i2c }

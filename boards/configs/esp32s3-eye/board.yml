@@ -64,3 +64,11 @@ peripherals:
         color-order: rgb
         invert-colors: true
         backlight-active-high: false
+    # BOOT on GPIO0, active low, with the pull-up Espressif's esp_boards
+    # `esp32_s3_eye` enables. The four ADC-ladder buttons are not declared.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO0
+      parameters:
+        pull: up

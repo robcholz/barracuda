@@ -30,8 +30,13 @@ cargo image deploy
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 | `status-led` | 指示 LED | — |
+| `real-time-clock` | 实时时钟（BM8563） | — |
+| `inertial-measurement` | 运动传感器（MPU6886） | [`motion`](/zh/plugins/vm-imu) |
+| `buttons` | 按键 A、B 和电源键（GPIO37、GPIO39、GPIO35） | — |
 
 平台入口在构建任何其他部分之前就把电池电源锁存脚 `GPIO4`（`hardware.power-hold`）驱动为高电平，因此不接 USB 时松开电源键后开发板也会保持开机。
+
+GPIO34 到 GPIO39 没有内部上拉；按键使用开发板上的电阻。
 
 ## 可用引脚
 

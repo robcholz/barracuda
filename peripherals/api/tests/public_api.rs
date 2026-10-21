@@ -232,6 +232,16 @@ fn custom_implementation_can_implement_the_stable_imu_api() {
         Vector3::new(-20, 10, -30)
     );
     assert_eq!(transform.apply(Vector3::new(0, i32::MIN, 0)).x, i32::MAX);
+    assert!(transform.is_permutation());
+    assert!(AxisTransform::IDENTITY.is_permutation());
+    assert!(
+        !AxisTransform::new(
+            SignedAxis::PositiveX,
+            SignedAxis::NegativeX,
+            SignedAxis::PositiveZ,
+        )
+        .is_permutation()
+    );
 
     let mut peripherals = ImuPeripherals(Some(CustomImu));
     let mut imu = peripherals

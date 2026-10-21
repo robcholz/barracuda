@@ -31,8 +31,12 @@ cargo image deploy
 | `display` | 彩色电子墨水屏，4 英寸 400 x 600，六色（E Ink Spectra 6，ED2208 控制器） | [`display`](/zh/plugins/vm-display) |
 | `audio-codec` | 音频编解码器（ES8311 和 ES7210） | [`audio`](/zh/plugins/vm-audio) |
 | `real-time-clock` | 实时时钟（RX8130CE） | — |
+| `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `buttons` | 按键 A、B、C（GPIO10、GPIO9、GPIO1） | — |
 
 Spectra 6 不支持局部刷新：每次刷新都会重绘整块屏幕，耗时 10 到 20 秒。
+
+M5PM1 只测量电池电压。这块开发板没有把充电器的状态线接到 M5PM1，所以只要有 VIN 输入且电池低于 4.1 V，电池就显示为正在充电。
 
 ## 可用引脚
 

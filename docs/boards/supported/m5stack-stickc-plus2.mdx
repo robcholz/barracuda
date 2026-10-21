@@ -30,10 +30,16 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `status-led` | Indicator LED | — |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `inertial-measurement` | Motion sensor (MPU6886) | [`motion`](/plugins/vm-imu) |
+| `buttons` | Buttons A, B, and power (GPIO37, GPIO39, GPIO35) | — |
 
 The Platform entry drives `GPIO4`, the battery power latch
 (`hardware.power-hold`), high before anything else is built, so the Board
 stays on without USB power once its power button is released.
+
+GPIO34 to GPIO39 have no internal pull-up; the buttons use the Board's own
+resistors.
 
 ## Exposed pins
 

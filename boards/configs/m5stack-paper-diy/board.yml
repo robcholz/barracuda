@@ -51,3 +51,16 @@ peripherals:
       parameters:
         # M5GFX offset_rotation 3: upright portrait, 540 x 960.
         mounting: deg270
+    # The battery behind the M5PM1 at 6Eh the display also uses; the
+    # charger's CHG_STAT is M5PM1 G3 (M5Unified `Power_Class::isCharging`).
+    power-monitor:
+      implementation: m5pm1-power-monitor
+      bindings: { i2c: internal }
+      parameters: { charge-status: g3 }
+    # Buttons A (GPIO4) and B (GPIO3), active low with the Board's pull-ups
+    # (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO4
+        button-2: GPIO3

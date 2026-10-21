@@ -1,0 +1,83 @@
+id: mpu6886-bmi270-imu
+api-version: 1
+peripheral: inertial-measurement
+implementation:
+  package: barracuda-mpu6886-bmi270-imu
+  crate: barracuda_mpu6886_bmi270_imu
+  factory: "::{{crate}}::Mpu6886Bmi270ImuImplementation<{{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Mpu6886Bmi270Bindings::new({{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Mpu6886Bmi270Config::new({{parameter.address}}, {{parameter.accelerometer-range}}, {{parameter.gyroscope-range}}, {{parameter.sample-rate}}, ::barracuda_board_hal::imu::AxisTransform::new({{parameter.axis-x}}, {{parameter.axis-y}}, {{parameter.axis-z}}))"
+# One address that holds an MPU6886-family sensor on some units of a product
+# and a BMI270 on others. The implementation reads WHO_AM_I first and falls
+# back to the BMI270, as M5Unified `IMU_Class::begin` probes them.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 68h: the address both parts take with their address pin low.
+    default: 104
+  accelerometer-range:
+    type: enum
+    values: [2g, 4g, 8g, 16g]
+    default: 4g
+    rust-values:
+      2g: "::barracuda_mpu6886_bmi270_imu::AccelerometerRange::G2"
+      4g: "::barracuda_mpu6886_bmi270_imu::AccelerometerRange::G4"
+      8g: "::barracuda_mpu6886_bmi270_imu::AccelerometerRange::G8"
+      16g: "::barracuda_mpu6886_bmi270_imu::AccelerometerRange::G16"
+  gyroscope-range:
+    type: enum
+    values: [250dps, 500dps, 1000dps, 2000dps]
+    default: 500dps
+    rust-values:
+      250dps: "::barracuda_mpu6886_bmi270_imu::GyroscopeRange::Dps250"
+      500dps: "::barracuda_mpu6886_bmi270_imu::GyroscopeRange::Dps500"
+      1000dps: "::barracuda_mpu6886_bmi270_imu::GyroscopeRange::Dps1000"
+      2000dps: "::barracuda_mpu6886_bmi270_imu::GyroscopeRange::Dps2000"
+  # The rates both parts produce.
+  sample-rate:
+    type: enum
+    values: [50hz, 100hz, 200hz]
+    default: 100hz
+    rust-values:
+      50hz: "::barracuda_mpu6886_bmi270_imu::SampleRate::Hz50"
+      100hz: "::barracuda_mpu6886_bmi270_imu::SampleRate::Hz100"
+      200hz: "::barracuda_mpu6886_bmi270_imu::SampleRate::Hz200"
+  # Mounting: the sensor axis, with its sign, that each Board axis reads.
+  # The defaults leave the sensor's axes as they are; each sensor axis must
+  # be used once.
+  axis-x:
+    type: enum
+    values: ["+x", "-x", "+y", "-y", "+z", "-z"]
+    rust-values:
+      "+x": "::barracuda_board_hal::imu::SignedAxis::PositiveX"
+      "-x": "::barracuda_board_hal::imu::SignedAxis::NegativeX"
+      "+y": "::barracuda_board_hal::imu::SignedAxis::PositiveY"
+      "-y": "::barracuda_board_hal::imu::SignedAxis::NegativeY"
+      "+z": "::barracuda_board_hal::imu::SignedAxis::PositiveZ"
+      "-z": "::barracuda_board_hal::imu::SignedAxis::NegativeZ"
+    default: "+x"
+  axis-y:
+    type: enum
+    values: ["+x", "-x", "+y", "-y", "+z", "-z"]
+    rust-values:
+      "+x": "::barracuda_board_hal::imu::SignedAxis::PositiveX"
+      "-x": "::barracuda_board_hal::imu::SignedAxis::NegativeX"
+      "+y": "::barracuda_board_hal::imu::SignedAxis::PositiveY"
+      "-y": "::barracuda_board_hal::imu::SignedAxis::NegativeY"
+      "+z": "::barracuda_board_hal::imu::SignedAxis::PositiveZ"
+      "-z": "::barracuda_board_hal::imu::SignedAxis::NegativeZ"
+    default: "+y"
+  axis-z:
+    type: enum
+    values: ["+x", "-x", "+y", "-y", "+z", "-z"]
+    rust-values:
+      "+x": "::barracuda_board_hal::imu::SignedAxis::PositiveX"
+      "-x": "::barracuda_board_hal::imu::SignedAxis::NegativeX"
+      "+y": "::barracuda_board_hal::imu::SignedAxis::PositiveY"
+      "-y": "::barracuda_board_hal::imu::SignedAxis::NegativeY"
+      "+z": "::barracuda_board_hal::imu::SignedAxis::PositiveZ"
+      "-z": "::barracuda_board_hal::imu::SignedAxis::NegativeZ"
+    default: "+z"

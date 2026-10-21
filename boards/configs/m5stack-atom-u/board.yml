@@ -15,6 +15,12 @@ peripherals:
         data: GPIO27
         frequency-hz: 2400000
   devices:
+    # The button under the front, GPIO39, active low with the Board's pull-up
+    # (M5Unified `M5Unified::update`); GPIO39 has no internal bias.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO39
     led-strip:
       implementation: ws2812-spi-led-strip
       bindings:

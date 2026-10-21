@@ -7,6 +7,16 @@ toolchain:
   target: riscv32imc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  devices:
+    # The button on GPIO3, active low, with the internal pull-up M5Unified
+    # enables.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO3
+      parameters:
+        pull: up
 exposed-io:
   pins:
     # Grove port G0/G1 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).

@@ -1,0 +1,61 @@
+id: gpio-buttons
+api-version: 1
+peripheral: buttons
+implementation:
+  package: barracuda-gpio-buttons
+  crate: barracuda_gpio_buttons
+  factory: "::{{crate}}::GpioButtonsImplementation<{{binding.button-1.type}}>"
+  bindings-expression: "::{{crate}}::GpioButtonsBindings::new({{binding.button-1.value}}, [{{binding.button-2.value}}, {{binding.button-3.value}}, {{binding.button-4.value}}, {{binding.button-5.value}}, {{binding.button-6.value}}, {{binding.button-7.value}}, {{binding.button-8.value}}])"
+  config-expression: "::{{crate}}::GpioButtonsConfig::new({{parameter.active-level}}, {{parameter.pull}}, {{parameter.debounce-ms}})"
+# One pin per button, numbered in the order the Board documents them. The
+# buttons take the dense indices 0 through 7 of the semantic snapshot, so a
+# Board fills button-1 first and leaves no gap. A `gpio` binding lets the
+# implementation choose the input bias.
+bindings:
+  button-1:
+    kind: gpio
+  button-2:
+    kind: gpio
+    required: false
+  button-3:
+    kind: gpio
+    required: false
+  button-4:
+    kind: gpio
+    required: false
+  button-5:
+    kind: gpio
+    required: false
+  button-6:
+    kind: gpio
+    required: false
+  button-7:
+    kind: gpio
+    required: false
+  button-8:
+    kind: gpio
+    required: false
+parameters:
+  # The level a pressed button puts on its pin, the same for every button.
+  active-level:
+    type: enum
+    values: [low, high]
+    rust-values:
+      low: "::barracuda_gpio_buttons::ActiveLevel::Low"
+      high: "::barracuda_gpio_buttons::ActiveLevel::High"
+    default: low
+  # The SoC's internal bias. `none` when the Board fits its own resistors,
+  # and always on pins without one, such as ESP32 GPIO34 to GPIO39.
+  pull:
+    type: enum
+    values: [none, up, down]
+    rust-values:
+      none: "::barracuda_board_hal::Pull::None"
+      up: "::barracuda_board_hal::Pull::Up"
+      down: "::barracuda_board_hal::Pull::Down"
+    default: none
+  # How long a new level must hold before a press or release counts. 10 ms
+  # is M5Unified's `Button_Class` default.
+  debounce-ms:
+    type: integer
+    default: 10

@@ -45,6 +45,12 @@ peripherals:
         backlight: internal-i2c
       parameters:
         backlight-address: 48
+    # The button under the screen, GPIO41, active low with the Board's pull-up
+    # (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO41
     inertial-measurement:
       implementation: bmi270-imu
       bindings: { i2c: internal-i2c }

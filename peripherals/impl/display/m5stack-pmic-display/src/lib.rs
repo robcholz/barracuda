@@ -9,6 +9,12 @@
 //! expander, and it dims the backlight by programming the regulator that feeds
 //! it. Neither chip is visible outside the display.
 //!
+//! The display owns only the PMIC's regulator, voltage, and GPIO registers.
+//! Its measurement registers (status, ADC, fuel gauge) belong to
+//! `axp192-axp2101-power-monitor`, which reaches the PMIC through its own
+//! view of the shared bus; neither implementation writes the other's
+//! registers.
+//!
 //! Rails, reset lines, and brightness curves follow M5Stack's M5GFX
 //! (`Light_M5StackCore2`, `Light_M5StackCore2_AXP2101`, `Light_M5Tough`,
 //! `Light_M5StickC`, `Light_M5StackCoreS3`, and the board autodetection) and

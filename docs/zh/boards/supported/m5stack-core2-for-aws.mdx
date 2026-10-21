@@ -30,8 +30,15 @@ cargo image deploy
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 | `touch` | 触摸控制器（FT6336U） | — |
+| `real-time-clock` | 实时时钟（BM8563） | — |
+| `inertial-measurement` | 运动传感器（MPU6886） | [`motion`](/zh/plugins/vm-imu) |
+| `power-monitor` | 电量计（AXP192 或 AXP2101） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 
 触摸屏报告的范围是 320x280：屏幕下方的一条区域是三个触摸按键。显示屏实现的 PMIC 上电过程会连同面板一起复位触摸控制器。
+
+电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。
+
+v1.1 单元的 AXP2101 不测量电流，改由 `40h` 的 INA3221 检测电池电流。
 
 ## 可用引脚
 

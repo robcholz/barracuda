@@ -29,6 +29,9 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | E-paper display, 4.7-inch 540 x 960 portrait, 16 gray levels (IT8951E controller) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (GT911) | — |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `buttons` | Rocker up, press, down (GPIO37, GPIO38, GPIO39) | — |
 
 The Platform entry drives `GPIO2`, the main power latch (`hardware.power-hold`), high before anything else is built, so the Board stays on without USB power once its power button is released.
 

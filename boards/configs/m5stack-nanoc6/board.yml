@@ -9,6 +9,14 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   devices:
+    # The button on GPIO9, active low, with the internal pull-up M5Unified
+    # enables.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO9
+      parameters:
+        pull: up
     status-led:
       implementation: indicator-led
       bindings:

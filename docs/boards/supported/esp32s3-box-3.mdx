@@ -28,6 +28,14 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (GT911 or TT21100, detected at start) | — |
+| `inertial-measurement` | Motion sensor (ICM-42607-P) | [`motion`](/plugins/vm-imu) |
+| `buttons` | BOOT button (GPIO0) | — |
+
+As Espressif's BSP does, the touch implementation looks for a GT911 at `5Dh`
+and `14h` and then for a TT21100 at `24h`; the display's reset line (GPIO48)
+resets either. The mute switch's status line (GPIO1) is not a button and is
+not declared.
 
 ## Exposed pins
 

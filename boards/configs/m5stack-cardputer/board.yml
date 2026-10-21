@@ -29,6 +29,12 @@ peripherals:
         offset-y: 40
         invert-colors: true
         orientation: deg90
+    # The G0 button, active low with the Board's pull-up (M5Unified
+    # `M5Unified::update`). The keyboard is not declared.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO0
 exposed-io:
   pins:
     # Grove (PORT.CUSTOM) G1/G2: M5Stack Cardputer pin map.

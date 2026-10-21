@@ -1,0 +1,36 @@
+id: gt911-tt21100-touch
+api-version: 1
+peripheral: touch
+implementation:
+  package: barracuda-gt911-tt21100-touch
+  crate: barracuda_gt911_tt21100_touch
+  factory: "::{{crate}}::Gt911Tt21100TouchImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::Gt911Tt21100TouchBindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::Gt911Tt21100TouchConfig::new({{parameter.gt911-address}}, {{parameter.tt21100-address}}, {{parameter.width}}, {{parameter.height}}, {{parameter.tt21100-mirror-x}})"
+# A product fitted with either a Goodix GT911 or a Parade TT21100. As
+# Espressif's ESP-BOX BSPs do, the implementation looks for the GT911 at
+# both of its addresses first and then for the TT21100. Neither controller's
+# reset is touched; on the ESP32-S3-BOX-3 it is the display's.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  gt911-address:
+    type: integer
+    # 5Dh (`ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS`), then 14h.
+    default: 93
+  tt21100-address:
+    type: integer
+    # 24h (`ESP_LCD_TOUCH_IO_I2C_TT21100_ADDRESS`).
+    default: 36
+  # The span both controllers report, in display coordinates.
+  width:
+    type: integer
+    required: true
+  height:
+    type: integer
+    required: true
+  # Whether the TT21100's X axis runs opposite to the display's.
+  tt21100-mirror-x:
+    type: boolean
+    default: false

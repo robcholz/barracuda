@@ -974,6 +974,61 @@ peripherals:
 }
 
 #[test]
+fn renders_absent_optional_input_bindings_as_typed_none() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "pin-buttons",
+        r#"
+id: pin-buttons
+api-version: 1
+peripheral: buttons
+implementation:
+  package: pin-buttons
+  crate: pin_buttons
+  factory: "::{{crate}}::Implementation<{{binding.first.type}}, {{binding.second.type}}, {{binding.sense.type}}>"
+  bindings-expression: "({{binding.first.value}}, {{binding.second.value}}, {{binding.sense.value}})"
+  config-expression: "()"
+bindings:
+  first:
+    kind: gpio
+  second:
+    kind: gpio
+    required: false
+  sense:
+    kind: digital-input
+    required: false
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: button-board
+hardware:
+  chip: esp32
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  devices:
+    buttons:
+      implementation: pin-buttons
+      bindings:
+        first: GPIO39
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved optional bindings");
+
+    let rust = render_board_hal(&board, &resolved).expect("generated optional bindings");
+    assert_valid_rust(&rust);
+    assert!(rust.contains(
+        "pin_buttons::Implementation<::barracuda_platform_selected::__platform::hal::ConfigurablePin, ::barracuda_platform_selected::__platform::hal::ConfigurablePin, ::barracuda_platform_selected::__platform::hal::DigitalInput>"
+    ));
+    assert!(rust.contains("(::barracuda_platform_selected::__platform::hal::configurable_pin(bindings.buttons_first), None, None)"));
+}
+
+#[test]
 fn multiple_i2c_peripherals_share_one_static_bus_owner() {
     let root = tempdir().expect("temporary workspace");
     add_driver(

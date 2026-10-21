@@ -808,6 +808,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-axp192-axp2101-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-axp192",
+ "barracuda-driver-axp2101",
+ "barracuda-driver-ina3221",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-bm8563-rtc"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-bm8563",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-bmi270-imu"
 version = "0.1.0"
 dependencies = [
@@ -869,6 +891,8 @@ dependencies = [
  "barracuda-apa102-led-strip",
  "barracuda-atom-s3-display",
  "barracuda-atom-s3r-display",
+ "barracuda-axp192-axp2101-power-monitor",
+ "barracuda-bm8563-rtc",
  "barracuda-bmi270-imu",
  "barracuda-bq27220-power-monitor",
  "barracuda-capacitive-touch-buttons",
@@ -884,18 +908,27 @@ dependencies = [
  "barracuda-es8388-es7210-audio-codec",
  "barracuda-es8389-audio-codec",
  "barracuda-ft5x06-touch",
+ "barracuda-gpio-buttons",
+ "barracuda-gt911-touch",
+ "barracuda-gt911-tt21100-touch",
+ "barracuda-icm42607-imu",
  "barracuda-ina226-power-monitor",
  "barracuda-indicator-led",
+ "barracuda-ip5306-power-monitor",
  "barracuda-it8951-display",
+ "barracuda-m5pm1-power-monitor",
  "barracuda-m5stack-pmic-display",
  "barracuda-mipi-dbi-display",
  "barracuda-mipi-dbi-parallel-display",
  "barracuda-mipi-dbi-pi4ioe5v6408-display",
+ "barracuda-mpu6886-bmi270-imu",
+ "barracuda-mpu6886-imu",
  "barracuda-ov2640-camera",
  "barracuda-ov3660-camera",
  "barracuda-paper-color-display",
  "barracuda-paper-diy-display",
  "barracuda-paper-mono-display",
+ "barracuda-pi4ioe5v6408-buttons",
  "barracuda-rx8130ce-rtc",
  "barracuda-sdmmc-fat-removable-storage",
  "barracuda-ssd1306-spi-display",
@@ -1169,6 +1202,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-bm8563"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-bq27220"
 version = "0.1.0"
 dependencies = [
@@ -1288,11 +1328,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-icm42607"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-ili9881c"
 version = "0.1.0"
 
 [[package]]
 name = "barracuda-driver-ina226"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ina3221"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ip5306"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
@@ -1332,6 +1393,13 @@ dependencies = [
 
 [[package]]
 name = "barracuda-driver-m5pm1"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-mpu6886"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
@@ -1389,6 +1457,13 @@ dependencies = [
 [[package]]
 name = "barracuda-driver-st77916"
 version = "0.1.0"
+
+[[package]]
+name = "barracuda-driver-tt21100"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
 
 [[package]]
 name = "barracuda-driver-ws2812-spi"
@@ -1494,6 +1569,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-gpio-buttons"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-gpio-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1506,6 +1592,28 @@ dependencies = [
  "embedded-hal 1.0.0",
  "portable-atomic",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-gt911-touch"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-gt911",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-gt911-tt21100-touch"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-gt911",
+ "barracuda-driver-tt21100",
+ "barracuda-gt911-touch",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -1554,6 +1662,16 @@ dependencies = [
  "futures-lite",
  "portable-atomic",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-icm42607-imu"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-icm42607",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -1817,6 +1935,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-ip5306-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-ip5306",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-it8951-display"
 version = "0.1.0"
 dependencies = [
@@ -1875,6 +2003,16 @@ dependencies = [
  "getset",
  "libm",
  "portable-atomic",
+]
+
+[[package]]
+name = "barracuda-m5pm1-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-m5pm1",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -1977,6 +2115,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-mpu6886-bmi270-imu"
+version = "0.1.0"
+dependencies = [
+ "barracuda-bmi270-imu",
+ "barracuda-driver-mpu6886",
+ "barracuda-mpu6886-imu",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-mpu6886-imu"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-mpu6886",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-ov2640-camera"
 version = "0.1.0"
 dependencies = [
@@ -2048,6 +2208,17 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "yaml-peg",
+]
+
+[[package]]
+name = "barracuda-pi4ioe5v6408-buttons"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

@@ -94,6 +94,10 @@ binding: the Board names its pin, and the implementation receives a
 `ConfigurableDigitalPin` it switches between output and input. The Tab5
 display drives the touch interrupt line high while the touch controller leaves
 reset, which straps the GT911 address, and then releases it to the controller.
+An input whose bias the implementation sets is a `gpio` binding as well:
+`gpio-buttons` makes each button pin an input with the pull the Board names.
+An optional `gpio` or `digital-input` binding the Board leaves out reaches the
+implementation as `None`.
 
 A panel on an eight-bit Intel 8080 bus is a `parallel-output`: its write
 strobe, data/command and chip-select lines, eight data lines in bit order, the
@@ -200,6 +204,15 @@ at `0x6E` (the 5 V boost) the same way, through `drivers/chips/m5ioe1` and
 `drivers/chips/m5pm1`. The Paper Mono's `paper-mono-display` uses the same two
 drivers for its panel supply and reset and its front light; `paper-color-display`
 and `paper-diy-display` use the M5PM1 for the e-paper supply.
+
+A helper chip that also provides a semantic peripheral is shared by register,
+never by two owners of one register. On the Core2, Tough, Station, StickC,
+and CoreS3, `m5stack-pmic-display` drives the AXP192 or AXP2101 regulators,
+while `axp192-axp2101-power-monitor` reads the same PMIC's battery through its
+own view of the bus and touches only the status, ADC, and fuel-gauge
+registers. `m5pm1-power-monitor` and `pi4ioe5v6408-buttons` likewise configure
+only their own M5PM1 or expander pins next to the display implementations
+that use the others.
 
 ## Stable construction and runtime behavior
 

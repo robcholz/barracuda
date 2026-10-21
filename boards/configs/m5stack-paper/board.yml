@@ -17,6 +17,13 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # M5GFX board_M5Paper: the touch bus, SCL G22 / SDA G21 at 400 kHz.
+        peripheral: I2C1
+        scl: GPIO22
+        sda: GPIO21
+        frequency-hz: 400000
     spi-device:
       # IT8951E e-paper controller on HSPI's IOMUX pins (M5GFX board_M5Paper;
       # Espressif m5stack_paper spi_master). The microSD card shares the bus
@@ -43,6 +50,29 @@ peripherals:
         height: 540
         # M5GFX offset_rotation 3: upright portrait, 540 x 960.
         mounting: deg270
+    # GT911 (M5GFX board_M5Paper `Touch_GT911`, 0..539 x 0..959, which needs
+    # no rotation for the upright portrait display). Its address depends on
+    # the interrupt line (GPIO36) at power-on; the implementation tries 14h,
+    # then 5Dh, as M5GFX does, and polls.
+    touch:
+      implementation: gt911-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 20
+        width: 540
+        height: 960
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # The rocker's up, press, and down on GPIO37, GPIO38, GPIO39, active low
+    # with the Board's pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO37
+        button-2: GPIO38
+        button-3: GPIO39
 exposed-io:
   pins:
     # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:

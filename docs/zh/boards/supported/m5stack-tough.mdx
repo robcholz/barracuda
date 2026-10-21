@@ -30,8 +30,12 @@ cargo image deploy
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 | `touch` | 触摸控制器（CHSC6540） | — |
+| `real-time-clock` | 实时时钟（BM8563） | — |
+| `power-monitor` | 电量计（AXP192） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 
 显示屏实现的 AXP192 复位脉冲会连同面板一起复位触摸控制器。
+
+电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。
 
 ## 可用引脚
 

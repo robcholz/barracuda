@@ -4,6 +4,14 @@
 //! control, REG23H/26H/27H DC-DC voltages, REG28H LDO2/LDO3 voltages, and
 //! REG95H/REG96H GPIO3/GPIO4 function and level), cross-checked against
 //! M5Stack's `M5Unified` `AXP192_Class`.
+//!
+//! The registers fall into two groups with separate owners on a shared bus.
+//! The regulator and GPIO registers above power and reset a Board's other
+//! devices. The measurement registers belong to whoever reads the battery:
+//! the status registers REG00H/REG01H, the ADC enable REG82H, and the ADC
+//! results from REG78H (battery voltage, 12 bits at 1.1 mV) and REG7AH/7CH
+//! (battery charge and discharge current, 13 bits at 0.5 mA). No method
+//! touches registers of both groups.
 
 #![no_std]
 
@@ -20,6 +28,14 @@ const DCDC1_VOLTAGE: u8 = 0x26;
 const DCDC3_VOLTAGE: u8 = 0x27;
 const LDO23_VOLTAGE: u8 = 0x28;
 const GPIO34_FUNCTION: u8 = 0x95;
+const POWER_STATUS: u8 = 0x00;
+const CHARGE_STATUS: u8 = 0x01;
+const BATTERY_VOLTAGE: u8 = 0x78;
+const BATTERY_CHARGE_CURRENT: u8 = 0x7a;
+const BATTERY_DISCHARGE_CURRENT: u8 = 0x7c;
+const ADC_ENABLE_1: u8 = 0x82;
+/// REG82H bits 7 and 6: battery voltage and battery current ADCs.
+const BATTERY_ADCS: u8 = 0b1100_0000;
 const GPIO34_LEVEL: u8 = 0x96;
 
 const EXTEN_BIT: u8 = 1 << 6;
@@ -89,6 +105,28 @@ impl Gpio {
             Self::Gpio4 => (0b0000_1100, 0b0000_0100),
         }
     }
+}
+
+/// Battery state from REG00H and REG01H.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BatteryStatus {
+    /// REG00H bit 2: current flows into the battery.
+    pub charging: bool,
+    /// REG00H bit 5: VBUS is present.
+    pub vbus_present: bool,
+    /// REG01H bit 5: a battery is connected.
+    pub battery_present: bool,
+}
+
+/// One battery measurement from the ADC.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BatteryMeasurement {
+    /// Battery voltage in microvolts.
+    pub microvolts: u32,
+    /// Current into the battery in microamps.
+    pub charge_microamps: u32,
+    /// Current out of the battery in microamps.
+    pub discharge_microamps: u32,
 }
 
 /// AXP192 register or configuration failure.
@@ -221,6 +259,60 @@ where
         Ok(())
     }
 
+    /// Switches on the battery voltage and current ADCs, leaving the other
+    /// channels as they are.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn enable_battery_adc(&mut self) -> Result<(), Error<I2C::Error>> {
+        self.update(ADC_ENABLE_1, |value| value | BATTERY_ADCS)
+    }
+
+    /// Reads the charge, supply, and battery-presence flags.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn battery_status(&mut self) -> Result<BatteryStatus, Error<I2C::Error>> {
+        let power = self.read(POWER_STATUS)?;
+        let charge = self.read(CHARGE_STATUS)?;
+        Ok(BatteryStatus {
+            charging: power & (1 << 2) != 0,
+            vbus_present: power & (1 << 5) != 0,
+            battery_present: charge & (1 << 5) != 0,
+        })
+    }
+
+    /// Reads the battery voltage and both battery currents.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn battery_measurement(&mut self) -> Result<BatteryMeasurement, Error<I2C::Error>> {
+        let voltage = self.read_pair(BATTERY_VOLTAGE)?;
+        let charge = self.read_pair(BATTERY_CHARGE_CURRENT)?;
+        let discharge = self.read_pair(BATTERY_DISCHARGE_CURRENT)?;
+        // 12-bit voltage: high byte then the low nibble; 13-bit currents:
+        // high byte then the low five bits.
+        let voltage = (u32::from(voltage[0]) << 4) | u32::from(voltage[1] & 0x0f);
+        let charge = (u32::from(charge[0]) << 5) | u32::from(charge[1] & 0x1f);
+        let discharge = (u32::from(discharge[0]) << 5) | u32::from(discharge[1] & 0x1f);
+        Ok(BatteryMeasurement {
+            microvolts: voltage.saturating_mul(1_100),
+            charge_microamps: charge.saturating_mul(500),
+            discharge_microamps: discharge.saturating_mul(500),
+        })
+    }
+
+    fn read_pair(&mut self, register: u8) -> Result<[u8; 2], Error<I2C::Error>> {
+        let mut value = [0; 2];
+        self.i2c
+            .write_read(self.address, &[register], &mut value)
+            .map_err(Error::Bus)?;
+        Ok(value)
+    }
+
     fn update(
         &mut self,
         register: u8,
@@ -274,8 +366,8 @@ mod tests {
     };
 
     use super::{
-        ADDRESS, Axp192, DCDC3_VOLTAGE, Error, GPIO34_FUNCTION, GPIO34_LEVEL, Gpio, LDO23_VOLTAGE,
-        OUTPUT_CONTROL, Rail,
+        ADDRESS, Axp192, BatteryMeasurement, BatteryStatus, DCDC3_VOLTAGE, Error, GPIO34_FUNCTION,
+        GPIO34_LEVEL, Gpio, LDO23_VOLTAGE, OUTPUT_CONTROL, Rail,
     };
 
     struct Bus {
@@ -313,8 +405,11 @@ mod tests {
                         self.registers[usize::from(*reg)] = *value;
                         self.writes.push((*reg, *value));
                     }
-                    Operation::Read([value]) => {
-                        *value = self.registers[usize::from(register.expect("register"))];
+                    Operation::Read(values) => {
+                        let start = usize::from(register.expect("register"));
+                        for (offset, value) in values.iter_mut().enumerate() {
+                            *value = self.registers[start + offset];
+                        }
                     }
                     _ => {}
                 }
@@ -442,5 +537,40 @@ mod tests {
             .map(|(_, value)| *value)
             .collect();
         assert_eq!(levels, [0x01, 0x03]);
+    }
+
+    #[test]
+    fn reads_the_battery_through_the_measurement_registers_only() {
+        let mut bus = Bus::default();
+        bus.registers[0x82] = 0x03;
+        bus.registers[0x00] = 0b0010_0100;
+        bus.registers[0x01] = 0b0010_0000;
+        // 3.8016 V = 3456 x 1.1 mV; 120 mA charge = 240 x 0.5 mA.
+        bus.registers[0x78] = 0xd8;
+        bus.registers[0x79] = 0x00;
+        bus.registers[0x7a] = 0x07;
+        bus.registers[0x7b] = 0x10;
+        {
+            let mut pmic = Axp192::new(&mut bus, ADDRESS).expect("valid address");
+            pmic.enable_battery_adc().expect("adc");
+            assert_eq!(
+                pmic.battery_status().expect("status"),
+                BatteryStatus {
+                    charging: true,
+                    vbus_present: true,
+                    battery_present: true,
+                }
+            );
+            assert_eq!(
+                pmic.battery_measurement().expect("measurement"),
+                BatteryMeasurement {
+                    microvolts: 3_801_600,
+                    charge_microamps: 120_000,
+                    discharge_microamps: 0,
+                }
+            );
+        }
+        assert_eq!(bus.registers[0x82], 0xc3);
+        assert_eq!(bus.writes, [(0x82, 0xc3)]);
     }
 }
