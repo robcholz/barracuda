@@ -55,6 +55,8 @@ barracuda-platform-macos = { path = "platforms/macos" }
 barracuda-platform-stm32 = { path = "platforms/stm32" }
 # END GENERATED PLATFORM WORKSPACE DEPENDENCIES
 # BEGIN GENERATED PERIPHERAL IMPLEMENTATION WORKSPACE DEPENDENCIES
+barracuda-adc-battery-power-monitor = { path = "peripherals/impl/power-monitor/adc-battery-power-monitor" }
+barracuda-adc-ladder-buttons = { path = "peripherals/impl/buttons/adc-ladder-buttons" }
 barracuda-apa102-led-strip = { path = "peripherals/impl/led-strip/apa102-led-strip" }
 barracuda-atom-s3-display = { path = "peripherals/impl/display/atom-s3-display" }
 barracuda-atom-s3r-display = { path = "peripherals/impl/display/atom-s3r-display" }
@@ -85,8 +87,10 @@ barracuda-ov3660-camera = { path = "peripherals/impl/camera/ov3660-camera" }
 barracuda-paper-color-display = { path = "peripherals/impl/display/paper-color-display" }
 barracuda-paper-diy-display = { path = "peripherals/impl/display/paper-diy-display" }
 barracuda-paper-mono-display = { path = "peripherals/impl/display/paper-mono-display" }
+barracuda-pdm-i2s-audio-codec = { path = "peripherals/impl/audio-codec/pdm-i2s-audio-codec" }
 barracuda-rx8130ce-rtc = { path = "peripherals/impl/real-time-clock/rx8130ce-rtc" }
 barracuda-sdmmc-fat-removable-storage = { path = "peripherals/impl/removable-storage/sdmmc-fat-removable-storage" }
+barracuda-spi-sd-fat-removable-storage = { path = "peripherals/impl/removable-storage/spi-sd-fat-removable-storage" }
 barracuda-ssd1306-spi-display = { path = "peripherals/impl/display/ssd1306-spi-display" }
 barracuda-st77916-qspi-display = { path = "peripherals/impl/display/st77916-qspi-display" }
 barracuda-stopwatch-co5300-display = { path = "peripherals/impl/display/stopwatch-co5300-display" }

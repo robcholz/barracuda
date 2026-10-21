@@ -1,0 +1,42 @@
+id: adc-battery-power-monitor
+api-version: 1
+peripheral: power-monitor
+implementation:
+  package: barracuda-adc-battery-power-monitor
+  crate: barracuda_adc_battery_power_monitor
+  factory: "::{{crate}}::AdcBatteryPowerMonitorImplementation<{{binding.sense.type}}, {{binding.charging.type}}>"
+  bindings-expression: "::{{crate}}::AdcBatteryBindings::new({{binding.sense.value}}, {{binding.charging.value}})"
+  config-expression: "::{{crate}}::AdcBatteryConfig::new({{parameter.divider-numerator}}, {{parameter.divider-denominator}}, {{parameter.empty-millivolts}}, {{parameter.full-millivolts}}, {{parameter.charging-level}})"
+bindings:
+  # The ADC pin behind the battery's resistor divider.
+  sense:
+    kind: analog-input
+  # A charger status output, when the Board wires one to a GPIO.
+  charging:
+    kind: digital-input
+    required: false
+parameters:
+  # The divider's ratio, battery voltage over pin voltage, as a fraction:
+  # (upper + lower) / lower for a divider of two resistors.
+  divider-numerator:
+    type: integer
+    required: true
+  divider-denominator:
+    type: integer
+    default: 1
+  # The battery voltages read as 0 % and 100 %. The defaults are M5Unified's
+  # `Power_Class::getBatteryLevel` line for ADC-sensed Li-Po cells.
+  empty-millivolts:
+    type: integer
+    default: 3300
+  full-millivolts:
+    type: integer
+    default: 4100
+  # The level of `charging` while the charger charges.
+  charging-level:
+    type: enum
+    values: [low, high]
+    rust-values:
+      low: "false"
+      high: "true"
+    default: low

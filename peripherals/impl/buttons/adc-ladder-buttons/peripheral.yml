@@ -1,0 +1,26 @@
+id: adc-ladder-buttons
+api-version: 1
+peripheral: buttons
+implementation:
+  package: barracuda-adc-ladder-buttons
+  crate: barracuda_adc_ladder_buttons
+  factory: "::{{crate}}::AdcLadderButtonsImplementation<{{binding.sense.type}}>"
+  bindings-expression: "::{{crate}}::AdcLadderButtonsBindings::new({{binding.sense.value}})"
+  config-expression: "::{{crate}}::AdcLadderButtonsConfig::new({{parameter.levels-millivolts}}, {{parameter.idle-millivolts}})"
+bindings:
+  # The ADC pin of the resistor ladder the buttons switch.
+  sense:
+    kind: analog-input
+parameters:
+  # The pin voltage each button produces, ascending and separated by spaces,
+  # one per button in button-index order: "380 820 1980 2410". A reading
+  # belongs to the button whose level is nearest, within half the distance to
+  # its neighbors, as Espressif's `adc_multi` button group decides.
+  levels-millivolts:
+    type: string
+    required: true
+  # The pin voltage with no button pressed, which bounds the last button's
+  # window.
+  idle-millivolts:
+    type: integer
+    default: 3000

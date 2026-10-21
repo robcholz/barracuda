@@ -21,6 +21,18 @@ const DCDC3_VOLTAGE: u8 = 0x27;
 const LDO23_VOLTAGE: u8 = 0x28;
 const GPIO34_FUNCTION: u8 = 0x95;
 const GPIO34_LEVEL: u8 = 0x96;
+const GPIO0_FUNCTION: u8 = 0x90;
+const LDO_IO0_VOLTAGE: u8 = 0x91;
+const GPIO1_FUNCTION: u8 = 0x92;
+const GPIO2_FUNCTION: u8 = 0x93;
+/// REG90H/92H/93H function `101`: NMOS open-drain output driving low.
+const GPIO012_LOW: u8 = 0x05;
+/// REG90H/92H/93H function `110`: floating, the pin's pull-up decides.
+const GPIO012_FLOATING: u8 = 0x06;
+/// REG90H function `010`: GPIO0 is the LDOio0 regulator output.
+const GPIO0_LDO: u8 = 0x02;
+/// REG90H function `111`: GPIO0 floats.
+const GPIO0_OFF: u8 = 0x07;
 
 const EXTEN_BIT: u8 = 1 << 6;
 /// REG95H bit 7 switches GPIO3/GPIO4 to their GPIO function; M5Unified sets it
@@ -87,6 +99,27 @@ impl Gpio {
         match self {
             Self::Gpio3 => (0b0000_0011, 0b0000_0001),
             Self::Gpio4 => (0b0000_1100, 0b0000_0100),
+        }
+    }
+}
+
+/// AXP192 GPIO whose function register selects its level (REG90H, 92H, 93H).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LowGpio {
+    /// GPIO0, REG90H.
+    Gpio0,
+    /// GPIO1, REG92H.
+    Gpio1,
+    /// GPIO2, REG93H.
+    Gpio2,
+}
+
+impl LowGpio {
+    const fn function_register(self) -> u8 {
+        match self {
+            Self::Gpio0 => GPIO0_FUNCTION,
+            Self::Gpio1 => GPIO1_FUNCTION,
+            Self::Gpio2 => GPIO2_FUNCTION,
         }
     }
 }
@@ -201,6 +234,38 @@ where
         self.update(GPIO34_LEVEL, |value| set_bits(value, mask, high))
     }
 
+    /// Drives GPIO0, GPIO1, or GPIO2 low as an open-drain output, or lets it
+    /// float to its pull-up (M5Unified `AXP192_Class::_set_GPIO0_2`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn set_open_drain_level(
+        &mut self,
+        gpio: LowGpio,
+        high: bool,
+    ) -> Result<(), Error<I2C::Error>> {
+        let function = if high { GPIO012_FLOATING } else { GPIO012_LOW };
+        self.write(gpio.function_register(), function)
+    }
+
+    /// Switches GPIO0 to the LDOio0 regulator at `millivolts` (1800 to 3300
+    /// in 100 mV steps), or off with `None` (M5Unified
+    /// `AXP192_Class::setLDO0`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidVoltage`] for a voltage LDOio0 cannot produce,
+    /// or an I2C register error.
+    pub fn set_ldo_io0(&mut self, millivolts: Option<u16>) -> Result<(), Error<I2C::Error>> {
+        let Some(millivolts) = millivolts else {
+            return self.write(GPIO0_FUNCTION, GPIO0_OFF);
+        };
+        let code = voltage_code(millivolts, 1800, 3300, 100).ok_or(Error::InvalidVoltage)?;
+        self.update(LDO_IO0_VOLTAGE, |value| (value & 0x0f) | (code << 4))?;
+        self.write(GPIO0_FUNCTION, GPIO0_LDO)
+    }
+
     /// Pulses an active-low reset line on GPIO3 or GPIO4 and leaves it
     /// released high.
     ///
@@ -274,9 +339,49 @@ mod tests {
     };
 
     use super::{
-        ADDRESS, Axp192, DCDC3_VOLTAGE, Error, GPIO34_FUNCTION, GPIO34_LEVEL, Gpio, LDO23_VOLTAGE,
-        OUTPUT_CONTROL, Rail,
+        ADDRESS, Axp192, DCDC3_VOLTAGE, Error, GPIO0_FUNCTION, GPIO2_FUNCTION, GPIO34_FUNCTION,
+        GPIO34_LEVEL, Gpio, LDO_IO0_VOLTAGE, LDO23_VOLTAGE, LowGpio, OUTPUT_CONTROL, Rail,
     };
+
+    #[test]
+    fn drives_gpio2_low_or_floating() {
+        let mut bus = Bus::default();
+        {
+            let mut pmic = Axp192::new(&mut bus, ADDRESS).expect("valid address");
+            // M5Unified Core2 speaker enable: `setGPIO2(true)` floats GPIO2.
+            pmic.set_open_drain_level(LowGpio::Gpio2, true)
+                .expect("gpio2 high");
+        }
+        assert_eq!(bus.registers[usize::from(GPIO2_FUNCTION)], 0x06);
+        {
+            let mut pmic = Axp192::new(&mut bus, ADDRESS).expect("valid address");
+            pmic.set_open_drain_level(LowGpio::Gpio2, false)
+                .expect("gpio2 low");
+        }
+        assert_eq!(bus.registers[usize::from(GPIO2_FUNCTION)], 0x05);
+    }
+
+    #[test]
+    fn switches_ldo_io0_and_keeps_low_nibble() {
+        let mut bus = Bus::default();
+        bus.registers[usize::from(LDO_IO0_VOLTAGE)] = 0x0a;
+        {
+            let mut pmic = Axp192::new(&mut bus, ADDRESS).expect("valid address");
+            // M5Unified StickC microphone: `setLDO0(2800)`.
+            pmic.set_ldo_io0(Some(2800)).expect("ldo0 on");
+        }
+        assert_eq!(bus.registers[usize::from(LDO_IO0_VOLTAGE)], 0xaa);
+        assert_eq!(bus.registers[usize::from(GPIO0_FUNCTION)], 0x02);
+        {
+            let mut pmic = Axp192::new(&mut bus, ADDRESS).expect("valid address");
+            pmic.set_ldo_io0(None).expect("ldo0 off");
+            assert!(matches!(
+                pmic.set_ldo_io0(Some(3400)),
+                Err(Error::InvalidVoltage)
+            ));
+        }
+        assert_eq!(bus.registers[usize::from(GPIO0_FUNCTION)], 0x07);
+    }
 
     struct Bus {
         registers: [u8; 0x100],
