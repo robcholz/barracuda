@@ -46,16 +46,6 @@ impl Device {
     }
 }
 
-/// The shape a view was built for.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ViewShape {
-    /// Only the circle inscribed in the frame shows.
-    Round,
-    /// The whole frame shows.
-    Rect,
-}
-
 /// A `requires` or `uses` entry: the package's name and, after `@`, the
 /// least version of its interface the app needs, 1 when it names none, and 0
 /// when the version is not a number.
@@ -108,15 +98,11 @@ pub(crate) fn incompatibility(
             return Some(String::from("This device has no display"));
         };
         // A view lays out at the display's size: the size it names is the
-        // least it needs, and a view for the whole frame loses its corners
-        // on a round display.
+        // least it needs.
         if let Some([width, height]) = app.view_size
             && (display.width < width || display.height < height)
         {
             return Some(format!("Display too small (needs {width}×{height})"));
-        }
-        if app.view_shape == Some(ViewShape::Rect) && display.round {
-            return Some(String::from("App needs a square display"));
         }
     }
     for entry in &app.requires {
@@ -172,7 +158,6 @@ pub(crate) fn describe(device: &Device, packages: &Packages) -> Value {
         "display": device.display.map(|display| json!({
             "width": display.width,
             "height": display.height,
-            "round": display.round,
         })),
         "touch": device.touch,
         "capabilities": capabilities,

@@ -48,7 +48,6 @@ export const BLANK: Files = {
       name: "New app",
       version: "0.1.0",
       api: 1,
-      view: { shape: "round" },
     },
     null,
     2,

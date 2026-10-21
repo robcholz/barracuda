@@ -121,8 +121,8 @@ test("a manifest the device would reject fails the build first", () => {
     "$.view.styles is missing",
   );
   expect(
-    manifestProblem({ ...good, view: { ...good.view, shape: "oval" } }),
-  ).toBe('$.view.shape must be one of "round", "rect"');
+    manifestProblem({ ...good, view: { ...good.view, shape: "round" } }),
+  ).toBe("$.view.shape is not a manifest field");
   expect(
     manifestProblem({ ...good, requires: ["notify@2"], uses: ["notify"] }),
   ).toBe(

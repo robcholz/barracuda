@@ -67,12 +67,6 @@
           "minItems": 2,
           "maxItems": 2
         },
-        "view_shape": {
-          "enum": [
-            "round",
-            "rect"
-          ]
-        },
         "icon": {
           "type": "string"
         },

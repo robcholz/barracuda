@@ -4,6 +4,5 @@
   "name": "Settings",
   "version": "0.1.0",
   "api": 1,
-  "icon": "settings",
-  "view": { "shape": "round" }
+  "icon": "settings"
 }

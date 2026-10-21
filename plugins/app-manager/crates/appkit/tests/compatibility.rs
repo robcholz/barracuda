@@ -50,7 +50,7 @@ local capabilities = {}
 for name in pairs(device.capabilities) do capabilities[#capabilities + 1] = name end
 table.sort(capabilities)
 print(device.api, device.board, device.display.width, device.display.height,
-  device.display.round, device.touch, table.concat(capabilities, ","))
+  device.touch, table.concat(capabilities, ","))
 "#;
 
 async fn put(fs: &ScopedVfs, path: &str, bytes: &[u8]) {
@@ -91,15 +91,15 @@ async fn filesystem() -> ScopedVfs {
     offer(&fs, "plain", "").await;
     offer(
         &fs,
-        "round",
-        &format!(r#","view":{{{VIEW},"size":[360,360],"shape":"round"}}"#),
+        "full",
+        &format!(r#","view":{{{VIEW},"size":[360,360]}}"#),
     )
     .await;
     // A smaller view lays out at the display's size.
     offer(
         &fs,
         "small",
-        &format!(r#","view":{{{VIEW},"size":[240,240],"shape":"round"}}"#),
+        &format!(r#","view":{{{VIEW},"size":[240,240]}}"#),
     )
     .await;
     // Does not fit, and says why.
@@ -113,14 +113,8 @@ async fn filesystem() -> ScopedVfs {
     .await;
     offer(
         &fs,
-        "square",
-        &format!(r#","view":{{{VIEW},"size":[240,240],"shape":"rect"}}"#),
-    )
-    .await;
-    offer(
-        &fs,
         "large",
-        &format!(r#","view":{{{VIEW},"size":[480,480],"shape":"round"}}"#),
+        &format!(r#","view":{{{VIEW},"size":[480,480]}}"#),
     )
     .await;
     offer(&fs, "photo", r#","requires":["camera"]"#).await;
@@ -140,6 +134,13 @@ async fn filesystem() -> ScopedVfs {
     offer(&fs, "unknown", r#","requires":["teleport"]"#).await;
     offer(&fs, "core", r#","uses":["time"]"#).await;
     offer(&fs, "twice", r#","requires":["light"],"uses":["light"]"#).await;
+    // A display's shape is the view's design, not the manifest's.
+    offer(
+        &fs,
+        "shaped",
+        &format!(r#","view":{{{VIEW},"size":[240,240],"shape":"rect"}}"#),
+    )
+    .await;
     fs
 }
 
@@ -195,15 +196,14 @@ async fn scenario(spawner: Spawner) {
         [
             ("dim", Some("Needs system update (light v2, device has v1)")),
             ("elsewhere", Some("Only for other-board, third-board")),
+            ("full", None),
             ("lamp", None),
             ("large", Some("Display too small (needs 480×480)")),
             ("later", Some("Needs system update (API 2, device has 1)")),
             ("photo", Some("This device has no camera")),
             ("plain", None),
-            ("round", None),
             ("serial", Some("This device doesn't support serial")),
             ("small", None),
-            ("square", Some("App needs a square display")),
             ("unknown", Some("This device has no teleport")),
         ]
     );
@@ -212,12 +212,13 @@ async fn scenario(spawner: Spawner) {
         .iter()
         .map(|app| (app.dir.as_str(), app.problem.as_str()))
         .collect();
-    assert_eq!(invalid.len(), 6, "{invalid:#?}");
+    assert_eq!(invalid.len(), 7, "{invalid:#?}");
     for ((dir, problem), (expected_dir, expected)) in invalid.iter().zip([
         ("core.bapp", "\"time\" is a package every app has"),
         ("loose.bapp", "\"pins\" talks to a Board's hardware"),
         ("mislabeled.bapp", "\"light\" is a stable package"),
         ("pinned.bapp", "\"pins\" is not a stable package"),
+        ("shaped.bapp", "shape"),
         ("twice.bapp", "\"light\" is listed twice"),
         ("versioned.bapp", "\"light@soon\" is not a package name"),
     ]) {
@@ -226,7 +227,7 @@ async fn scenario(spawner: Spawner) {
     }
 
     // Incompatible apps do not open.
-    for id in ["later", "dim", "elsewhere", "square", "photo", "serial"] {
+    for id in ["later", "dim", "elsewhere", "photo", "serial"] {
         assert_eq!(
             manager.open(id).await.err(),
             Some(AppError::Incompatible),
@@ -247,7 +248,7 @@ async fn scenario(spawner: Spawner) {
         exit.output,
         [
             "true\ttrue\tfalse\ttrue\tfalse",
-            "1\ttest-board\t360\t360\ttrue\ttrue\tlight",
+            "1\ttest-board\t360\t360\ttrue\tlight",
         ],
         "{exit:?}"
     );

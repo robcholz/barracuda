@@ -5,6 +5,5 @@
   "version": "0.1.0",
   "api": 1,
   "requires": ["light"],
-  "icon": "lamp",
-  "view": { "shape": "round" }
+  "icon": "lamp"
 }

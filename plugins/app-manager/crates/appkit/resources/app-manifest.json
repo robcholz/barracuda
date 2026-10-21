@@ -82,12 +82,6 @@
             "minimum": 1,
             "maximum": 4096
           }
-        },
-        "shape": {
-          "enum": [
-            "round",
-            "rect"
-          ]
         }
       },
       "required": [

@@ -67,7 +67,6 @@ shows the reason; `app.open` answers `{"error": "incompatible", "reason": …}`.
 | `boards` does not list this Board | `Only for espressif-esp-vocat-v1-2` (the listed Boards) |
 | the app has a view and the device no display | `This device has no display` |
 | the display is smaller than `view.size` | `Display too small (needs 480×480)` |
-| `view.shape` is `rect` and the display is round | `App needs a square display` |
 | a package in `requires` is not a stable package here | `This device has no notify` |
 | its version here is below the one `requires` names | `Needs system update (notify v2, device has v1)` |
 | a package in `permissions` is missing | `This device doesn't support serial` |
@@ -82,9 +81,10 @@ display, and the layout is flexbox, so a view that fills its parent
 (`w-full`, `h-full`), spaces columns with insets on both sides (`left-[40px]
 right-[40px]`), and centers with `justify-center` fits displays of other
 sizes. Fixed sizes stay as written. `view.size` is the smallest display the
-view still fits, and a round view, one that keeps to the inscribed circle,
-fits a rectangular display too; a `rect` view does not fit a round one,
-whose corners it would lose. Text keeps its size: font slots are baked at
+view still fits. The device judges a view by its size alone: whether the
+display is round or rectangular is for the view's design to handle, so a view
+meant for every device keeps its content where a round display shows it.
+Text keeps its size: font slots are baked at
 fixed pixel sizes. A view that needs the display's size reads it from
 `app.device().display`.
 
@@ -104,7 +104,7 @@ to its version:
 {
   api = 1,
   board = "espressif-esp-vocat-v1-2",
-  display = { width = 360, height = 360, round = true },  -- nil without one
+  display = { width = 360, height = 360 },  -- nil without one
   touch = true,
   capabilities = { notify = 2, ... },
 }

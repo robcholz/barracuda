@@ -45,8 +45,7 @@ description: "打包一个应用：容器位置、清单、Lua 程序和视图�
     "program": "view.bvir",
     "styles": "styles.bin",
     "fonts": ["font-1.bin", "font-2.bin", "font-12.bin"],
-    "size": [360, 360],
-    "shape": "round"
+    "size": [360, 360]
   }
 }
 ```
@@ -64,7 +63,6 @@ description: "打包一个应用：容器位置、清单、Lua 程序和视图�
 | `view.styles`  | 有视图时 | 编译后的样式表                                    |
 | `view.fonts`   | 否       | 最多 16 个烘焙好的字体图集；默认为无               |
 | `view.size`    | 否       | `[width, height]`，视图能适配的最小显示屏尺寸；由构建根据 `pocket.json` 写入。视图按显示屏的实际尺寸布局 |
-| `view.shape`   | 否       | `round`：视图限制在内切圆内，适配任何显示屏；`rect`：视图需要矩形显示屏 |
 | `api`          | 否       | 应用所针对的 `app` Lua 包版本；默认为 `1` |
 | `requires`     | 否       | 最多 16 个应用离不开的稳定 Lua 包，每项写作 `name` 或 `name@version`，后者表示所需的最低版本 |
 | `uses`         | 否       | 最多 16 个设备具备时才使用的稳定 Lua 包，写法同 `requires` |
@@ -138,7 +136,7 @@ end
 
 ## 视图
 
-`view.program`、`view.styles`、`view.fonts` 和 `view.size` 都是构建产物：MicroTS 编译器把 `app.tsx` 及其 `app.d.ts` 契约转换为 View IR，`ui-link` 把它链接为 BVIR，字体烘焙器生成字体图集。源清单中的 `view` 只包含 `shape`。无法运行这套工具链的 Agent 可以编写无头应用，或者把现有构建的视图文件复制到自己的入口程序旁边。
+`view.program`、`view.styles`、`view.fonts` 和 `view.size` 都是构建产物：MicroTS 编译器把 `app.tsx` 及其 `app.d.ts` 契约转换为 View IR，`ui-link` 把它链接为 BVIR，字体烘焙器生成字体图集。源清单中没有 `view`。显示屏的形状不属于清单：视图在设计时就要同时适用于圆形和矩形显示屏。无法运行这套工具链的 Agent 可以编写无头应用，或者把现有构建的视图文件复制到自己的入口程序旁边。
 
 ## 示例：Agent 可以安装的无头应用
 

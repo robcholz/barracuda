@@ -6,10 +6,10 @@
 //
 // A source is a directory with `app.json`, the entry program, and an
 // optional `app.tsx` view with its `app.d.ts` contract and `pocket.json`. The
-// source manifest's `view` holds at most the `shape` the view is drawn for.
-// The bundle is the built container: the manifest with `view` filled in (the
-// files, and the size from `pocket.json`'s fixed viewport), the program,
-// `view.bvir`, `styles.bin`, and any font atlases. Paths
+// source manifest has no `view`; the build writes it. The bundle is the built
+// container: the manifest with `view` filled in (the files, and the size from
+// `pocket.json`'s fixed viewport), the program, `view.bvir`, `styles.bin`,
+// and any font atlases. Paths
 // are relative to the working directory, so a builtin app Plugin runs this
 // script on its own `resources/app`.
 //
@@ -75,10 +75,8 @@ const strip = (value: unknown): unknown =>
 for (const { name, source, bundle, ownFonts } of apps) {
   rmSync(bundle, { recursive: true, force: true });
   mkdirSync(bundle, { recursive: true });
-  // The source manifest's `view` has only its shape; the build fills in the
-  // rest once the view exists.
+  // The build fills in the manifest's `view` once the view exists.
   const manifest = JSON.parse(readFileSync(join(source, "app.json"), "utf8"));
-  const shape: string | undefined = manifest.view?.shape;
   delete manifest.view;
   const entry = manifest.entry ?? "main.lua";
   const writeManifest = () => writeFileSync(join(bundle, "app.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -137,7 +135,6 @@ for (const { name, source, bundle, ownFonts } of apps) {
     if (fonts.length) manifest.view.fonts = fonts.map((font) => `font-${font.slot}.bin`);
     const size = JSON.parse(readFileSync(join(source, "pocket.json"), "utf8")).app?.viewport?.fixed?.logical;
     if (size) manifest.view.size = size;
-    if (shape) manifest.view.shape = shape;
     writeManifest();
     console.log(`${name}: view.bvir, styles.bin, ${fonts.length} font(s)`);
   } finally {
