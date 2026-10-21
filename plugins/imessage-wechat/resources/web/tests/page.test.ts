@@ -376,7 +376,7 @@ test("an expired bot session offers 重新绑定, which starts a QR login", asyn
   status = { status: "idle", configured: true };
   let receive: Record<string, unknown> = {
     state: "error",
-    message: "需要重新扫码 / Scan again to relink",
+    message: "Scan again to relink",
     code: "session_expired",
   };
   const reply = harness.reply;
@@ -410,7 +410,7 @@ test("an expired bot session offers 重新绑定, which starts a QR login", asyn
 
   receive = {
     state: "error",
-    message: "需要重新扫码 / Scan again to relink",
+    message: "Scan again to relink",
     code: "session_expired",
   };
   await advance(5_000);
@@ -448,7 +448,7 @@ test("renders the expired session in English", async () => {
           mode: "send_receive",
           receive: {
             state: "error",
-            message: "需要重新扫码 / Scan again to relink",
+            message: "Scan again to relink",
             code: "session_expired",
           },
           owners: { count: 1 },

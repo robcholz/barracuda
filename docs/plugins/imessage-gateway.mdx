@@ -240,7 +240,7 @@ impl<Storage: PluginStorage> Owners<Storage> {
     pub async fn add(&self, id: &str, label: Option<&str>) -> Result<bool, OwnersError>;
     pub async fn remove(&self, id: &str) -> Result<bool, OwnersError>;
 }
-pub const PAIRED_REPLY: &str; // a Chinese line, then "Paired. You can start chatting."
+pub const PAIRED_REPLY: &str; // "Paired. You can start chatting."
 ```
 
 - A pairing code is six digits drawn uniformly from the entropy source, valid

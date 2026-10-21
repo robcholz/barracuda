@@ -22,4 +22,4 @@ pub(crate) use store::OWNERS_STORAGE_KEY;
 pub use store::{Owners, OwnersError};
 
 /// Reply sent once to a sender that just paired, in both portal languages.
-pub const PAIRED_REPLY: &str = "已绑定，可以开始对话了\nPaired. You can start chatting.";
+pub const PAIRED_REPLY: &str = "Paired. You can start chatting.";

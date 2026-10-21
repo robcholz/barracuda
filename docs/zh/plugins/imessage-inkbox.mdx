@@ -75,7 +75,7 @@ X-API-Key: <api key>
 - **消息**。每页按从旧到新处理。只处理 `direction` 为 `inbound` 且带文本的消息；发送者是 `remote_number`，路由是 `inkbox`/`conversation_id`，即发送路径所用的会话。所有者的消息以 Inkbox 消息 `id` 发布；新发送者发来的配对码会把对方添加为所有者，并通过正常的发送路径向该会话发送 `PAIRED_REPLY`（“Paired. You can start chatting.”）；其他人的消息都会被丢弃并计数。群组消息不会被列出（Inkbox 的 `include_groups` 保持关闭）。
 - **大页面**。超过 32 KiB 的 body 会以一半的 limit 重新请求；一个间隔内的新消息超过一整页时，会跳过最旧的消息，并给出警告。
 - **错误**。401 或 403 会以
-  “Inkbox rejected the API key”（前面是它的中文部分）停止接收，直到配置发生变化；429 等待 `Retry-After` 秒（缺失时为 60）；其他状态码和连接失败按运行时的退避策略重试；在一次正常轮询之后断开的连接会立即重新打开。
+  “Inkbox rejected the API key”停止接收，直到配置发生变化；429 等待 `Retry-After` 秒（缺失时为 60）；其他状态码和连接失败按运行时的退避策略重试；在一次正常轮询之后断开的连接会立即重新打开。
 
 邮件不会被轮询：注册得到的 agent 邮箱会在 Inkbox 接收邮件，但只有 iMessage 会到达 Gateway。
 

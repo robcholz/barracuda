@@ -185,7 +185,7 @@ impl<Storage: PluginStorage> Owners<Storage> {
     pub async fn add(&self, id: &str, label: Option<&str>) -> Result<bool, OwnersError>;
     pub async fn remove(&self, id: &str) -> Result<bool, OwnersError>;
 }
-pub const PAIRED_REPLY: &str; // a Chinese line, then "Paired. You can start chatting."
+pub const PAIRED_REPLY: &str; // "Paired. You can start chatting."
 ```
 
 - 配对码是从熵源中均匀抽取的六位数字，在 `PAIRING_CODE_LIFETIME`（10 分钟）内有效，并以恒定时间进行比较。

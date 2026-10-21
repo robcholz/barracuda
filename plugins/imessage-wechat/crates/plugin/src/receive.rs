@@ -35,7 +35,7 @@ use wechat::{
 use crate::{ChannelConfiguration, CHANNEL};
 
 /// Receive-state message after iLink reports the bot session expired (-14).
-pub(crate) const SESSION_EXPIRED_MESSAGE: &str = "需要重新扫码 / Scan again to relink";
+pub(crate) const SESSION_EXPIRED_MESSAGE: &str = "Scan again to relink";
 
 /// Receive-state code beside [`SESSION_EXPIRED_MESSAGE`]: what the page and the
 /// portal status match, so the message can change freely.

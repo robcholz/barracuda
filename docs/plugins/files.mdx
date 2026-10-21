@@ -91,10 +91,10 @@ device's `/portal/#files` in a window instead, and the two windows talk with
    files and 2 MiB, `app.json` among them. The page takes it only from the
    window that opened it, and shows that window's origin with the app, its
    version, and the installed version it replaces.
-3. Nothing changes until the person chooses **安装到设备** (**Install on
-   device**). The page then writes the files into
-   `/workspace/media/apps/.<id>.bapp/`, which the app manager skips, moves an
-   installed `<id>.bapp/` aside, renames the new directory into place and
+3. Nothing changes until the person chooses **Install on device**. The page
+   then writes the files into `/workspace/media/apps/.<id>.bapp/`, which the
+   app manager skips, moves an installed `<id>.bapp/` aside, renames the new
+   directory into place and
    deletes the old one, so the app manager never sees half an app
    ([App format](/plugins/app-manager/app-format)).
 4. The page reports each step to that origin as

@@ -70,15 +70,15 @@ function stored(win: Window, key: string): string | null {
 }
 /**
  * The language the portal starts in: the one the user picked, else the browser's first preferred
- * zh or en; English when it prefers only others, Chinese when it names none.
+ * zh or en; English otherwise.
  */
 export function initialLang(win: Window): Lang {
   const tags = win.navigator?.languages ?? [];
   const tag =
     stored(win, STORAGE.lang) ??
     tags.find((tag) => /^(zh|en)\b/i.test(tag)) ??
-    (tags[0] ? "en" : "zh");
-  return /^en/i.test(tag) ? "en" : "zh";
+    "en";
+  return /^zh/i.test(tag) ? "zh" : "en";
 }
 function store(win: Window, key: string, value: string) {
   try {

@@ -468,7 +468,7 @@ test("a stored language wins over the browser's", async () => {
   expect(h.$(".bc-nav-label")?.textContent).toBe("设备");
 });
 
-test("the start language is the browser's first zh or en, else English, else Chinese", () => {
+test("the start language is the browser's first zh or en, else English", () => {
   const lang = (languages: string[]) =>
     initialLang({
       localStorage: { getItem: () => null },
@@ -479,7 +479,7 @@ test("the start language is the browser's first zh or en, else English, else Chi
   expect(lang(["ja-JP", "zh-Hans"])).toBe("zh");
   expect(lang(["fr-FR"])).toBe("en");
   expect(lang(["EN"])).toBe("en");
-  expect(lang([])).toBe("zh");
+  expect(lang([])).toBe("en");
 });
 
 test("a stored language and theme apply at start; the theme control switches and persists", async () => {
