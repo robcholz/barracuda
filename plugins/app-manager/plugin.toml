@@ -52,3 +52,11 @@ command = ["bun", "resources/build-app.ts", "--target", "320x240", "crates/runti
 inputs = ["crates/runtime/tests/fixtures/baked", "resources/build-app.ts"]
 outputs = ["crates/runtime/tests/fixtures/baked-320x240.bapp"]
 env = ["POCKETJS_ROOT"]
+
+# A view whose text wraps: the UI runtime's text tests.
+[tasks.wrap]
+cwd = "."
+command = ["bun", "resources/build-app.ts", "crates/runtime/tests/fixtures/wrap", "crates/runtime/tests/fixtures/wrap.bapp"]
+inputs = ["crates/runtime/tests/fixtures/wrap", "resources/build-app.ts"]
+outputs = ["crates/runtime/tests/fixtures/wrap.bapp"]
+env = ["POCKETJS_ROOT"]
