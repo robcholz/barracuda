@@ -52,6 +52,25 @@ peripherals:
         data-lanes: 2
         phy-power-channel: 3
         phy-power-millivolts: 2500
+    sdmmc-device:
+      # microSD on slot 0 of the SD host, four lines on its IO_MUX pads: CLK
+      # GPIO43, CMD GPIO44, D0-D3 GPIO39-42, no card-detect line (M5Unified
+      # `_pin_table_sd` for board_M5Tab5; Espressif's esp-bsp m5stack_tab5
+      # `BSP_SD_*`, `BSP_SD_DET` not connected). Espressif's m5stack_tab5
+      # `fs_sdcard` runs it at SDMMC_FREQ_HIGHSPEED (40 MHz) with its I/O on
+      # on-chip LDO VO4 (`ldo_chan_id: 4`) at ESP-IDF's default 3.3 V
+      # (`SDMMC_HOST_DEFAULT` `io_voltage`). The Wi-Fi co-processor holds
+      # slot 1 of the same host.
+      micro-sd:
+        peripheral: SDHOST
+        slot: 0
+        clk: GPIO43
+        cmd: GPIO44
+        data: [GPIO39, GPIO40, GPIO41, GPIO42]
+        bus-width: 4
+        power-channel: 4
+        power-millivolts: 3300
+        frequency-hz: 40000000
     i2s-stream:
       audio-stream:
         # ES8388 DAC and ES7210 microphone ADC on I2S0: MCLK GPIO30, BCLK
@@ -102,6 +121,9 @@ peripherals:
       parameters:
         gt911-address: 20
         st712x-address: 85
+    micro-sd:
+      implementation: sdmmc-fat-removable-storage
+      bindings: { device: micro-sd }
     real-time-clock:
       implementation: rx8130ce-rtc
       bindings: { i2c: internal }

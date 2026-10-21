@@ -51,6 +51,31 @@ toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    sdmmc-device:
+      # microSD on slot 0 of the SD host, four lines on its IO_MUX pads: CLK
+      # GPIO43, CMD GPIO44, D0-D3 GPIO39-42, no card-detect line (Espressif's
+      # esp-bsp esp32_p4_function_ev_board `BSP_SD_*` and
+      # `bsp_sdcard_sdmmc_get_slot`, SDMMC_SLOT_NO_CD). Espressif's
+      # esp32_p4_function_ev_board `fs_sdcard` and esp-bsp run it at
+      # SDMMC_FREQ_HIGHSPEED (40 MHz) with its I/O on on-chip LDO VO4
+      # (`ldo_chan_id: 4`) at ESP-IDF's default 3.3 V (`SDMMC_HOST_DEFAULT`
+      # `io_voltage`). The Wi-Fi co-processor holds slot 1 of the same host.
+      micro-sd:
+        peripheral: SDHOST
+        slot: 0
+        clk: GPIO43
+        cmd: GPIO44
+        data: [GPIO39, GPIO40, GPIO41, GPIO42]
+        bus-width: 4
+        power-channel: 4
+        power-millivolts: 3300
+        frequency-hz: 40000000
+  devices:
+    micro-sd:
+      implementation: sdmmc-fat-removable-storage
+      bindings: { device: micro-sd }
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.

@@ -1,6 +1,7 @@
 //! ESP32-P4 implementation of Barracuda's stable HAL surface.
 
 mod dsi;
+mod sdmmc;
 // esp-hal drives the ESP32-P4's I2S controllers with the same master driver
 // as the ESP32-S3's, so the two Platforms share the stream adapter.
 #[path = "../../esp32s3/src/hal/i2s_stream.rs"]
@@ -12,6 +13,10 @@ pub use dsi::{
 };
 pub use i2s_stream::{
     i2s_stream, i2s_stream_with_mclk, I2sConfigError, I2sDevice, I2sTransferError,
+};
+pub use sdmmc::{
+    sdmmc_device, sdmmc_device_1bit, sdmmc_slot_binding, sdmmc_slot_binding_type, CardBus,
+    SdCardSlot, SdmmcConfigError, SdmmcDevice, SdmmcError,
 };
 
 include!("../../esp32/src/hal.rs");

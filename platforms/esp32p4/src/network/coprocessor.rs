@@ -1,8 +1,11 @@
 //! Wi-Fi on an ESP-Hosted co-processor wired to the SD host's slot 1.
 //!
 //! The co-processor runs Espressif's ESP-Hosted-MCU slave firmware; the host
-//! side of its protocol lives in `barracuda-driver-esp-hosted`. This module
-//! builds the SDIO slot from the Board's pins, spawns the driver's runner,
+//! side of its protocol lives in `barracuda-driver-esp-hosted`. The Platform
+//! owns the SD host and takes slot 1 when the entry starts (`crate::sd_host`);
+//! a Board's microSD card may hold slot 0 of the same host, and the two share
+//! its transfer engine. This module wires slot 1 to the Board's pins, spawns
+//! the driver's runner,
 //! runs one IP stack over the station and one over the soft access point,
 //! and adapts the driver's Wi-Fi operations to the Platform's `WifiDevice`.
 
@@ -23,8 +26,7 @@ use embassy_net::{Stack, StackResources};
 use embassy_time::{with_timeout, Delay, Duration};
 use esp_hal::{
     gpio::{AnyPin, Level, Output, OutputConfig},
-    peripherals::SDHOST,
-    sdmmc::{Config as SdHostConfig, SdHostController, Slot, SlotConfig},
+    sdmmc::Slot,
     Async,
 };
 use static_cell::{ConstStaticCell, StaticCell};
@@ -56,8 +58,8 @@ const ACCESS_POINT_CHANNEL: u8 = 1;
 /// Chip resources the Board's Wi-Fi co-processor consumes, built by the
 /// generated network bindings from `hardware.wifi-coprocessor`.
 pub struct CoprocessorTokens {
-    /// The SD host controller.
-    pub(crate) sdhost: SDHOST<'static>,
+    /// Slot 1 of the SD host the Platform owns.
+    pub(crate) sdio: crate::sd_host::CoprocessorSlot,
     /// The SDIO clock pin.
     pub(crate) clk: AnyPin<'static>,
     /// The SDIO command pin.
@@ -107,35 +109,29 @@ pub(super) struct Radio {
     control: Control<'static>,
 }
 
-/// Builds the SDIO slot and spawns the driver's runner, which resets and
+/// Wires the SDIO slot and spawns the driver's runner, which resets and
 /// starts the co-processor in the background.
 ///
 /// # Errors
 ///
-/// Returns an error when the SD host rejects its configuration or the
-/// runner task cannot be allocated.
+/// Returns an error when the SD host refused the slot or the runner task
+/// cannot be allocated.
 pub(super) fn start(
     spawner: Spawner,
     tokens: CoprocessorTokens,
 ) -> Result<Coprocessor, Esp32P4PlatformError> {
-    static CONTROLLER: StaticCell<SdHostController<'static>> = StaticCell::new();
     static STATE: ConstStaticCell<State> = ConstStaticCell::new(State::new());
 
-    let controller = CONTROLLER.init(
-        SdHostController::new(tokens.sdhost, SdHostConfig::default())
-            .map_err(Esp32P4PlatformError::Sdio)?,
-    );
     let [d0, d1, d2, d3] = tokens.data;
-    let slot = controller
-        .slot::<1>(SlotConfig::default())
+    let slot = tokens
+        .sdio
         .map_err(Esp32P4PlatformError::Sdio)?
         .with_clk(tokens.clk)
         .with_cmd(tokens.cmd)
         .with_data0(d0)
         .with_data1(d1)
         .with_data2(d2)
-        .with_data3(d3)
-        .into_async();
+        .with_data3(d3);
     // Hold the co-processor in reset until the runner starts it.
     let reset = Output::new(tokens.reset, Level::Low, OutputConfig::default());
     let (devices, control, runner) = barracuda_driver_esp_hosted::new(

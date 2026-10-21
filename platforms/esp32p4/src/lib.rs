@@ -16,6 +16,15 @@ mod entropy;
 #[doc(hidden)]
 pub mod entropy_source;
 
+/// SD memory card protocol over one slot of the SD host.
+#[doc(hidden)]
+pub mod sd_card;
+
+/// The SD host the Platform owns and the slots it hands out.
+#[cfg(target_arch = "riscv32")]
+#[doc(hidden)]
+pub mod sd_host;
+
 #[cfg(target_arch = "riscv32")]
 #[doc(hidden)]
 pub mod application;
