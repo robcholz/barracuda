@@ -1208,6 +1208,129 @@ native-layout:
     ));
 }
 
+/// A microSD card on `slot` of the SD host, with `power` lines when any.
+fn card_board(chip: &str, slot: u8, width: &str, power: &str) -> String {
+    let data = if width == "4" {
+        "[GPIO39, GPIO40, GPIO41, GPIO42]"
+    } else {
+        "[GPIO39]"
+    };
+    format!(
+        r#"
+name: card-board
+hardware:
+  chip: {chip}
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    sdmmc-device:
+      micro-sd:
+        peripheral: SDHOST
+        slot: {slot}
+        clk: GPIO43
+        cmd: GPIO44
+        data: {data}
+        bus-width: {width}
+{power}  devices:
+    micro-sd:
+      implementation: sdmmc-fat-removable-storage
+      bindings: {{ device: micro-sd }}
+"#
+    )
+}
+
+const VO4: &str = "        power-channel: 4\n        power-millivolts: 3300\n";
+
+#[test]
+fn an_sdmmc_card_takes_its_slot_through_the_platform_hand_off() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog = load_catalog(&root).expect("repository Implementation catalog");
+    let board = parse(&card_board("esp32p4", 0, "4", VO4)).expect("card Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved card Board");
+    let platform = resolve_board_platform(&root, "esp32p4", None).expect("repository Platform");
+    assert_eq!(validate_platform_hal(&board, &resolved, &platform), Ok(()));
+    let rust = render_board_hal_for_platform(&board, &resolved, &platform).expect("card HAL");
+    assert_valid_rust(&rust);
+
+    // The binding's type and value are the Platform's: the value may take
+    // the slot from the hand-off the entry passes beside the peripherals.
+    assert!(rust.contains(
+        "micro_sd_device_slot: ::barracuda_platform_selected::__platform::hal::sdmmc_slot_binding_type!(SDHOST, 0),"
+    ));
+    assert!(rust.contains(
+        "$crate::__platform_selected::__platform::hal::sdmmc_slot_binding!($peripherals, $handoff, SDHOST, 0),"
+    ));
+    assert!(!rust.contains("$peripherals.SDHOST"));
+    assert!(rust.contains("$peripherals.GPIO43,"));
+    assert!(rust.contains(
+        "($peripherals:ident) => {\n        $crate::__barracuda_generated_board_bindings!($peripherals, ())\n    };"
+    ));
+    assert!(rust.contains(
+        "hal::sdmmc_device(bindings.micro_sd_device_slot, bindings.micro_sd_device_clk, bindings.micro_sd_device_cmd, bindings.micro_sd_device_d0, bindings.micro_sd_device_d1, bindings.micro_sd_device_d2, bindings.micro_sd_device_d3, 4, 4, 3300, 25000000)"
+    ));
+
+    // The ESP32-S3 keeps building its own controller for a one-bit card.
+    let board = parse(&card_board("esp32s3", 0, "1", "")).expect("ESP32-S3 card Board");
+    let resolved = resolve_board(&board, &catalog).expect("resolved ESP32-S3 card");
+    let platform = resolve_board_platform(&root, "esp32s3", None).expect("ESP32-S3 Platform");
+    assert_eq!(validate_platform_hal(&board, &resolved, &platform), Ok(()));
+    let rust = render_board_hal_for_platform(&board, &resolved, &platform).expect("S3 card HAL");
+    assert!(rust.contains(
+        "hal::sdmmc_device_1bit(bindings.micro_sd_device_slot, bindings.micro_sd_device_clk, bindings.micro_sd_device_cmd, bindings.micro_sd_device_d0, 25000000)"
+    ));
+}
+
+#[test]
+fn a_card_needs_a_slot_and_supply_its_platform_hands_out() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog = load_catalog(&root).expect("repository Implementation catalog");
+    let validate = |chip: &str, yaml: &str| {
+        let board = parse(yaml).expect("card Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("resolved card Board");
+        let platform = resolve_board_platform(&root, chip, None).expect("repository Platform");
+        validate_platform_hal(&board, &resolved, &platform)
+    };
+
+    // The ESP32-P4 keeps slot 1 for a co-processor and hands out slot 0.
+    assert_eq!(
+        validate("esp32p4", &card_board("esp32p4", 1, "4", VO4)),
+        Err(GenerateError::UnsupportedSdmmcSlot {
+            platform: String::from("esp32p4"),
+            resource: String::from("micro-sd"),
+            slot: 1,
+        })
+    );
+    // Slot 0's pads run from LDO VO4 at 3.3 V; a Board says so.
+    for power in [
+        "",
+        "        power-channel: 4\n        power-millivolts: 1800\n",
+        "        power-channel: 3\n        power-millivolts: 3300\n",
+    ] {
+        assert!(matches!(
+            validate("esp32p4", &card_board("esp32p4", 0, "1", power)),
+            Err(GenerateError::SdmmcSlotPower { slot: 0, .. })
+        ));
+    }
+    assert_eq!(
+        validate("esp32p4", &card_board("esp32p4", 0, "1", VO4)),
+        Ok(())
+    );
+    // The ESP32-S3 powers no SD pads itself.
+    assert!(matches!(
+        validate("esp32s3", &card_board("esp32s3", 0, "1", VO4)),
+        Err(GenerateError::SdmmcSlotPower { .. })
+    ));
+    // A Platform without the binding refuses the card outright.
+    assert!(matches!(
+        validate("esp32c6", &card_board("esp32c6", 0, "1", "")),
+        Err(GenerateError::UnsupportedHalBinding {
+            binding: HalBinding::SdmmcDevice,
+            ..
+        })
+    ));
+}
+
 #[test]
 fn every_repository_peripheral_composition_resolves_and_generates() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

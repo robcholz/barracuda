@@ -291,6 +291,20 @@ HAL bindings. Move-only generated bindings prevent one chip token from being
 consumed twice. Platform providers validate runtime routing, electrical modes,
 frequencies, and controller limits before constructing a function handle.
 
+A chip controller that a Platform mechanism and a Board peripheral both use
+stays with the Platform, and the Board receives only its part. The ESP32-P4
+has one SD host whose two slots share one transfer engine: the Platform's
+Wi-Fi co-processor link uses slot 1, and a Board's microSD card uses slot 0.
+The Platform entry builds the host once and passes slot 0 to the generated
+Board bindings beside the chip peripherals, as the bindings macro's second,
+Platform hand-off argument; the card's `sdmmc-device` binding takes that slot
+and never the controller. The Platform manifest lists the slots it hands out
+and the supply each needs (`hal.sdmmc-slots`), and Board validation refuses a
+card on the co-processor's slot, so `cargo board select` rejects a Board whose
+declarations would claim one slot twice. The two users share the engine
+through the vendor HAL's own first-come-first-served lock, with no priority,
+and the card keeps each transfer short so the link is never starved.
+
 ## Peripherals and exposed I/O
 
 Board configuration distinguishes optional attached product hardware from

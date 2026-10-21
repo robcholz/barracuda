@@ -99,14 +99,18 @@ fn a_tab5_hands_the_entry_its_sd_host_co_processor_pins_and_power_switch() {
         let rust = network::network_tokens(None, board.hardware().wifi_coprocessor())
             .expect("projected tokens");
 
-        // SDHOST, then CLK, CMD, D0-D3, and the C6's enable.
+        // Slot 1 of the SD host the entry took, then CLK, CMD, D0-D3, and
+        // the C6's enable.
         assert!(rust.contains(
-            "$crate::application::NetworkTokens::new($peripherals.SDHOST, $peripherals.GPIO12, \
+            "$crate::application::NetworkTokens::new($sd_host.coprocessor, $peripherals.GPIO12, \
              $peripherals.GPIO13, $peripherals.GPIO11, $peripherals.GPIO10, $peripherals.GPIO9, \
              $peripherals.GPIO8, $peripherals.GPIO15)"
         ));
         assert!(rust.contains("frequency_hz: 40000000,"));
         assert!(rust.contains("chip: 0x0d,"));
+        assert!(rust.contains("sdio: crate::sd_host::CoprocessorSlot"));
+        assert!(!rust.contains("SDHOST"));
+        assert!(rust.contains("($peripherals:ident, $sd_host:ident) => {"));
         assert!(!rust.contains("ethernet:"));
         // WLAN_PWR_EN: output 0 of the PI4IOE5V6408 at 44h on I2C0.
         assert!(rust.contains(
@@ -127,7 +131,7 @@ fn a_board_with_both_links_hands_the_entry_both() {
     .expect("projected tokens");
 
     assert!(rust.contains(
-        "$peripherals.GPIO52, $peripherals.GPIO51, $peripherals.SDHOST, $peripherals.GPIO18, \
+        "$peripherals.GPIO52, $peripherals.GPIO51, $sd_host.coprocessor, $peripherals.GPIO18, \
          $peripherals.GPIO19, $peripherals.GPIO14, $peripherals.GPIO15, $peripherals.GPIO16, \
          $peripherals.GPIO17, $peripherals.GPIO54)"
     ));
@@ -151,8 +155,27 @@ fn co_processor_wiring_the_platform_cannot_drive_is_refused() {
         let board = parse(&tab5.replacen(from, to, 1)).expect("schema-valid Board");
         network::network_tokens(None, board.hardware().wifi_coprocessor())
     };
-    // Slot 0 is the SD card's fixed IO_MUX slot.
-    assert!(project("slot: 1", "slot: 0").is_err());
+    // Slot 0 is the SD card's fixed IO_MUX slot: Board selection refuses a
+    // co-processor there beside the Tab5's card, and the projection refuses
+    // it on a Board without one.
+    assert!(matches!(
+        parse(&tab5.replacen("slot: 1", "slot: 0", 1)),
+        Err(barracuda_board_config::ConfigError::SdmmcSlotInUse { slot: 0, .. })
+    ));
+    let (head, tail) = tab5.split_once("    sdmmc-device:").expect("Tab5 card");
+    let (_, rest) = tail.split_once("    i2s-stream:").expect("after the card");
+    let without_card = format!("{head}    i2s-stream:{rest}")
+        .replacen(
+            "    micro-sd:
+      implementation: sdmmc-fat-removable-storage
+      bindings: {{ device: micro-sd }}
+",
+            "",
+            1,
+        )
+        .replacen("slot: 1", "slot: 0", 1);
+    let cardless = parse(&without_card).expect("Tab5 without its card");
+    assert!(network::network_tokens(None, cardless.hardware().wifi_coprocessor()).is_err());
     // ESP-Hosted has no ESP32-H2 co-processor.
     assert!(project("chip: esp32c6", "chip: esp32h2").is_err());
     assert!(project("reset: GPIO15", "reset: GPIO15); evil(").is_err());

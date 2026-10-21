@@ -994,3 +994,128 @@ fn parses_dsi_hosts_with_or_without_a_backlight_pin() {
         }
     );
 }
+
+/// A co-processor on SD host slot 1 beside a microSD card on slot 0, as on
+/// the M5Stack Tab5.
+const CARD_AND_COPROCESSOR_BOARD: &str = r#"
+name: card-board
+hardware:
+  chip: esp32p4
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO12
+      cmd: GPIO13
+      d0: GPIO11
+      d1: GPIO10
+      d2: GPIO9
+      d3: GPIO8
+      frequency-hz: 40000000
+    reset: GPIO15
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    sdmmc-device:
+      micro-sd:
+        peripheral: SDHOST
+        slot: 0
+        clk: GPIO43
+        cmd: GPIO44
+        data: [GPIO39, GPIO40, GPIO41, GPIO42]
+        bus-width: 4
+        power-channel: 4
+        power-millivolts: 3300
+        frequency-hz: 40000000
+  devices:
+    micro-sd:
+      implementation: sdmmc-fat-removable-storage
+      bindings: { device: micro-sd }
+"#;
+
+/// The card Board without its co-processor.
+fn card_board_without_coprocessor() -> String {
+    let (head, tail) = CARD_AND_COPROCESSOR_BOARD
+        .split_once("  wifi-coprocessor:")
+        .expect("co-processor section");
+    let (_, rest) = tail.split_once("native-layout:").expect("layout section");
+    format!("{head}native-layout:{rest}")
+}
+
+#[test]
+fn an_sdmmc_device_names_the_sd_host_slot_it_is_wired_to() {
+    let board = parse(CARD_AND_COPROCESSOR_BOARD).expect("card beside a co-processor");
+    let io = board.peripheral_io();
+    let card = io.sdmmc_device("micro-sd").expect("microSD slot");
+    assert_eq!((card.peripheral(), card.slot()), ("SDHOST", 0));
+    assert_eq!(
+        (card.power_channel(), card.power_millivolts()),
+        (Some(4), Some(3300))
+    );
+    assert_eq!(card.frequency_hz(), 40_000_000);
+    assert_eq!(
+        io.sdmmc_devices().map(|(name, _)| name).collect::<Vec<_>>(),
+        ["micro-sd"]
+    );
+
+    // A slot left out is slot 0, as on every ESP32-S3 Board.
+    let unnamed = parse(&CARD_AND_COPROCESSOR_BOARD.replacen("        slot: 0\n", "", 1))
+        .expect("card without a slot");
+    let card = unnamed.peripheral_io().sdmmc_device("micro-sd");
+    assert_eq!(card.map(|card| card.slot()), Some(0));
+
+    // A clock left out is the default speed mode's 25 MHz; SD tops out at 50.
+    let card_clock = "        frequency-hz: 40000000\n  devices:";
+    let default_speed = parse(&CARD_AND_COPROCESSOR_BOARD.replacen(card_clock, "  devices:", 1))
+        .expect("card without a clock");
+    let card = default_speed.peripheral_io().sdmmc_device("micro-sd");
+    assert_eq!(card.map(|card| card.frequency_hz()), Some(25_000_000));
+    assert!(matches!(
+        parse(&CARD_AND_COPROCESSOR_BOARD.replacen(
+            card_clock,
+            "        frequency-hz: 80000000\n  devices:",
+            1
+        )),
+        Err(ConfigError::InvalidSdmmcDevice { .. })
+    ));
+}
+
+#[test]
+fn a_card_cannot_take_the_slot_the_coprocessor_or_another_card_holds() {
+    let on_slot_one = |yaml: &str| yaml.replacen("        slot: 0\n", "        slot: 1\n", 1);
+    assert_eq!(
+        parse(&on_slot_one(CARD_AND_COPROCESSOR_BOARD)).unwrap_err(),
+        ConfigError::SdmmcSlotInUse {
+            resource: String::from("micro-sd"),
+            slot: 1,
+            user: String::from("the Wi-Fi co-processor"),
+        }
+    );
+
+    // Without a co-processor slot 1 is free for a card.
+    let board = parse(&on_slot_one(&card_board_without_coprocessor()))
+        .expect("card on slot 1 without a co-processor");
+    assert!(board.hardware().wifi_coprocessor().is_none());
+
+    let second_card = CARD_AND_COPROCESSOR_BOARD.replacen(
+        "  devices:\n",
+        "      second-sd:\n        peripheral: SDHOST\n        clk: GPIO1\n        cmd: GPIO2\n        data: [GPIO3]\n        bus-width: 1\n  devices:\n",
+        1,
+    );
+    assert_eq!(
+        parse(&second_card).unwrap_err(),
+        ConfigError::SdmmcSlotInUse {
+            resource: String::from("second-sd"),
+            slot: 0,
+            user: String::from("sdmmc-device `micro-sd`"),
+        }
+    );
+    assert_eq!(
+        parse(&CARD_AND_COPROCESSOR_BOARD.replacen("slot: 0", "slot: 2", 1)).unwrap_err(),
+        ConfigError::InvalidSdmmcDevice {
+            resource: String::from("micro-sd"),
+        }
+    );
+}

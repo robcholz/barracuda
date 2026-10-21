@@ -1,6 +1,6 @@
 //! Validates the selected Board against its native ESP-IDF partition table
-//! and projects the network links it declares: wired Ethernet and a Wi-Fi
-//! co-processor.
+//! and projects the network links it declares, wired Ethernet and a Wi-Fi
+//! co-processor, and the SD host slots its co-processor and card use.
 
 use std::{env, error::Error, fs, path::PathBuf};
 
@@ -13,9 +13,13 @@ mod power_hold;
 #[path = "build_network.rs"]
 mod network;
 
+#[path = "build_sd_host.rs"]
+mod sd_host;
+
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=BARRACUDA_LOG_LEVEL");
     println!("cargo:rerun-if-changed=build_network.rs");
+    println!("cargo:rerun-if-changed=build_sd_host.rs");
     let log_level = generated_log_level()?;
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let root = manifest.join("../..");
@@ -48,6 +52,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("cargo:rustc-check-cfg=cfg(barracuda_esp32p4_ethernet)");
     println!("cargo:rustc-check-cfg=cfg(barracuda_esp32p4_wifi_coprocessor)");
+    println!("cargo:rustc-check-cfg=cfg(barracuda_esp32p4_sd_card)");
     let active = board.hardware().chip() == "esp32p4";
     let ethernet = board.hardware().ethernet().filter(|_| active);
     let coprocessor = board.hardware().wifi_coprocessor().filter(|_| active);
@@ -56,6 +61,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     if coprocessor.is_some() {
         println!("cargo:rustc-cfg=barracuda_esp32p4_wifi_coprocessor");
+    }
+    // The entry takes slot 0 of the SD host for the Board composition when
+    // the Board wires a card to it.
+    if active && sd_host::board_card_slot(&board)? {
+        println!("cargo:rustc-cfg=barracuda_esp32p4_sd_card");
     }
     let network = network::network_tokens(ethernet, coprocessor)?;
     fs::write(output.join("esp32p4_network.rs"), network)?;

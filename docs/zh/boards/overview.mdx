@@ -108,7 +108,7 @@ hardware:
       rxd1: GPIO30
 ```
 
-`wifi-coprocessor` 记录芯片通过 SDIO 访问的另一颗芯片上的 Wi-Fi 射频，例如 ESP32-P4 开发板，因为这颗芯片自身没有射频。它记录协处理器的 `chip`、它出厂运行的 `firmware`（`esp-hosted-mcu`，即 Espressif 的 ESP-Hosted-MCU）、SD 主机的 `slot` 及其时钟、命令和四根数据引脚与总线时钟、接到协处理器低电平有效复位脚的引脚，以及开发板通过 I/O 扩展芯片切换协处理器电源时，该扩展芯片的型号、I2C 总线、地址和输出。和 `ethernet` 一样，它是原理图上的事实。没有 `wifi-coprocessor-sdio` 绑定的平台会在 `cargo board select` 时拒绝这块开发板，它的引脚也不会同时作为外设绑定或可用引脚。
+`wifi-coprocessor` 记录芯片通过 SDIO 访问的另一颗芯片上的 Wi-Fi 射频，例如 ESP32-P4 开发板，因为这颗芯片自身没有射频。它记录协处理器的 `chip`、它出厂运行的 `firmware`（`esp-hosted-mcu`，即 Espressif 的 ESP-Hosted-MCU）、SD 主机的 `slot` 及其时钟、命令和四根数据引脚与总线时钟、接到协处理器低电平有效复位脚的引脚，以及开发板通过 I/O 扩展芯片切换协处理器电源时，该扩展芯片的型号、I2C 总线、地址和输出。和 `ethernet` 一样，它是原理图上的事实。没有 `wifi-coprocessor-sdio` 绑定的平台会在 `cargo board select` 时拒绝这块开发板，它的引脚也不会同时作为外设绑定或可用引脚。协处理器独占它的 SD 主机槽位：microSD 卡（`peripherals.io.sdmmc-device`）要声明另一个 `slot`，位于同一槽位的存储卡会被 `cargo board select` 拒绝。
 
 ```yaml
 hardware:
@@ -172,7 +172,7 @@ cargo run
 
 Barracuda 为基于工作区当前已实现的每个 ESP 芯片系列的 M5Stack 控制器提供可选择的开发板包：ESP32、ESP32-C3、ESP32-C6、ESP32-S3 和 ESP32-P4。运行 `cargo board select` 并搜索 `m5stack-` 前缀，即可看到完整的当前目录。
 
-M5Stack Tab5 选择 `m5stack-tab5`。它的开发板 HAL 使用纯 `esp-hal` 绑定实例化区分硬件版本的 DSI 显示屏和触摸、BMI270 惯性测量、INA226 电源监测和 RX8130CE 实时时钟。显示和触摸实现私下组合 PI4IOE5V6408 芯片驱动，用于各自的复位线；这个扩展芯片不是 System 可见的外设。ES8388/ES7210 音频通路和 microSD 卡槽要等 ESP32-P4 平台有了 I2S 和 SD/MMC 绑定才能声明。`m5stack-tab5x` 身份保持独立，不得仅凭烧录工具报告的 ESP32-P4 芯片版本就替换它。
+M5Stack Tab5 选择 `m5stack-tab5`。它的开发板 HAL 使用纯 `esp-hal` 绑定实例化区分硬件版本的 DSI 显示屏和触摸、BMI270 惯性测量、INA226 电源监测和 RX8130CE 实时时钟。显示和触摸实现私下组合 PI4IOE5V6408 芯片驱动，用于各自的复位线；这个扩展芯片不是 System 可见的外设。它的 microSD 卡位于 SD 主机的槽位 0，Wi-Fi 协处理器位于槽位 1。`m5stack-tab5x` 身份保持独立，不得仅凭烧录工具报告的 ESP32-P4 芯片版本就替换它。
 
 M5Stack CoreP4X 选择 `m5stack-corep4x`；它的 480x480 ST7102 DSI 面板由 `corep4x-dsi-display` 组合，该实现私下驱动 M5IOE1 扩展芯片控制面板的电源、复位和背光，并驱动 M5PM1 打开 5 V 升压。ESP32-P4-Function-EV-Board 和 M5Stack Unit PoE-P4 在 `hardware.ethernet` 下声明各自的 IP101GRI 以太网 PHY。Tab5、Tab5X 和 ESP32-P4-Function-EV-Board 在 `hardware.wifi-coprocessor` 下声明各自的 ESP32-C6 Wi-Fi 协处理器。
 

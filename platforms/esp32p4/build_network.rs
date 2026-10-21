@@ -30,7 +30,7 @@ pub struct NetworkTokens;
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __barracuda_esp32p4_network_tokens {
-    ($peripherals:ident) => {
+    ($peripherals:ident, $sd_host:ident) => {
         $crate::application::NetworkTokens
     };
 }
@@ -209,11 +209,11 @@ fn project_coprocessor(
         ("sdio_d3", token(d3)?),
         ("coprocessor_reset", token(coprocessor.reset())?),
     ];
+    // The Platform owns the SD host and takes slot 1 for the link when the
+    // entry starts (`crate::sd_host`).
     let mut projection = Projection {
-        parameters: vec![String::from(
-            "sdhost: ::esp_hal::peripherals::SDHOST<'static>",
-        )],
-        arguments: vec![String::from("$peripherals.SDHOST")],
+        parameters: vec![String::from("sdio: crate::sd_host::CoprocessorSlot")],
+        arguments: vec![String::from("$sd_host.coprocessor")],
         ..Projection::default()
     };
     for (parameter, pin) in pins {
@@ -228,7 +228,7 @@ fn project_coprocessor(
     ));
     projection.initializers.push(format!(
         "coprocessor: crate::network::coprocessor::CoprocessorTokens {{
-                sdhost,
+                sdio,
                 clk: ::esp_hal::gpio::Pin::degrade(sdio_clk),
                 cmd: ::esp_hal::gpio::Pin::degrade(sdio_cmd),
                 data: [
@@ -356,11 +356,12 @@ impl NetworkTokens {{
     }}
 }}
 
-/// Takes the selected Board's network-link tokens out of the chip peripherals.
+/// Takes the selected Board's network-link tokens out of the chip peripherals
+/// and the SD host slots the entry took.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __barracuda_esp32p4_network_tokens {{
-    ($peripherals:ident) => {{
+    ($peripherals:ident, $sd_host:ident) => {{
         $crate::application::NetworkTokens::new({arguments})
     }};
 }}

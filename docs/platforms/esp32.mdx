@@ -104,13 +104,27 @@ framebuffer in PSRAM that VDMA scans out, DCS commands before and during
 video, and the backlight pin, which it switches on and off because esp-hal has
 no LEDC driver for the ESP32-P4.
 
+The ESP32-P4 also drives a microSD card (`sdmmc-device`) on slot 0 of its one
+SD host. That slot's fixed pads are `GPIO39` to `GPIO44`, powered from the
+chip's LDO VO4 at 3.3 V, so a Board's card declares `slot: 0`,
+`power-channel: 4`, and `power-millivolts: 3300`. The Platform owns the SD
+host: at startup it builds the host once, keeps slot 1 for a Wi-Fi
+co-processor, and hands slot 0 to the Board's card. `cargo board select`
+refuses a card on slot 1, or on the slot a Board's co-processor uses. The card
+runs on four lines at its `frequency-hz`, switched to high speed above 25 MHz,
+and at most 40 MHz. It and the co-processor take turns on the SD host's one
+transfer engine in the order they ask, with no priority between them. One
+card transfer moves at most 4 KiB, so a large file never holds Wi-Fi up for
+longer than one such transfer, about 0.2 ms at 40 MHz.
+
 The ESP32-P4 has no radio. Its IP stack runs on whichever network link the
 Board declares:
 
 - **Wired Ethernet**, under `hardware.ethernet`: the EMAC on the Board's RMII
   pins, an IEEE 802.3 PHY at its address, and a DHCP client.
 - **A Wi-Fi co-processor**, under `hardware.wifi-coprocessor`: an ESP32-C6
-  running ESP-Hosted-MCU on SD host slot 1. At startup the Platform switches
+  running ESP-Hosted-MCU on SD host slot 1, beside the Board's microSD card on
+  slot 0 if it has one. At startup the Platform switches
   on the co-processor's power if the Board declares a switch, resets it, and
   checks the INIT event its firmware sends. It logs the firmware version when
   the firmware reports one. A wrong chip, firmware without Wi-Fi, another RPC

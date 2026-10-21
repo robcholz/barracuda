@@ -131,6 +131,25 @@ macro_rules! __barracuda_esp32s3_parallel_output_dma_buffer {
     };
 }
 
+/// Resolves a Board's SD host slot binding to its token type: on the
+/// ESP32-S3 the Board composition takes the SD host itself and builds the
+/// card's slot 0 from it, so the binding is the `SDHOST` token.
+#[macro_export]
+macro_rules! __barracuda_esp32s3_sdmmc_slot_binding_type {
+    ($controller:ident, 0) => {
+        $crate::hal::__vendor::peripherals::$controller<'static>
+    };
+}
+
+/// Moves a Board's SD host slot binding out of the chip peripherals; the
+/// ESP32-S3 entry hands the Board composition nothing else.
+#[macro_export]
+macro_rules! __barracuda_esp32s3_sdmmc_slot_binding {
+    ($peripherals:ident, $handoff:expr, $controller:ident, 0) => {
+        $peripherals.$controller
+    };
+}
+
 #[doc(hidden)]
 pub use __barracuda_esp32s3_camera_dma_buffer as camera_dma_buffer;
 #[doc(hidden)]
@@ -139,6 +158,10 @@ pub use __barracuda_esp32s3_i2s_dma_buffers as i2s_dma_buffers;
 pub use __barracuda_esp32s3_i2s_dma_buffers as runtime_i2s_dma_buffers;
 #[doc(hidden)]
 pub use __barracuda_esp32s3_parallel_output_dma_buffer as parallel_output_dma_buffer;
+#[doc(hidden)]
+pub use __barracuda_esp32s3_sdmmc_slot_binding as sdmmc_slot_binding;
+#[doc(hidden)]
+pub use __barracuda_esp32s3_sdmmc_slot_binding_type as sdmmc_slot_binding_type;
 
 /// ESP32-S3 camera receiver construction failure.
 #[derive(Debug)]

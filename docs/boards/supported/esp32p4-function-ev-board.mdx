@@ -28,6 +28,34 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `audio-codec` | Audio codec (ES8311) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT) | — |
+
+The display, touch, and camera connectors are not declared yet; add
+their devices to `boards/configs/esp32p4-function-ev-board/board.yml` to drive
+them. See [Peripheral composition](/boards/peripherals).
+
+## microSD card
+
+The microSD slot is on slot 0 of the ESP32-P4's SD host, on that slot's fixed
+pads. The Wi-Fi co-processor uses slot 1 of the same host. The
+[ESP32-P4 Platform](/platforms/esp32) owns the SD host and hands slot 0 to the
+`micro-sd` device. It runs the card on four lines at 40 MHz and powers its I/O
+from the chip's LDO VO4 at 3.3 V. A FAT card appears at `/removable/micro-sd`.
+The slot has no card-detect line, so a removed or swapped card is noticed the
+next time the slot is read, within about a second.
+
+| Signal | Pin |
+| --- | --- |
+| SD CLK / CMD | `GPIO43` / `GPIO44` |
+| SD D0 / D1 / D2 / D3 | `GPIO39` / `GPIO40` / `GPIO41` / `GPIO42` |
+| Card detect | none |
+| I/O supply | on-chip LDO VO4, 3.3 V |
+
+The card and Wi-Fi take turns on the SD host's one transfer engine, in the
+order they ask for it. One card transfer moves at most 4 KiB, so Wi-Fi waits
+at most about 0.2 ms for the card, however large the file.
+
+The card has not been tried on a device yet.
 
 ## Wired Ethernet
 

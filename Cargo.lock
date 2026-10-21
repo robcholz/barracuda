@@ -2174,6 +2174,7 @@ dependencies = [
 name = "barracuda-platform-esp32p4"
 version = "0.1.0"
 dependencies = [
+ "aligned",
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
@@ -2203,6 +2204,7 @@ dependencies = [
  "esp-storage",
  "log",
  "nb 1.1.0",
+ "sdio",
  "static_cell",
 ]
 

@@ -208,8 +208,12 @@ macro_rules! platform_entry {
             // a shared bus turns it on before the Board takes the bus.
             $crate::__barracuda_esp32p4_network_power!(peripherals);
             $crate::application::initialize_bulk_memory($board, peripherals.PSRAM);
-            let $board_bindings_value = $board_bindings!(peripherals);
-            let network = $crate::__barracuda_esp32p4_network_tokens!(peripherals);
+            // The Platform owns the one SD host: it keeps slot 1 for a Wi-Fi
+            // co-processor link and hands slot 0 to the Board's card.
+            #[allow(unused_variables)]
+            let sd_host = $crate::sd_host::SdHost::take(peripherals.SDHOST);
+            let $board_bindings_value = $board_bindings!(peripherals, sd_host.board);
+            let network = $crate::__barracuda_esp32p4_network_tokens!(peripherals, sd_host);
             let flash = peripherals.FLASH;
             let timer_group =
                 $crate::application::__hal::timer::timg::TimerGroup::new(peripherals.TIMG0);

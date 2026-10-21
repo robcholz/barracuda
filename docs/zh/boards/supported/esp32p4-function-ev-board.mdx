@@ -28,6 +28,24 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `audio-codec` | 音频编解码器（ES8311） | [`audio`](/zh/plugins/vm-audio) |
+| `micro-sd` | microSD 卡槽（FAT） | — |
+
+显示屏、触摸和摄像头接口尚未声明；把它们的设备添加到 `boards/configs/esp32p4-function-ev-board/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+
+## microSD 卡
+
+microSD 卡槽位于 ESP32-P4 SD 主机的槽位 0，接在该槽位固定的引脚上。Wi-Fi 协处理器使用同一主机的槽位 1。[ESP32-P4 平台](/zh/platforms/esp32)拥有这个 SD 主机，并把槽位 0 交给 `micro-sd` 设备。它以 4 线、40 MHz 驱动存储卡，并由芯片的 LDO VO4 以 3.3 V 为卡的 I/O 供电。FAT 格式的卡会出现在 `/removable/micro-sd`。卡槽没有插卡检测线，所以拔出或更换存储卡会在下次读取卡槽时发现，约在一秒之内。
+
+| 信号 | 引脚 |
+| --- | --- |
+| SD CLK / CMD | `GPIO43` / `GPIO44` |
+| SD D0 / D1 / D2 / D3 | `GPIO39` / `GPIO40` / `GPIO41` / `GPIO42` |
+| 插卡检测 | 无 |
+| I/O 供电 | 片上 LDO VO4，3.3 V |
+
+存储卡和 Wi-Fi 按请求的先后轮流使用 SD 主机唯一的传输引擎。一次存储卡传输最多 4 KiB，所以无论文件多大，Wi-Fi 等待存储卡的时间最多约 0.2 ms。
+
+这张存储卡还没有在实机上试过。
 
 ## 有线以太网
 

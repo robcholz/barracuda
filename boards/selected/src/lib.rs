@@ -11,6 +11,11 @@ mod selected {
 
 use selected::SelectedBoardHal;
 
+/// The selected Platform, for generated binding macros that expand in the
+/// application crate and take a part of a Platform-owned controller.
+#[doc(hidden)]
+pub use barracuda_platform_selected as __platform_selected;
+
 /// Board selected by the Board build input.
 pub use selected::BOARD;
 
