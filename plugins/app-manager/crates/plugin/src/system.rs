@@ -785,7 +785,7 @@ impl SystemUi {
             Screen::Info => (
                 String::from(subject_name),
                 match subject.and_then(|info| info.incompatible.as_ref()) {
-                    Some(reason) => format!("Can't run: {reason}"),
+                    Some(reason) => format!("Can't run\n{reason}"),
                     None => format!(
                         "Version {} · {}",
                         subject.map_or("", |info| info.version.as_str()),

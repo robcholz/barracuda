@@ -267,7 +267,7 @@ export default function System() {
               <Text class="text-lg font-bold text-[#ED8E04]">{"\uE010"}</Text>
               <Text class="text-lg font-bold text-[#FAFAFA]">{title()}</Text>
             </View>
-            <Text class="text-sm text-[#A1A1AA] mt-[4px]">{detail()}</Text>
+            <Text class="text-sm text-[#A1A1AA] text-center mt-[4px]">{detail()}</Text>
             <View class="w-[224px] h-12 rounded-md bg-[#CCFF00] items-center justify-center mt-[20px]" focusable onPress={() => confirm()}>
               <Text class="text-lg font-bold text-[#09090B]">{primary()}</Text>
             </View>
@@ -277,7 +277,7 @@ export default function System() {
           </Show>
           <Show when={screen() === 8}>
             <Text class="text-lg font-bold text-[#FAFAFA] mt-[8px]">{title()}</Text>
-            <Text class="text-sm text-[#A1A1AA]">{detail()}</Text>
+            <Text class="text-sm text-[#A1A1AA] text-center">{detail()}</Text>
             <View class="w-[256px] flex-col mt-[8px]">
               <For each={lines()} by={(line) => line.id}>
                 {(line) => (
@@ -456,10 +456,10 @@ export default function System() {
         <Show when={control() === 2}>
           <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center gap-[10px]">
             <Text class="text-lg font-bold text-[#FAFAFA]">Portal is on</Text>
-            <View class="w-[128px] h-[128px] rounded-md bg-[#FAFAFA] items-center justify-center px-2">
-              <Text class="text-sm text-[#09090B] text-center">{portal()}</Text>
+            <Text class="text-sm text-[#A1A1AA]">Install apps from your phone</Text>
+            <View class="w-[256px] rounded-lg border border-[#27272A] bg-[#09090B] px-4 py-3">
+              <Text class="text-base text-[#FAFAFA]">{portal()}</Text>
             </View>
-            <Text class="text-sm text-[#A1A1AA]">Join the hotspot by phone to install apps</Text>
             <View class="w-[72px] h-10 rounded-md border border-[#63636B] items-center justify-center" focusable onPress={() => closeControl()}>
               <Text class="text-sm font-bold text-[#FAFAFA]">Done</Text>
             </View>

@@ -182,7 +182,7 @@ impl NetworkSource for Online {
     }
 
     fn hotspot_hint(&self) -> String {
-        String::from("Join hotspot \"Setup\"")
+        String::from("1. Join Wi-Fi \"Setup\"\n2. Open http://192.168.4.1")
     }
 
     fn open_hotspot(&self) -> HotspotFuture<'_> {
@@ -426,7 +426,7 @@ async fn scenario(spawner: Spawner) {
     assert_eq!(system.screen(), Some(Screen::Info));
     let info = texts(&system);
     assert!(
-        info.contains("Can't run: This device has no camera") && info.contains("Uninstall"),
+        info.contains("Can't run\nThis device has no camera") && info.contains("Uninstall"),
         "{info}"
     );
     system.gesture(swipe(Direction::Right, None)).await;
@@ -513,7 +513,10 @@ async fn scenario(spawner: Spawner) {
     // The portal tile opens the source's hotspot and shows how to reach it.
     system.call(press("toggle", Some(5))).await;
     let control = texts(&system);
-    assert!(control.contains("Join hotspot \"Setup\""), "{control}");
+    assert!(
+        control.contains("1. Join Wi-Fi \"Setup\"\n2. Open http://192.168.4.1"),
+        "{control}"
+    );
     system.call(press("closeControl", None)).await;
     system
         .gesture(swipe(Direction::Up, Some(Edge::Bottom)))
