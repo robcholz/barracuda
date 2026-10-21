@@ -11,10 +11,10 @@ local DISPLAY = app.device().display
 local BAR = (DISPLAY and DISPLAY.width or 360) - 2 * 40 - 2 * 12
 local TIMEOUTS = { 15, 30, 60, 300, 0 }
 local STATES = {
-  running = "运行中",
-  background = "后台",
-  suspended = "已挂起",
-  terminating = "正在退出",
+  running = "Running",
+  background = "Background",
+  suspended = "Suspended",
+  terminating = "Quitting",
 }
 local EMPTY = { base = "", accent = "", dim = "" }
 
@@ -32,9 +32,9 @@ local function set(name, value)
 end
 
 local function timeout_text(seconds)
-  if seconds == 0 then return "永不" end
-  if seconds < 60 then return seconds .. " 秒" end
-  return (seconds // 60) .. " 分钟"
+  if seconds == 0 then return "Never" end
+  if seconds < 60 then return seconds .. " sec" end
+  return (seconds // 60) .. " min"
 end
 
 local function installed()
@@ -52,14 +52,14 @@ local function settings_rows()
     {
       id = WIFI,
       label = "Wi-Fi",
-      value = wifi.ssid or (wifi.state == "connected" and "已连接" or "未连接"),
+      value = wifi.ssid or (wifi.state == "connected" and "Connected" or "Not connected"),
       glyph = "\u{E09C}",
       mono = wifi.ssid ~= nil,
     },
-    { id = SOUND, label = "声音与显示", value = "", glyph = "\u{E090}", mono = false },
-    { id = APPS, label = "应用", value = string.format("%02d", #installed()), glyph = "\u{E060}", mono = true },
-    { id = STORAGE, label = "存储", value = storage.label .. " 已用", glyph = "\u{E034}", mono = false },
-    { id = ABOUT, label = "关于本机", value = "", glyph = "\u{E040}", mono = false },
+    { id = SOUND, label = "Sound & display", value = "", glyph = "\u{E090}", mono = false },
+    { id = APPS, label = "Apps", value = string.format("%02d", #installed()), glyph = "\u{E060}", mono = true },
+    { id = STORAGE, label = "Storage", value = storage.label .. " used", glyph = "\u{E034}", mono = false },
+    { id = ABOUT, label = "About", value = "", glyph = "\u{E040}", mono = false },
   }
 end
 
@@ -67,8 +67,8 @@ local function publish_wifi()
   local wifi = status.wifi
   set("connected", wifi.state == "connected")
   set("named", wifi.ssid ~= nil)
-  set("ssid", wifi.ssid or (wifi.state == "connected" and "已连接的网络" or "未连接"))
-  set("network", wifi.state == "connected" and "已连接" or (wifi.state == "connecting" and "连接中" or ""))
+  set("ssid", wifi.ssid or (wifi.state == "connected" and "Connected network" or "Not connected"))
+  set("network", wifi.state == "connected" and "Connected" or (wifi.state == "connecting" and "Connecting" or ""))
   local shown = {}
   for index, item in ipairs(networks) do
     if item.ssid ~= wifi.ssid and #shown < 4 then
@@ -97,7 +97,7 @@ local function publish_apps()
       name = info.name,
       icon = icon,
       letter = plain and info.letter or "",
-      state = STATES[info.state] or ("版本 " .. info.version),
+      state = STATES[info.state] or ("v" .. info.version),
       live = info.state == "running",
     }
   end
@@ -106,11 +106,11 @@ end
 
 local function publish_storage()
   local storage = assert(settings.storage())
-  set("used", storage.label .. " 已用")
+  set("used", storage.label .. " used")
   if storage.total then
-    set("usedNote", storage.free_label .. " 可用，共 " .. storage.total_label)
+    set("usedNote", storage.free_label .. " free of " .. storage.total_label)
   else
-    set("usedNote", "媒体、应用与缓存")
+    set("usedNote", "Media, apps, and cache")
   end
   local total = math.max(storage.total or storage.used, storage.used, 1)
   local fills = {}
@@ -131,9 +131,9 @@ local function publish_about()
   local storage = assert(settings.storage())
   set("board", device.board)
   set("rows", {
-    { id = 1, label = "系统版本", value = device.version, glyph = "\u{E040}", mono = true },
-    { id = 2, label = "芯片", value = device.chip, glyph = "\u{E050}", mono = true },
-    { id = 3, label = "存储", value = storage.free_label and (storage.free_label .. " 可用") or (storage.label .. " 已用"), glyph = "\u{E034}", mono = false },
+    { id = 1, label = "System version", value = device.version, glyph = "\u{E040}", mono = true },
+    { id = 2, label = "Chip", value = device.chip, glyph = "\u{E050}", mono = true },
+    { id = 3, label = "Storage", value = storage.free_label and (storage.free_label .. " free") or (storage.label .. " used"), glyph = "\u{E034}", mono = false },
   })
 end
 

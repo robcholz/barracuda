@@ -111,12 +111,12 @@ impl BuiltinBackend for Workflows {
 /// What starts a Workflow, from its Event rule.
 fn trigger(rule: &str) -> String {
     match rule.split('.').next() {
-        Some("time" | "scheduler") => String::from("定时"),
-        Some("wifi") => String::from("网络变化时"),
-        Some("app") => String::from("应用事件"),
-        Some("agent") => String::from("Agent 事件"),
-        Some("imessage" | "gateway") => String::from("收到消息时"),
-        _ => format!("事件 {rule}"),
+        Some("time" | "scheduler") => String::from("Scheduled"),
+        Some("wifi") => String::from("On network change"),
+        Some("app") => String::from("App event"),
+        Some("agent") => String::from("Agent event"),
+        Some("imessage" | "gateway") => String::from("On message"),
+        _ => format!("Event {rule}"),
     }
 }
 
@@ -126,8 +126,8 @@ mod tests {
 
     #[test]
     fn triggers_read_from_the_event_rule() {
-        assert_eq!(trigger("scheduler.fired"), "定时");
-        assert_eq!(trigger("gateway.message.received"), "收到消息时");
-        assert_eq!(trigger("session.event"), "事件 session.event");
+        assert_eq!(trigger("scheduler.fired"), "Scheduled");
+        assert_eq!(trigger("gateway.message.received"), "On message");
+        assert_eq!(trigger("session.event"), "Event session.event");
     }
 }

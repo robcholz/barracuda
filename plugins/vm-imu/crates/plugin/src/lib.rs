@@ -127,7 +127,7 @@ where
         self.present
             .then_some(barracuda_vm_plugin::PackageInterface::Stable {
                 version: 1,
-                purpose: "读取动作传感器",
+                purpose: "Read motion sensors",
             })
     }
 

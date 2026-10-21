@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "sessions",
-  "name": "会话",
+  "name": "Sessions",
   "version": "0.1.0",
   "api": 1,
   "icon": "chat",

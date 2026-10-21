@@ -200,7 +200,7 @@ where
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
-            purpose: "直接控制屏幕",
+            purpose: "Control the screen",
         })
     }
 

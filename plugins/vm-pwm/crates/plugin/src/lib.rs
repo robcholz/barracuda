@@ -118,7 +118,7 @@ where
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
-            purpose: "输出 PWM 信号",
+            purpose: "Output PWM signals",
         })
     }
     fn revoke(&self) {

@@ -199,7 +199,7 @@ impl LuaPackage for HttpPackage {
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         Some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 1,
-            purpose: "联网收发数据",
+            purpose: "Use the internet",
         })
     }
 

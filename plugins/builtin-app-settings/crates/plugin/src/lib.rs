@@ -34,8 +34,8 @@ pub const SETTINGS: &str = "settings";
 /// Shared Workspace areas whose size the storage page shows: its name,
 /// icon, and directory.
 const AREAS: [(&str, &str, &str); 2] = [
-    ("媒体", "image", "/workspace/media"),
-    ("缓存", "memory", "/workspace/cache"),
+    ("Media", "image", "/workspace/media"),
+    ("Cache", "memory", "/workspace/cache"),
 ];
 /// The deepest directory the storage walk enters.
 const MAX_DEPTH: usize = 8;
@@ -220,7 +220,7 @@ impl Settings {
         let cache = walk(&self.filesystem, AREAS[1].2).await;
         let parts = [
             (AREAS[0].0, AREAS[0].1, media),
-            ("应用", "package", apps),
+            ("Apps", "package", apps),
             (AREAS[1].0, AREAS[1].1, cache),
         ];
         let used: u64 = parts.iter().map(|(_, _, bytes)| bytes).sum();

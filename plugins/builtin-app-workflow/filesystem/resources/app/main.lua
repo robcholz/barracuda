@@ -4,7 +4,7 @@ local app = require("app")
 local workflows = require("workflows")
 local view = assert(app.view())
 
-local GLYPHS = { ["定时"] = "\u{E090}", ["网络变化时"] = "\u{E09C}" }
+local GLYPHS = { ["Scheduled"] = "\u{E090}", ["On network change"] = "\u{E09C}" }
 local OTHER = "\u{E004}"
 
 local function clock()

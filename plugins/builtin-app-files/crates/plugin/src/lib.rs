@@ -19,10 +19,10 @@ use serde_json::{Value, json};
 pub const FILES: &str = "files";
 /// The shared areas the app shows: its name, and the directory.
 pub const AREAS: [(&str, &str); 4] = [
-    ("媒体", "/workspace/media"),
-    ("资源", "/workspace/resources"),
-    ("存储卡", "/workspace/removable"),
-    ("缓存", "/workspace/cache"),
+    ("Media", "/workspace/media"),
+    ("Resources", "/workspace/resources"),
+    ("SD card", "/workspace/removable"),
+    ("Cache", "/workspace/cache"),
 ];
 /// The most files a listing holds.
 pub const MAX_FILES: usize = 64;

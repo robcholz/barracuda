@@ -50,7 +50,7 @@ export default function Files() {
         </View>
         <Show when={empty()}>
           <View class="absolute left-0 right-0 top-[150px] flex-row justify-center">
-            <Text class="text-sm text-[#A1A1AA]">这里还没有文件</Text>
+            <Text class="text-sm text-[#A1A1AA]">No files yet</Text>
           </View>
         </Show>
       </Show>

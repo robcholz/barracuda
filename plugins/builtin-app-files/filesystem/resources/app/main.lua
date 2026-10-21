@@ -6,10 +6,10 @@ local view = assert(app.view())
 
 local AREAS, AREA = 0, 1
 local GLYPHS = {
-  ["媒体"] = "\u{E03C}",
-  ["资源"] = "\u{E060}",
-  ["存储卡"] = "\u{E034}",
-  ["缓存"] = "\u{E050}",
+  ["Media"] = "\u{E03C}",
+  ["Resources"] = "\u{E060}",
+  ["SD card"] = "\u{E034}",
+  ["Cache"] = "\u{E050}",
 }
 local page = AREAS
 local list = {}
@@ -34,7 +34,7 @@ local function publish()
       rows[index] = {
         id = index,
         name = item.name,
-        count = item.present and tostring(item.count) or "—",
+        count = item.present and tostring(item.count) or "-",
         glyph = GLYPHS[item.name] or "",
       }
     end
@@ -47,7 +47,8 @@ local function publish()
       rows[index] = { id = index, path = file.path, size = file.label }
     end
     set("area", current.name)
-    set("summary", shown.present and (shown.count .. " 个 · " .. shown.label) or "未插入")
+    local noun = shown.count == 1 and " file · " or " files · "
+    set("summary", shown.present and (shown.count .. noun .. shown.label) or "Not inserted")
     set("files", rows)
     set("empty", #rows == 0)
   end

@@ -336,7 +336,7 @@ impl LuaPackage for AgentLuaPackage {
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         Some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 1,
-            purpose: "使用 Agent",
+            purpose: "Use the Agent",
         })
     }
 

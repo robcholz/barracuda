@@ -76,7 +76,7 @@ export default function Settings() {
           </View>
           <View class="w-full h-[1px] bg-[#27272A]" />
           <View class="w-full flex-row items-center justify-between px-3 pt-[18px] pb-[6px]">
-            <Text class="text-sm text-[#A1A1AA]">附近的网络</Text>
+            <Text class="text-sm text-[#A1A1AA]">Nearby networks</Text>
             <Show when={scanning()}>
               <Text class="text-sm text-[#A1A1AA] animate-spin">{""}</Text>
             </Show>
@@ -105,7 +105,7 @@ export default function Settings() {
         <View class="absolute left-[40px] right-[40px] top-[52px] flex-col">
           <View class="w-full flex-col px-3 pt-[10px] pb-[4px]">
             <View class="flex-row justify-between items-center">
-              <Text class="text-lg text-[#FAFAFA]">音量</Text>
+              <Text class="text-lg text-[#FAFAFA]">Volume</Text>
               <Text class="shrink-0 font-mono text-sm text-[#A1A1AA]">{volume()}%</Text>
             </View>
             <View class="w-full h-[28px] relative">
@@ -129,7 +129,7 @@ export default function Settings() {
           <View class="w-full h-[1px] bg-[#27272A]" />
           <View class="w-full flex-col px-3 pt-[10px] pb-[4px]">
             <View class="flex-row justify-between items-center">
-              <Text class="text-lg text-[#FAFAFA]">亮度</Text>
+              <Text class="text-lg text-[#FAFAFA]">Brightness</Text>
               <Text class="shrink-0 font-mono text-sm text-[#A1A1AA]">{brightness()}%</Text>
             </View>
             <View class="w-full h-[28px] relative">
@@ -154,7 +154,7 @@ export default function Settings() {
           <View class="w-full h-[58px] flex-col" focusable onPress={() => nextTimeout()}>
             <View class="w-full h-[57px] flex-row items-center gap-3 px-3">
               <Text class="shrink-0 text-lg font-bold text-[#A1A1AA]">{""}</Text>
-              <Text class="flex-1 text-lg text-[#FAFAFA]">息屏</Text>
+              <Text class="flex-1 text-lg text-[#FAFAFA]">Screen off</Text>
               <Text class="text-sm text-[#A1A1AA]">{timeout()}</Text>
             </View>
             <View class="w-full h-[1px] bg-[#27272A]" />
@@ -162,7 +162,7 @@ export default function Settings() {
           <View class="w-full h-[58px] flex-col" focusable onPress={() => toggleMute()}>
             <View class="w-full h-[57px] flex-row items-center gap-3 px-3">
               <Text class="shrink-0 text-lg font-bold text-[#A1A1AA]">{""}</Text>
-              <Text class="flex-1 text-lg text-[#FAFAFA]">静音</Text>
+              <Text class="flex-1 text-lg text-[#FAFAFA]">Mute</Text>
               <View
                 class={
                   muted()
