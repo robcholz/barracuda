@@ -31,7 +31,7 @@ description: "了解可安装应用在每台设备上都能依赖什么：Lua �
 ### `notify`
 
 - `notify.post(title [, body]) -> id` 向通知中心添加一条通知。
-- `notify.ask(title [, body [, allow, deny]]) -> allowed` 用一张排在所有通知之前的卡片询问用户，并等待回答：用户允许时返回 `true`，拒绝或关闭时返回 `false`。从版本 2 开始，`allow` 和 `deny` 用来指定卡片上两个按钮的文字（未指定时默认显示“允许”和“拒绝”的含义，每个最多 6 个字符），例如 `notify.ask("Lights on?", nil, "Now", "Later")`。
+- `notify.ask(title [, body [, allow, deny]]) -> allowed` 用一张排在所有通知之前的卡片询问用户，并等待回答：用户允许时返回 `true`，拒绝或关闭时返回 `false`。从版本 2 开始，`allow` 和 `deny` 用来指定卡片上两个按钮的文字（未指定时为 **Allow** 和 **Deny**，每个最多 6 个字符），例如 `notify.ask("Lights on?", nil, "Now", "Later")`。
 
 失败时返回 `nil` 和一条消息。
 
@@ -41,14 +41,14 @@ System 会按以下顺序根据设备检查每个可安装应用，并在遇到�
 
 | 检查项 | 原因说明 |
 | --- | --- |
-| `api` 高于设备的级别 | 请更新系统：应用需要 API 2，本设备为 1 |
-| `boards` 未列出本开发板 | 仅适用于 espressif-esp-vocat-v1-2（列出的开发板） |
-| 应用带视图，而设备没有显示屏 | 本设备没有屏幕 |
-| 显示屏小于 `view.size` | 屏幕太小：应用需要 480×480 |
-| `view.shape` 为 `rect`，而显示屏是圆形 | 应用需要方形屏幕 |
-| `requires` 中的某个 Lua 包在本设备上不是稳定 Lua 包 | 本设备没有 notify |
-| 它在本设备上的版本低于 `requires` 中写明的版本 | 请更新系统：应用需要 notify 版本 2，本设备为版本 1 |
-| `permissions` 中的某个 Lua 包缺失 | 本设备不支持 serial |
+| `api` 高于设备的级别 | `Needs system update (API 2, device has 1)` |
+| `boards` 未列出本开发板 | `Only for espressif-esp-vocat-v1-2`（列出的开发板） |
+| 应用带视图，而设备没有显示屏 | `This device has no display` |
+| 显示屏小于 `view.size` | `Display too small (needs 480×480)` |
+| `view.shape` 为 `rect`，而显示屏是圆形 | `App needs a square display` |
+| `requires` 中的某个 Lua 包在本设备上不是稳定 Lua 包 | `This device has no notify` |
+| 它在本设备上的版本低于 `requires` 中写明的版本 | `Needs system update (notify v2, device has v1)` |
+| `permissions` 中的某个 Lua 包缺失 | `This device doesn't support serial` |
 
 不适配的应用永远不会打开，包括在开发板或系统变化后不再适配的应用。
 

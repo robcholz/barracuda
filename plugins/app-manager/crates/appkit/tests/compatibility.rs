@@ -151,13 +151,13 @@ async fn scenario(spawner: Spawner) {
             "light",
             Some(PackageInterface::Stable {
                 version: 1,
-                purpose: "控制灯光",
+                purpose: "Control lights",
             }),
         ),
         Fake(
             "pins",
             Some(PackageInterface::BoardSpecific {
-                purpose: "控制引脚",
+                purpose: "Control pins",
             }),
         ),
         Fake("secret", None),
@@ -179,8 +179,8 @@ async fn scenario(spawner: Spawner) {
         AppManager::register(filesystem().await, vm, Some(ui), device, &packages).unwrap();
     spawner.spawn(supervise(manager.clone()).unwrap());
 
-    assert_eq!(manager.purpose("light"), Some("控制灯光"));
-    assert_eq!(manager.purpose("pins"), Some("控制引脚"));
+    assert_eq!(manager.purpose("light"), Some("Control lights"));
+    assert_eq!(manager.purpose("pins"), Some("Control pins"));
     assert_eq!(manager.purpose("secret"), None);
     assert_eq!(manager.purpose("camera"), None);
 
@@ -193,21 +193,18 @@ async fn scenario(spawner: Spawner) {
     assert_eq!(
         offered,
         [
-            (
-                "dim",
-                Some("需要更新系统（应用需要 light 第 2 版，本机是第 1 版）")
-            ),
-            ("elsewhere", Some("只适用于 other-board、third-board")),
+            ("dim", Some("Needs system update (light v2, device has v1)")),
+            ("elsewhere", Some("Only for other-board, third-board")),
             ("lamp", None),
-            ("large", Some("屏幕太小（应用需要 480×480）")),
-            ("later", Some("需要更新系统（应用需要 API 2，本机是 1）")),
-            ("photo", Some("此设备没有 camera")),
+            ("large", Some("Display too small (needs 480×480)")),
+            ("later", Some("Needs system update (API 2, device has 1)")),
+            ("photo", Some("This device has no camera")),
             ("plain", None),
             ("round", None),
-            ("serial", Some("此设备不支持 serial")),
+            ("serial", Some("This device doesn't support serial")),
             ("small", None),
-            ("square", Some("应用需要方屏")),
-            ("unknown", Some("此设备没有 teleport")),
+            ("square", Some("App needs a square display")),
+            ("unknown", Some("This device has no teleport")),
         ]
     );
     let invalid: Vec<_> = list

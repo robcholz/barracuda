@@ -230,7 +230,7 @@ mod tests {
         RunningApp {
             app: AppInfo {
                 id: "counter".into(),
-                name: "计数器".into(),
+                name: "Counter".into(),
                 version: "0.1.0".into(),
                 location: AppLocation::Workspace,
                 kind: AppKind::Installable,
@@ -243,7 +243,7 @@ mod tests {
                 view_size: Some([360, 360]),
                 view_shape: Some(ViewShape::Round),
                 icon: Some("lamp".into()),
-                incompatible: Some("此设备没有灯光".into()),
+                incompatible: Some("This device has no light".into()),
             },
             run_id: 3,
             state,
@@ -279,7 +279,7 @@ mod tests {
         }
         check::<OpenAction>(Response::<RunningApp>::Error {
             error: AppError::Incompatible,
-            reason: Some("只适用于 espressif-esp-vocat-v1-2".into()),
+            reason: Some("Only for espressif-esp-vocat-v1-2".into()),
         });
         check::<HomeAction>(AppResponse { app: None });
         check::<HomeAction>(AppResponse {

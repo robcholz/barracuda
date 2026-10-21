@@ -14,7 +14,7 @@ local function finder(text)
 end
 
 assert(view:set("busy", false))
-finder(device and "取景" or "没有相机")
+finder(device and "Viewfinder" or "No camera")
 for event in app.events() do
   if event == "shoot" and device then
     assert(view:set("busy", true))
@@ -24,9 +24,9 @@ for event in app.events() do
       app.fs.mkdir("/photos")
       assert(app.fs.write(string.format("/photos/%04d.jpg", shots), photo))
       assert(app.kv.set("shots", shots))
-      finder("已保存 " .. shots .. " 张")
+      finder("Saved " .. shots .. (shots == 1 and " photo" or " photos"))
     else
-      finder(message or "拍摄失败")
+      finder(message or "Couldn't take photo")
     end
     assert(view:set("busy", false))
   elseif event == "app:terminate" then

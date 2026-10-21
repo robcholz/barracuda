@@ -143,13 +143,13 @@ mod tests {
         let notices = Rc::new(Notifications::new());
         let action = NotifyAction(Rc::clone(&notices));
         let response = block_on(action.invoke(NotifyRequest {
-            title: "门铃".into(),
-            body: "有人在门口".into(),
+            title: "Doorbell".into(),
+            body: "Someone is at the door".into(),
             icon: Some("lamp".into()),
         }))
         .unwrap();
         valid::<NotifyAction>(&response);
-        assert_eq!(notices.list()[0].title, "门铃");
+        assert_eq!(notices.list()[0].title, "Doorbell");
         assert_eq!(notices.list()[0].icon.as_deref(), Some("lamp"));
         assert!(notices.unread());
     }
@@ -161,11 +161,11 @@ mod tests {
         assert!(
             ConfirmAction::SCHEMA
                 .request()
-                .validate(&json!({ "title": "打开客厅灯带？", "body": "林夏 · Telegram" }))
+                .validate(&json!({ "title": "Turn on the living room light strip?", "body": "Lin Xia · Telegram" }))
                 .is_ok()
         );
         let pending = action.invoke(ConfirmRequest {
-            title: "打开客厅灯带？".into(),
+            title: "Turn on the living room light strip?".into(),
             body: String::new(),
         });
         let question = notices.list()[0].clone();
@@ -177,7 +177,7 @@ mod tests {
         assert!(notices.list().is_empty());
 
         let dismissed = action.invoke(ConfirmRequest {
-            title: "删除文件？".into(),
+            title: "Delete files?".into(),
             body: String::new(),
         });
         notices.dismiss(notices.list()[0].id);
@@ -189,7 +189,8 @@ mod tests {
     fn agent_reports_the_home_screen_state() {
         let agent = Rc::new(AgentStatus::new());
         let action = AgentAction(Rc::clone(&agent));
-        let request = json!({ "state": "answering", "question": "明天？", "answer": "9:30 开会" });
+        let request =
+            json!({ "state": "answering", "question": "Tomorrow?", "answer": "9:30 meeting" });
         assert!(AgentAction::SCHEMA.request().validate(&request).is_ok());
         assert!(
             AgentAction::SCHEMA
@@ -200,6 +201,6 @@ mod tests {
         let response = block_on(action.invoke(serde_json::from_value(request).unwrap())).unwrap();
         valid::<AgentAction>(&response);
         assert_eq!(agent.state(), AgentState::Answering);
-        assert_eq!(agent.answer(), "9:30 开会");
+        assert_eq!(agent.answer(), "9:30 meeting");
     }
 }

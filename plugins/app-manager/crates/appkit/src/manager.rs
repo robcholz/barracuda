@@ -327,11 +327,11 @@ impl AppManager {
 
     /// What app `info` asks to be allowed, as the app info screen shows it:
     /// one line per package it names, in the words the
-    /// package's Plugin declared, or by its name for one this device lacks,
-    /// with packages it only uses marked optional. Each line comes with its
-    /// package's name.
+    /// package's Plugin declared, or by its name for one this device lacks.
+    /// Each line comes with its package's name before it and, after it,
+    /// whether the app only uses the package, which makes it optional.
     #[must_use]
-    pub fn asks(&self, info: &AppInfo) -> Vec<(String, String)> {
+    pub fn asks(&self, info: &AppInfo) -> Vec<(String, String, bool)> {
         info.requires
             .iter()
             .chain(&info.uses)
@@ -340,13 +340,8 @@ impl AppManager {
                 let name = device::requirement(package).0;
                 let purpose = self
                     .purpose(name)
-                    .map_or_else(|| format!("使用 {name}"), String::from);
-                let line = if info.uses.contains(package) {
-                    format!("{purpose}（可选）")
-                } else {
-                    purpose
-                };
-                (String::from(name), line)
+                    .map_or_else(|| format!("Use {name}"), String::from);
+                (String::from(name), purpose, info.uses.contains(package))
             })
             .collect()
     }

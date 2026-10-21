@@ -17,8 +17,8 @@ local function publish()
   assert(view:set("reading", tostring(now)))
   local good = now <= 35
   assert(view:set("good", good))
-  assert(view:set("verdict", good and "空气良好" or (now <= 75 and "轻度污染" or "污染较重")))
-  assert(view:set("before", "一小时前 " .. hour))
+  assert(view:set("verdict", good and "Good" or (now <= 75 and "Moderate" or "Unhealthy")))
+  assert(view:set("before", "An hour ago: " .. hour))
 end
 
 local step = #history

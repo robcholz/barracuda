@@ -22,14 +22,14 @@ export default function Lamp() {
           focusable
           onPress={() => setWarm()}
         >
-          <Text class="text-base text-[#FAFAFA]">暖光</Text>
+          <Text class="text-base text-[#FAFAFA]">Warm</Text>
         </View>
         <View
           class={warm() ? "flex-1 h-[38px] items-center justify-center" : "flex-1 h-[38px] rounded bg-[#27272A] border border-[#3F3F46] items-center justify-center"}
           focusable
           onPress={() => setCool()}
         >
-          <Text class="text-base text-[#FAFAFA]">冷光</Text>
+          <Text class="text-base text-[#FAFAFA]">Cool</Text>
         </View>
       </View>
     </View>

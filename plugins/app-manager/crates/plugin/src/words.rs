@@ -13,32 +13,36 @@ pub(crate) fn permission_icon(package: &str) -> &'static str {
     }
 }
 
+/// The note under what an app only uses when the device has it, on the app
+/// info screen.
+pub(crate) const OPTIONAL: &str = "Optional";
+
 /// Where a running app is in its lifecycle, for the app switcher.
 pub(crate) const fn state(state: AppState) -> &'static str {
     match state {
-        AppState::Active | AppState::Inactive | AppState::Running => "运行中",
-        AppState::Background => "后台",
-        AppState::Suspended => "已挂起",
-        AppState::Terminating => "正在退出",
+        AppState::Active | AppState::Inactive | AppState::Running => "Running",
+        AppState::Background => "Background",
+        AppState::Suspended => "Suspended",
+        AppState::Terminating => "Quitting",
     }
 }
 
 /// Why an app that was on the display ended.
 pub(crate) fn exit(exit: &AppExit) -> &'static str {
     match exit.outcome {
-        VmRunOutcome::Cancelled => "没有及时响应，已被结束",
-        _ => "运行出错，未保存的内容已丢失",
+        VmRunOutcome::Cancelled => "Stopped responding and was closed",
+        _ => "Crashed; unsaved changes were lost",
     }
 }
 
 /// Why an app could not be opened.
 pub(crate) const fn open_error(error: AppError) -> &'static str {
     match error {
-        AppError::InvalidBundle | AppError::ViewRejected => "应用文件有问题",
-        AppError::Busy => "同时运行的应用太多了",
-        AppError::Incompatible => "不适用于此设备",
-        AppError::Storage => "读取存储失败",
-        _ => "暂时无法打开",
+        AppError::InvalidBundle | AppError::ViewRejected => "The app's files are damaged",
+        AppError::Busy => "Too many apps running",
+        AppError::Incompatible => "Can't run on this device",
+        AppError::Storage => "Couldn't read storage",
+        _ => "Can't open right now",
     }
 }
 
