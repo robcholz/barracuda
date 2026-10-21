@@ -75,6 +75,8 @@ barracuda-es8388-es7210-audio-codec = { path = "peripherals/impl/audio-codec/es8
 barracuda-es8389-audio-codec = { path = "peripherals/impl/audio-codec/es8389-audio-codec" }
 barracuda-ft5x06-touch = { path = "peripherals/impl/touch/ft5x06-touch" }
 barracuda-gpio-buttons = { path = "peripherals/impl/buttons/gpio-buttons" }
+barracuda-gt911-touch = { path = "peripherals/impl/touch/gt911-touch" }
+barracuda-gt911-tt21100-touch = { path = "peripherals/impl/touch/gt911-tt21100-touch" }
 barracuda-icm42607-imu = { path = "peripherals/impl/inertial-measurement/icm42607-imu" }
 barracuda-ina226-power-monitor = { path = "peripherals/impl/power-monitor/ina226-power-monitor" }
 barracuda-indicator-led = { path = "peripherals/impl/indicator/indicator-led" }
@@ -205,6 +207,7 @@ barracuda-driver-ssd1306 = { path = "drivers/chips/ssd1306" }
 barracuda-driver-ssd1677 = { path = "drivers/chips/ssd1677" }
 barracuda-driver-st712x = { path = "drivers/chips/st712x" }
 barracuda-driver-st77916 = { path = "drivers/chips/st77916" }
+barracuda-driver-tt21100 = { path = "drivers/chips/tt21100" }
 barracuda-driver-ws2812-spi = { path = "drivers/chips/ws2812-spi" }
 barracuda-kv = { path = "shared/kv" }
 barracuda-minimal-yaml = { path = "shared/minimal-yaml" }

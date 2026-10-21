@@ -896,6 +896,8 @@ dependencies = [
  "barracuda-es8389-audio-codec",
  "barracuda-ft5x06-touch",
  "barracuda-gpio-buttons",
+ "barracuda-gt911-touch",
+ "barracuda-gt911-tt21100-touch",
  "barracuda-icm42607-imu",
  "barracuda-ina226-power-monitor",
  "barracuda-indicator-led",
@@ -1428,6 +1430,13 @@ name = "barracuda-driver-st77916"
 version = "0.1.0"
 
 [[package]]
+name = "barracuda-driver-tt21100"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-ws2812-spi"
 version = "0.1.0"
 dependencies = [
@@ -1554,6 +1563,28 @@ dependencies = [
  "embedded-hal 1.0.0",
  "portable-atomic",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-gt911-touch"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-gt911",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-gt911-tt21100-touch"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-gt911",
+ "barracuda-driver-tt21100",
+ "barracuda-gt911-touch",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
