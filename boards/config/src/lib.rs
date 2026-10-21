@@ -252,6 +252,22 @@ impl BoardDefinition {
         }
         if let Some(coprocessor) = &self.hardware.wifi_coprocessor {
             coprocessor.validate()?;
+            // The co-processor's SDIO link holds its slot of the chip's SD
+            // host for the life of the firmware; a card cannot share it.
+            let slot = coprocessor.sdio.slot;
+            if let Some((name, _)) = self
+                .peripherals
+                .io
+                .sdmmc_devices
+                .iter()
+                .find(|(_, device)| device.slot == slot)
+            {
+                return Err(ConfigError::SdmmcSlotInUse {
+                    resource: name.clone(),
+                    slot,
+                    user: String::from("the Wi-Fi co-processor"),
+                });
+            }
         }
         if let Some(pin) = &self.hardware.power_hold {
             validate_identifier("power-hold", "pin", pin)?;
@@ -394,6 +410,13 @@ impl PeripheralIoDefinition {
         self.sdmmc_devices.get(name)
     }
 
+    /// Iterates every declared SDMMC device in stable Board-name order.
+    pub fn sdmmc_devices(&self) -> impl Iterator<Item = (&str, &SdmmcDeviceDefinition)> {
+        self.sdmmc_devices
+            .iter()
+            .map(|(name, device)| (name.as_str(), device))
+    }
+
     /// Finds one SPI bus reserved by a peripheral implementation.
     #[must_use]
     pub fn spi_bus(&self, name: &str) -> Option<&SpiDefinition> {
@@ -528,6 +551,18 @@ impl PeripheralIoDefinition {
         for (name, device) in &self.sdmmc_devices {
             validate_resource_name("internal sdmmc-device", name)?;
             device.validate(name)?;
+            // One slot of an SD host carries one card.
+            if let Some((other, _)) = self.sdmmc_devices.iter().find(|(other, candidate)| {
+                *other < name
+                    && candidate.peripheral == device.peripheral
+                    && candidate.slot == device.slot
+            }) {
+                return Err(ConfigError::SdmmcSlotInUse {
+                    resource: name.clone(),
+                    slot: device.slot,
+                    user: format!("sdmmc-device `{other}`"),
+                });
+            }
         }
         for (name, spi) in &self.spi_buses {
             validate_resource_name("internal spi-bus", name)?;
@@ -765,10 +800,16 @@ impl DsiHostDefinition {
 }
 
 /// One fixed-width SDMMC card slot and optional on-chip power supply.
+///
+/// `slot` names the slot of the chip's SD host the card is wired to; it
+/// defaults to 0. The selected Platform lists the slots it hands to a Board
+/// and the supply each needs (`hal.sdmmc-slots` in `platform.yml`).
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SdmmcDeviceDefinition {
     peripheral: String,
+    #[serde(default)]
+    slot: u8,
     clk: String,
     cmd: String,
     data: Vec<String>,
@@ -785,6 +826,12 @@ impl SdmmcDeviceDefinition {
     #[must_use]
     pub fn peripheral(&self) -> &str {
         &self.peripheral
+    }
+
+    /// Returns the slot of the SD host the card is wired to.
+    #[must_use]
+    pub const fn slot(&self) -> u8 {
+        self.slot
     }
 
     /// Returns the SD clock pin.
@@ -835,7 +882,8 @@ impl SdmmcDeviceDefinition {
             (None, None) => true,
             _ => false,
         };
-        if !matches!(self.bus_width, 1 | 4)
+        if self.slot > 1
+            || !matches!(self.bus_width, 1 | 4)
             || usize::from(self.bus_width) != self.data.len()
             || !power_valid
             || (self.bus_width == 4 && self.power_channel.is_none())
@@ -2259,6 +2307,16 @@ pub enum ConfigError {
     InvalidSdmmcDevice {
         /// Board-level SDMMC resource name.
         resource: String,
+    },
+    /// An SDMMC device claims an SD host slot something else is wired to.
+    #[error("Board SDMMC device `{resource}` claims SD host slot {slot}, which {user} uses")]
+    SdmmcSlotInUse {
+        /// Board-level SDMMC resource name.
+        resource: String,
+        /// The SD host slot both claim.
+        slot: u8,
+        /// What already holds the slot.
+        user: String,
     },
     /// A MIPI CSI host references an undeclared shared I2C bus.
     #[error("Board MIPI CSI host `{resource}` references unknown I2C bus `{i2c}`")]

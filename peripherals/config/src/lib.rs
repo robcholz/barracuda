@@ -516,6 +516,32 @@ pub enum GenerateError {
         /// Required HAL resource form.
         binding: HalBinding,
     },
+    /// A Board's SDMMC device names an SD host slot the Platform does not
+    /// hand to a Board.
+    #[error("Platform `{platform}` hands no SD host slot {slot} to SDMMC device `{resource}`")]
+    UnsupportedSdmmcSlot {
+        /// Platform selected for the Board.
+        platform: String,
+        /// Board-level SDMMC resource name.
+        resource: String,
+        /// The slot the Board declares.
+        slot: u8,
+    },
+    /// A Board's SDMMC device declares a supply other than the one its
+    /// Platform powers the slot from.
+    #[error(
+        "SDMMC device `{resource}` on SD host slot {slot} must declare {expected}, as Platform `{platform}` powers the slot"
+    )]
+    SdmmcSlotPower {
+        /// Platform selected for the Board.
+        platform: String,
+        /// Board-level SDMMC resource name.
+        resource: String,
+        /// The slot the Board declares.
+        slot: u8,
+        /// The supply the Platform powers the slot from, in Board terms.
+        expected: String,
+    },
     /// A data-only SPI binding has no unreserved Platform controller.
     #[error("Platform has no unreserved SPI controller for a data-only output")]
     MissingPlatformSpiController,
@@ -1028,6 +1054,7 @@ pub fn render_board_hal(
              #[macro_export]\n\
              macro_rules! __barracuda_generated_board_bindings {\n\
                  ($hardware:ident) => { () };\n\
+                 ($hardware:ident, $handoff:expr) => { () };\n\
              }\n",
         ));
     }
@@ -1088,6 +1115,42 @@ pub fn validate_platform_hal(
             platform: platform.name().to_owned(),
             binding: HalBinding::WifiCoprocessorSdio,
         });
+    }
+    for (resource, device) in board.peripheral_io().sdmmc_devices() {
+        if !platform.hal().supports(HalBinding::SdmmcDevice) {
+            return Err(GenerateError::UnsupportedHalBinding {
+                platform: platform.name().to_owned(),
+                binding: HalBinding::SdmmcDevice,
+            });
+        }
+        let slot = platform.hal().sdmmc_slot(device.slot()).ok_or_else(|| {
+            GenerateError::UnsupportedSdmmcSlot {
+                platform: platform.name().to_owned(),
+                resource: resource.to_owned(),
+                slot: device.slot(),
+            }
+        })?;
+        let declared = (device.power_channel(), device.power_millivolts());
+        let powered = slot
+            .power()
+            .map(|power| (Some(power.channel()), Some(power.millivolts())));
+        if declared != powered.unwrap_or((None, None)) {
+            return Err(GenerateError::SdmmcSlotPower {
+                platform: platform.name().to_owned(),
+                resource: resource.to_owned(),
+                slot: device.slot(),
+                expected: slot.power().map_or_else(
+                    || String::from("no power-channel or power-millivolts"),
+                    |power| {
+                        format!(
+                            "power-channel {} and power-millivolts {}",
+                            power.channel(),
+                            power.millivolts()
+                        )
+                    },
+                ),
+            });
+        }
     }
     if board.hardware().power_hold().is_some() && !platform.hal().supports(HalBinding::PowerHold) {
         return Err(GenerateError::UnsupportedHalBinding {
@@ -1246,6 +1309,10 @@ struct RenderedI2cBus {
 #[derive(Default)]
 struct RenderState {
     raw_fields: Vec<(String, String)>,
+    /// Binding values that are not a token moved out of the chip
+    /// peripherals, keyed by field: a Platform macro that may also take a
+    /// part of a Platform-owned controller from the entry's hand-off.
+    raw_field_values: BTreeMap<String, String>,
     binding_errors: Vec<(String, String)>,
     identifiers: BTreeMap<String, String>,
     reserved_spi_controllers: BTreeSet<String>,
@@ -1574,10 +1641,16 @@ fn render_generic_hal(
     }
     source.push_str("        }\n    }\n}\n\n");
 
+    // The entry passes the chip peripherals and, when its Platform owns a
+    // controller a Board binding takes a part of, that hand-off.
     source.push_str(
-        "#[doc(hidden)]\n#[macro_export]\nmacro_rules! __barracuda_generated_board_bindings {\n    ($peripherals:ident) => {\n        $crate::Bindings::new(\n",
+        "#[doc(hidden)]\n#[macro_export]\nmacro_rules! __barracuda_generated_board_bindings {\n    ($peripherals:ident) => {\n        $crate::__barracuda_generated_board_bindings!($peripherals, ())\n    };\n    ($peripherals:ident, $handoff:expr) => {\n        $crate::Bindings::new(\n",
     );
-    for (_, ty) in &state.raw_fields {
+    for (field, ty) in &state.raw_fields {
+        if let Some(value) = state.raw_field_values.get(field) {
+            source.push_str(&format!("            {value},\n"));
+            continue;
+        }
         let Some((_, hardware)) = ty.rsplit_once("!(") else {
             return Err(GenerateError::InvalidHardwareIdentifier {
                 identifier: ty.clone(),
@@ -2586,15 +2659,27 @@ fn render_binding(
                 })?;
             validate_hardware_identifier(device.peripheral())?;
             let prefix = format!("{}_{}", peripheral.name(), role);
-            let controller =
-                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            // The selected Platform decides what a slot binding is: the SD
+            // host's token when the Board composition builds the controller,
+            // or one slot of a controller the Platform owns, taken from the
+            // entry's hand-off.
+            let controller = checked_identifier(&format!("{prefix}_slot"), &mut state.identifiers)?;
             state.raw_fields.push((
                 controller.clone(),
                 format!(
-                    "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
-                    device.peripheral()
+                    "::barracuda_platform_selected::__platform::hal::sdmmc_slot_binding_type!({}, {})",
+                    device.peripheral(),
+                    device.slot()
                 ),
             ));
+            state.raw_field_values.insert(
+                controller.clone(),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::sdmmc_slot_binding!($peripherals, $handoff, {}, {})",
+                    device.peripheral(),
+                    device.slot()
+                ),
+            );
             let mut pin_fields = Vec::new();
             for (name, pin) in [("clk", device.clk()), ("cmd", device.cmd())]
                 .into_iter()

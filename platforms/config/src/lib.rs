@@ -156,6 +156,55 @@ impl RuntimeI2sController {
     }
 }
 
+/// The on-chip regulator a Platform powers an SD host slot from.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SdmmcSlotPower {
+    channel: u8,
+    millivolts: u16,
+}
+
+impl SdmmcSlotPower {
+    /// Returns the on-chip LDO channel.
+    #[must_use]
+    pub const fn channel(&self) -> u8 {
+        self.channel
+    }
+
+    /// Returns the voltage the Platform programs on that channel.
+    #[must_use]
+    pub const fn millivolts(&self) -> u16 {
+        self.millivolts
+    }
+}
+
+/// One SD host slot a Platform hands to a Board's `sdmmc-device` binding.
+///
+/// A slot a Platform keeps for its own mechanisms, such as a Wi-Fi
+/// co-processor's SDIO link, is not listed.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SdmmcSlot {
+    slot: u8,
+    #[serde(default)]
+    power: Option<SdmmcSlotPower>,
+}
+
+impl SdmmcSlot {
+    /// Returns the SD host slot index.
+    #[must_use]
+    pub const fn slot(&self) -> u8 {
+        self.slot
+    }
+
+    /// Returns the on-chip supply the slot's pads run from, when the
+    /// Platform powers them; a Board's card on this slot declares the same.
+    #[must_use]
+    pub const fn power(&self) -> Option<SdmmcSlotPower> {
+        self.power
+    }
+}
+
 /// Hardware construction capabilities implemented alongside one Platform.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -174,6 +223,8 @@ pub struct HalConfig {
     runtime_pwm_controllers: Vec<RuntimePwmController>,
     #[serde(default, rename = "runtime-i2s-controllers")]
     runtime_i2s_controllers: Vec<RuntimeI2sController>,
+    #[serde(default, rename = "sdmmc-slots")]
+    sdmmc_slots: Vec<SdmmcSlot>,
     #[serde(default, rename = "peripheral-models")]
     peripheral_models: bool,
 }
@@ -225,6 +276,20 @@ impl HalConfig {
     #[must_use]
     pub fn runtime_i2s_controllers(&self) -> &[RuntimeI2sController] {
         &self.runtime_i2s_controllers
+    }
+
+    /// Returns the SD host slots a Board's `sdmmc-device` binding may use.
+    #[must_use]
+    pub fn sdmmc_slots(&self) -> &[SdmmcSlot] {
+        &self.sdmmc_slots
+    }
+
+    /// Finds the SD host slot a Board's `sdmmc-device` binding names.
+    #[must_use]
+    pub fn sdmmc_slot(&self, slot: u8) -> Option<&SdmmcSlot> {
+        self.sdmmc_slots
+            .iter()
+            .find(|candidate| candidate.slot == slot)
     }
 
     /// Returns whether the HAL places a device model behind each declared
@@ -332,6 +397,31 @@ impl HalConfig {
                     return Err(invalid_hal(path, "a runtime I2S DMA channel is duplicated"));
                 }
             }
+        }
+
+        let mut sdmmc_slots = BTreeSet::new();
+        for slot in &self.sdmmc_slots {
+            if !sdmmc_slots.insert(slot.slot) {
+                return Err(invalid_hal(
+                    path,
+                    "an SD host slot is listed more than once",
+                ));
+            }
+            if slot
+                .power
+                .is_some_and(|power| power.channel == 0 || power.millivolts == 0)
+            {
+                return Err(invalid_hal(
+                    path,
+                    "an SD host slot's power needs a nonzero channel and voltage",
+                ));
+            }
+        }
+        if sdmmc_slots.is_empty() == self.supports(HalBinding::SdmmcDevice) {
+            return Err(invalid_hal(
+                path,
+                "a Platform with the sdmmc-device binding lists the SD host slots it hands out, and only then",
+            ));
         }
         Ok(())
     }

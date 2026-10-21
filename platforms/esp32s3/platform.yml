@@ -42,6 +42,10 @@ hal:
     - controller: I2S0
       dma-channels: [DMA_CH0]
       dma-buffer-bytes: 4096
+  # A Board's microSD card takes slot 0 of the SD host; both ESP32-S3 slots
+  # reach any pin through the GPIO matrix and run from the Board's own 3.3 V.
+  sdmmc-slots:
+    - slot: 0
 selection:
   board-chips:
     - esp32s3
