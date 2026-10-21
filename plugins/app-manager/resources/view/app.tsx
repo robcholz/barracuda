@@ -88,8 +88,8 @@ export default function System() {
         <Show when={agent() === 0}>
           <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center pt-[6px]">
             <Text class="text-5xl font-bold text-[#CCFF00] scale-150 my-[14px]">{"\uE008"}</Text>
-            <Text class="text-2xl font-bold text-[#FAFAFA]">待命</Text>
-            <Text class="text-sm text-[#A1A1AA]">按住 Agent 键说话</Text>
+            <Text class="text-2xl font-bold text-[#FAFAFA]">Standby</Text>
+            <Text class="text-sm text-[#A1A1AA]">Hold the Agent key to talk</Text>
             <Show when={card() !== ""}>
               <View class="flex-row items-center gap-3 mt-[20px] pl-[8px] pr-[10px] py-[8px] rounded-lg" focusable onPress={() => cardTap()}>
                 <View class="w-8 h-8 rounded-[7px] bg-[#232327] items-center justify-center">
@@ -123,7 +123,7 @@ export default function System() {
           <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center pt-[6px]">
             <Text class="text-5xl font-bold text-[#CCFF00] scale-150 my-[14px] animate-pulse">{"\uE008"}</Text>
             <Text class="text-base text-[#A1A1AA] mt-[6px]">{question()}</Text>
-            <Text class="text-base text-[#FAFAFA]">思考中</Text>
+            <Text class="text-base text-[#FAFAFA]">Thinking</Text>
           </View>
         </Show>
         <Show when={agent() === 3}>
@@ -181,11 +181,11 @@ export default function System() {
           <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center gap-[10px]">
             <Text class="text-lg font-bold text-[#FAFAFA] mb-[4px]">{title()}</Text>
             <View class="w-[200px] h-[44px] rounded-md border border-[#63636B] bg-[#09090B] items-center justify-center" focusable onPress={() => info()}>
-              <Text class="text-base text-[#FAFAFA]">应用信息</Text>
+              <Text class="text-base text-[#FAFAFA]">App info</Text>
             </View>
             <Show when={removable()}>
               <View class="w-[200px] h-[44px] rounded-md bg-[#FF7878] items-center justify-center" focusable onPress={() => confirm()}>
-                <Text class="text-base text-[#09090B]">卸载</Text>
+                <Text class="text-base text-[#09090B]">Uninstall</Text>
               </View>
             </Show>
           </View>
@@ -201,7 +201,7 @@ export default function System() {
         }
       >
         <View class="absolute left-0 right-0 top-[16px] flex-row justify-center">
-          <Text class="text-sm font-bold text-[#FAFAFA]">运行中</Text>
+          <Text class="text-sm font-bold text-[#FAFAFA]">Running</Text>
         </View>
         <View class="absolute left-[38px] right-[38px] top-[56px] flex-col gap-2">
           <For each={running()} by={(app) => app.id}>
@@ -234,7 +234,7 @@ export default function System() {
           </For>
           <Show when={!anyRunning()}>
             <View class="w-full h-[200px] items-center justify-center">
-              <Text class="text-sm text-[#A1A1AA]">没有运行中的应用</Text>
+              <Text class="text-sm text-[#A1A1AA]">No apps running</Text>
             </View>
           </Show>
         </View>
@@ -267,7 +267,7 @@ export default function System() {
               <Text class="text-lg font-bold text-[#ED8E04]">{"\uE010"}</Text>
               <Text class="text-lg font-bold text-[#FAFAFA]">{title()}</Text>
             </View>
-            <Text class="text-sm text-[#A1A1AA] mt-[4px]">{detail()}</Text>
+            <Text class="text-sm text-[#A1A1AA] text-center mt-[4px]">{detail()}</Text>
             <View class="w-[224px] h-12 rounded-md bg-[#CCFF00] items-center justify-center mt-[20px]" focusable onPress={() => confirm()}>
               <Text class="text-lg font-bold text-[#09090B]">{primary()}</Text>
             </View>
@@ -277,7 +277,7 @@ export default function System() {
           </Show>
           <Show when={screen() === 8}>
             <Text class="text-lg font-bold text-[#FAFAFA] mt-[8px]">{title()}</Text>
-            <Text class="text-sm text-[#A1A1AA]">{detail()}</Text>
+            <Text class="text-sm text-[#A1A1AA] text-center">{detail()}</Text>
             <View class="w-[256px] flex-col mt-[8px]">
               <For each={lines()} by={(line) => line.id}>
                 {(line) => (
@@ -285,7 +285,12 @@ export default function System() {
                     <View class="w-[256px] h-[1px] bg-[#27272A]" />
                     <View class="w-[256px] h-[50px] flex-row items-center gap-3 px-3">
                       <Text class="text-lg font-bold text-[#A1A1AA]">{line().glyph}</Text>
-                      <Text class="text-lg font-bold text-[#FAFAFA]">{line().text}</Text>
+                      <View class="flex-col">
+                        <Text class="text-lg font-bold text-[#FAFAFA]">{line().text}</Text>
+                        <Show when={line().note !== ""}>
+                          <Text class="text-sm text-[#A1A1AA]">{line().note}</Text>
+                        </Show>
+                      </View>
                     </View>
                   </View>
                 )}
@@ -315,7 +320,7 @@ export default function System() {
         }
       >
         <View class="absolute left-0 right-0 top-[22px] flex-row justify-center">
-          <Text class="text-lg font-bold text-[#FAFAFA]">通知</Text>
+          <Text class="text-lg font-bold text-[#FAFAFA]">Notifications</Text>
         </View>
         <View class="absolute left-[54px] right-[54px] top-[58px] flex-col gap-2">
           <Show when={done() !== ""}>
@@ -369,14 +374,14 @@ export default function System() {
           <Show when={anyNotice()}>
             <View class="flex-row justify-center">
               <View class="px-[14px] py-[8px]" focusable onPress={() => clearAll()}>
-                <Text class="text-sm font-bold text-[#A1A1AA]">全部清除</Text>
+                <Text class="text-sm font-bold text-[#A1A1AA]">Clear all</Text>
               </View>
             </View>
           </Show>
         </View>
         <Show when={!anyNotice() && done() === ""}>
           <View class="absolute left-0 top-0 w-full h-full items-center justify-center">
-            <Text class="text-sm text-[#A1A1AA]">没有新通知</Text>
+            <Text class="text-sm text-[#A1A1AA]">No new notifications</Text>
           </View>
         </Show>
         <View class="absolute left-0 right-0 bottom-[12px] flex-row justify-center">
@@ -428,7 +433,7 @@ export default function System() {
         </Show>
         <Show when={control() === 1}>
           <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center gap-[10px]">
-            <Text class="text-lg font-bold text-[#FAFAFA]">亮度</Text>
+            <Text class="text-lg font-bold text-[#FAFAFA]">Brightness</Text>
             <View class="w-[64px] h-[160px] rounded-lg border border-[#63636B] overflow-hidden relative">
               <View class="absolute left-0 bottom-0 w-[62px] bg-[#FAFAFA]" style={{ height: brightnessFill() }} />
               <View class="absolute left-0 top-0 w-[62px] h-[158px] flex-col">
@@ -442,21 +447,21 @@ export default function System() {
                 <Text class="text-lg font-bold text-[#09090B]">{"\uE090"}</Text>
               </View>
             </View>
-            <Text class="text-sm text-[#A1A1AA]">亮度 {brightness()}%</Text>
+            <Text class="text-sm text-[#A1A1AA]">Brightness {brightness()}%</Text>
             <View class="w-[72px] h-10 rounded-md border border-[#63636B] items-center justify-center" focusable onPress={() => closeControl()}>
-              <Text class="text-sm font-bold text-[#FAFAFA]">完成</Text>
+              <Text class="text-sm font-bold text-[#FAFAFA]">Done</Text>
             </View>
           </View>
         </Show>
         <Show when={control() === 2}>
           <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center gap-[10px]">
-            <Text class="text-lg font-bold text-[#FAFAFA]">门户已开启</Text>
-            <View class="w-[128px] h-[128px] rounded-md bg-[#FAFAFA] items-center justify-center px-2">
-              <Text class="text-sm text-[#09090B] text-center">{portal()}</Text>
+            <Text class="text-lg font-bold text-[#FAFAFA]">Portal is on</Text>
+            <Text class="text-sm text-[#A1A1AA]">Install apps from your phone</Text>
+            <View class="w-[256px] rounded-lg border border-[#27272A] bg-[#09090B] px-4 py-3">
+              <Text class="text-base text-[#FAFAFA]">{portal()}</Text>
             </View>
-            <Text class="text-sm text-[#A1A1AA]">用手机连上热点，在门户里装应用</Text>
             <View class="w-[72px] h-10 rounded-md border border-[#63636B] items-center justify-center" focusable onPress={() => closeControl()}>
-              <Text class="text-sm font-bold text-[#FAFAFA]">完成</Text>
+              <Text class="text-sm font-bold text-[#FAFAFA]">Done</Text>
             </View>
           </View>
         </Show>

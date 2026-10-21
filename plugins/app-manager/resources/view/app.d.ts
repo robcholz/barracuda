@@ -10,7 +10,8 @@ export interface AppItem { id: i32; name: string; icon: Icon; letter: string; ru
 export interface RunItem { id: i32; name: string; icon: Icon; letter: string; detail: string; active: boolean }
 export interface Notice { id: i32; title: string; body: string; icon: Icon; letter: string; confirm: boolean; allow: string; deny: string }
 export interface Tile { id: i32; label: string; detail: string; glyph: string; on: boolean }
-export interface Line { id: i32; text: string; glyph: string }
+/** `note`: a muted second line, such as "Optional"; "" for none. */
+export interface Line { id: i32; text: string; note: string; glyph: string }
 /** One launcher page; `on` is the page on the display. */
 export interface Dot { id: i32; on: boolean }
 

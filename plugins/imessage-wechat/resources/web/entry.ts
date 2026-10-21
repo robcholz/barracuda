@@ -83,8 +83,8 @@ const LOGIN = "/api/gateway/wechat/login";
 /** The shell's phone breakpoint: no one scans a code on the screen of the phone that scans it. */
 const PHONE = "(max-width: 719px)";
 const POLL_MS = 2_000;
-/** How the device's receive error starts when iLink ended the bot session (-14). */
-const SESSION_EXPIRED = "需要重新扫码";
+/** The device's receive error code when iLink ended the bot session (-14). */
+const SESSION_EXPIRED = "session_expired";
 
 type Status = "idle" | "wait" | "scanned" | "confirmed" | "expired" | "failed";
 interface LoginState {
@@ -183,7 +183,7 @@ export const mount = definePage((context) => {
       const halted =
         status?.mode === "send_receive" &&
         receive?.state === "error" &&
-        !!receive.message?.startsWith(SESSION_EXPIRED);
+        receive?.code === SESSION_EXPIRED;
       if (halted === expired) return;
       expired = halted;
       if (view.kind === "linked") render();

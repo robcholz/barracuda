@@ -157,7 +157,7 @@ where
         self.present
             .then_some(barracuda_vm_plugin::PackageInterface::Stable {
                 version: 2,
-                purpose: "控制灯光",
+                purpose: "Control lights",
             })
     }
 

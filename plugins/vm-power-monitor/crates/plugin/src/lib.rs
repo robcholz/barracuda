@@ -104,7 +104,7 @@ impl LuaPackage for PowerMonitorPackage {
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
-            purpose: "读取电源数据",
+            purpose: "Read power data",
         })
     }
 

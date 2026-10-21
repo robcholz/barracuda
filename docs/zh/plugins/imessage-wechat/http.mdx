@@ -16,7 +16,7 @@ description: "微信消息通道的 HTTP 路由：状态、模式、所有者、
 
 - `configured`：已绑定一个微信机器人（已保存配置）。
 - `mode`：`disabled` 或 `send_receive`。
-- `receive`（仅在 `send_receive` 时）：`state` 为 `idle`、`starting`、`receiving`、`no_slot`（带 `capacity`）或 `error`（带 `message`）。iLink 报告机器人会话过期（代码 -14）后，它会是 `{"state":"error","message":"… / Scan again to relink"}`（省略了中文部分），直到新的二维码登录被确认。
+- `receive`（仅在 `send_receive` 时）：`state` 为 `idle`、`starting`、`receiving`、`no_slot`（带 `capacity`）或 `error`（带 `message`；页面需要识别的失败还带 `code`）。iLink 报告机器人会话过期（代码 -14）后，它会是 `{"state":"error","message":"Scan again to relink","code":"session_expired"}`，直到新的二维码登录被确认。
 - `owners.count`：允许的账号数。
 
 它从不返回设置或令牌；`POST /api/gateway/wechat` 只接受修改。

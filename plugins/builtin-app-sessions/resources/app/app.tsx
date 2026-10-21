@@ -29,8 +29,8 @@ export default function Sessions() {
         </View>
         <Show when={empty()}>
           <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center gap-2">
-            <Text class="text-lg text-[#FAFAFA]">还没有会话</Text>
-            <Text class="text-sm text-[#A1A1AA]">和 Agent 说话后，对话会出现在这里</Text>
+            <Text class="text-lg text-[#FAFAFA]">No sessions yet</Text>
+            <Text class="text-sm text-[#A1A1AA]">Chats with the Agent show up here</Text>
           </View>
         </Show>
       </Show>

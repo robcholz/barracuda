@@ -307,7 +307,7 @@ fn decode(text: &str) -> Result<Inbound, ReceiveError> {
 fn token_error(error: TokenError) -> ReceiveError {
     match error {
         TokenError::Rejected { code, message } => ReceiveError::halt(format!(
-            "QQ 拒绝了 App Secret / QQ rejected the App Secret ({}): {}",
+            "QQ rejected the App Secret ({}): {}",
             code.as_deref().unwrap_or("-"),
             message.as_deref().unwrap_or("-")
         )),
@@ -397,7 +397,7 @@ impl<Storage: PluginStorage> QQChannel<Storage> {
             Ok(url) => url,
             Err(ChannelError::Authentication) => {
                 return Err(ReceiveError::halt(
-                    "QQ 拒绝了凭据 / QQ rejected the credentials",
+                    "QQ rejected the credentials",
                 ))
             }
             Err(ChannelError::Transport { message }) => {

@@ -136,7 +136,7 @@ where
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
-            purpose: "访问串口",
+            purpose: "Access serial ports",
         })
     }
     fn revoke(&self) {

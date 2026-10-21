@@ -38,8 +38,8 @@ export default function Workflows() {
       </View>
       <Show when={empty()}>
         <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center gap-2">
-          <Text class="text-lg text-[#FAFAFA]">还没有工作流</Text>
-          <Text class="text-sm text-[#A1A1AA]">让 Agent 帮你定一个</Text>
+          <Text class="text-lg text-[#FAFAFA]">No workflows yet</Text>
+          <Text class="text-sm text-[#A1A1AA]">Ask the Agent to set one up</Text>
         </View>
       </Show>
     </View>

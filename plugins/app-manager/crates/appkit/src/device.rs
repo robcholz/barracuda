@@ -96,16 +96,16 @@ pub(crate) fn incompatibility(
 ) -> Option<String> {
     if app.api > API_LEVEL {
         return Some(format!(
-            "需要更新系统（应用需要 API {}，本机是 {API_LEVEL}）",
+            "Needs system update (API {}, device has {API_LEVEL})",
             app.api
         ));
     }
     if !app.boards.is_empty() && !app.boards.iter().any(|board| board == device.board) {
-        return Some(format!("只适用于 {}", app.boards.join("、")));
+        return Some(format!("Only for {}", app.boards.join(", ")));
     }
     if app.has_view {
         let Some(display) = device.display else {
-            return Some(String::from("此设备没有屏幕"));
+            return Some(String::from("This device has no display"));
         };
         // A view lays out at the display's size: the size it names is the
         // least it needs, and a view for the whole frame loses its corners
@@ -113,19 +113,19 @@ pub(crate) fn incompatibility(
         if let Some([width, height]) = app.view_size
             && (display.width < width || display.height < height)
         {
-            return Some(format!("屏幕太小（应用需要 {width}×{height}）"));
+            return Some(format!("Display too small (needs {width}×{height})"));
         }
         if app.view_shape == Some(ViewShape::Rect) && display.round {
-            return Some(String::from("应用需要方屏"));
+            return Some(String::from("App needs a square display"));
         }
     }
     for entry in &app.requires {
         let (name, needed) = requirement(entry);
         match stable(packages, name) {
-            None => return Some(format!("此设备没有 {name}")),
+            None => return Some(format!("This device has no {name}")),
             Some(version) if version < needed => {
                 return Some(format!(
-                    "需要更新系统（应用需要 {name} 第 {needed} 版，本机是第 {version} 版）"
+                    "Needs system update ({name} v{needed}, device has v{version})"
                 ));
             }
             Some(_) => {}
@@ -136,7 +136,7 @@ pub(crate) fn incompatibility(
         .iter()
         .find(|name| !packages.contains_key(name.as_str()))
     {
-        return Some(format!("此设备不支持 {missing}"));
+        return Some(format!("This device doesn't support {missing}"));
     }
     None
 }

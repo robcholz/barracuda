@@ -149,7 +149,7 @@ where
         self.present
             .then_some(barracuda_vm_plugin::PackageInterface::Stable {
                 version: 2,
-                purpose: "使用相机拍照",
+                purpose: "Take photos",
             })
     }
 

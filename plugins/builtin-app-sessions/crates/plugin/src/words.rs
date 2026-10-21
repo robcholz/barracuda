@@ -3,21 +3,24 @@
 use alloc::{format, string::String};
 
 const DAY_MS: u64 = 86_400_000;
-const WEEKDAYS: [&str; 7] = ["周四", "周五", "周六", "周日", "周一", "周二", "周三"];
+const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
 
 /// When `at` was, from `now` (both UTC Unix milliseconds): the time today,
-/// 昨天, the weekday within a week, else the date.
+/// "Yesterday", the weekday within a week, else the date.
 pub(crate) fn when(at: u64, now: Option<u64>) -> String {
     let day = at / DAY_MS;
     let minutes = at / 60_000;
     let today = now.map(|now| now / DAY_MS);
     match today.map(|today| today.saturating_sub(day)) {
         Some(0) => format!("{:02}:{:02}", (minutes / 60) % 24, minutes % 60),
-        Some(1) => String::from("昨天"),
+        Some(1) => String::from("Yesterday"),
         Some(2..=6) => String::from(WEEKDAYS[(day % 7) as usize]),
         _ => {
             let (_, month, date) = civil(day);
-            format!("{month}月{date}日")
+            format!("{} {date}", MONTHS[(month - 1) as usize])
         }
     }
 }
@@ -46,9 +49,9 @@ mod tests {
         // 2026-10-15 (a Thursday) 10:42 UTC.
         let now = 1_792_060_920_000;
         assert_eq!(when(now - 11 * 60_000, Some(now)), "10:31");
-        assert_eq!(when(now - DAY_MS, Some(now)), "昨天");
-        assert_eq!(when(now - 3 * DAY_MS, Some(now)), "周一");
-        assert_eq!(when(now - 30 * DAY_MS, Some(now)), "9月15日");
+        assert_eq!(when(now - DAY_MS, Some(now)), "Yesterday");
+        assert_eq!(when(now - 3 * DAY_MS, Some(now)), "Mon");
+        assert_eq!(when(now - 30 * DAY_MS, Some(now)), "Sep 15");
         assert_eq!(civil(0), (1970, 1, 1));
     }
 }

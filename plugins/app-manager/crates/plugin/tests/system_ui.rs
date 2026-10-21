@@ -182,7 +182,7 @@ impl NetworkSource for Online {
     }
 
     fn hotspot_hint(&self) -> String {
-        String::from("连接热点“Setup”")
+        String::from("1. Join Wi-Fi \"Setup\"\n2. Open http://192.168.4.1")
     }
 
     fn open_hotspot(&self) -> HotspotFuture<'_> {
@@ -334,7 +334,7 @@ impl LuaPackage for Light {
     fn interface(&self) -> Option<PackageInterface> {
         Some(PackageInterface::Stable {
             version: 1,
-            purpose: "控制灯光",
+            purpose: "Control lights",
         })
     }
 }
@@ -400,14 +400,14 @@ async fn scenario(spawner: Spawner) {
     assert_eq!(system.screen(), Some(Screen::Home));
     assert_eq!(ui.showing(), Some(true));
     let home = texts(&system);
-    assert!(home.contains("10:42") && home.contains("待命"), "{home}");
+    assert!(home.contains("10:42") && home.contains("Standby"), "{home}");
 
     // Left to the launcher: the system app, then the installable apps, and
     // last the one this device cannot run.
     system.gesture(swipe(Direction::Left, None)).await;
     assert_eq!(system.screen(), Some(Screen::Apps));
     let launcher = texts(&system);
-    for name in ["Crash", "System", "计数器", "Lamp", "X3"] {
+    for name in ["Crash", "System", "Counter", "Lamp", "X3"] {
         assert!(launcher.contains(name), "{launcher}");
     }
     // The round display's page holds 2-3-2 tiles; the eighth app is on the
@@ -426,7 +426,7 @@ async fn scenario(spawner: Spawner) {
     assert_eq!(system.screen(), Some(Screen::Info));
     let info = texts(&system);
     assert!(
-        info.contains("无法在此设备运行：此设备没有 camera") && info.contains("卸载"),
+        info.contains("Can't run\nThis device has no camera") && info.contains("Uninstall"),
         "{info}"
     );
     system.gesture(swipe(Direction::Right, None)).await;
@@ -443,12 +443,12 @@ async fn scenario(spawner: Spawner) {
         .gesture(Gesture::LongPress { x: at.0, y: at.1 })
         .await;
     assert_eq!(system.screen(), Some(Screen::Menu));
-    assert!(!texts(&system).contains("卸载"), "{}", texts(&system));
+    assert!(!texts(&system).contains("Uninstall"), "{}", texts(&system));
     system.call(press("info", None)).await;
     assert_eq!(system.screen(), Some(Screen::Info));
     let info = texts(&system);
     assert!(
-        info.contains("版本 2 · 系统应用") && !info.contains("卸载"),
+        info.contains("Version 2 · System app") && !info.contains("Uninstall"),
         "{info}"
     );
     system.gesture(swipe(Direction::Right, None)).await;
@@ -463,17 +463,17 @@ async fn scenario(spawner: Spawner) {
     assert_eq!(system.screen(), Some(Screen::Info));
     let info = texts(&system);
     assert!(
-        info.contains("版本 1 · 已安装")
-            && info.contains("控制灯光")
-            && info.contains("使用 http（可选）")
-            && info.contains("卸载"),
+        info.contains("Version 1 · Installed")
+            && info.contains("Control lights")
+            && info.contains("Use http|Optional")
+            && info.contains("Uninstall"),
         "{info}"
     );
     system.gesture(swipe(Direction::Right, None)).await;
     assert_eq!(system.screen(), Some(Screen::Apps));
 
     // Tapping the counter opens it: the app's view shows.
-    let (_, counter) = icon(&system, "计数器");
+    let (_, counter) = icon(&system, "Counter");
     system.call(press("openApp", Some(counter))).await;
     assert_eq!(system.screen(), None);
     assert_eq!(state_of(&apps, "counter"), Some(AppState::Active));
@@ -489,7 +489,7 @@ async fn scenario(spawner: Spawner) {
         .await;
     assert_eq!(system.screen(), Some(Screen::Notices));
     assert_eq!(state_of(&apps, "counter"), Some(AppState::Inactive));
-    assert!(texts(&system).contains("没有新通知"));
+    assert!(texts(&system).contains("No new notifications"));
     system.gesture(swipe(Direction::Up, None)).await;
     assert_eq!(system.screen(), None);
     assert_eq!(state_of(&apps, "counter"), Some(AppState::Active));
@@ -500,35 +500,38 @@ async fn scenario(spawner: Spawner) {
     // A device that shows no network has no Wi-Fi or portal tile.
     let control = texts(&system);
     assert!(
-        !control.contains("Wi-Fi") && !control.contains("门户") && control.contains("勿扰"),
+        !control.contains("Wi-Fi") && !control.contains("Portal") && control.contains("Quiet"),
         "{control}"
     );
     network.show(Rc::new(Online::default()));
     system.refresh();
     let control = texts(&system);
     assert!(
-        control.contains("Wi-Fi|HomeNet") && control.contains("门户|关"),
+        control.contains("Wi-Fi|HomeNet") && control.contains("Portal|Off"),
         "{control}"
     );
     // The portal tile opens the source's hotspot and shows how to reach it.
     system.call(press("toggle", Some(5))).await;
     let control = texts(&system);
-    assert!(control.contains("连接热点“Setup”"), "{control}");
+    assert!(
+        control.contains("1. Join Wi-Fi \"Setup\"\n2. Open http://192.168.4.1"),
+        "{control}"
+    );
     system.call(press("closeControl", None)).await;
     system
         .gesture(swipe(Direction::Up, Some(Edge::Bottom)))
         .await;
-    assert!(texts(&system).contains("门户|开"), "{}", texts(&system));
+    assert!(texts(&system).contains("Portal|On"), "{}", texts(&system));
     system.call(press("toggle", Some(5))).await;
-    assert!(texts(&system).contains("门户|关"), "{}", texts(&system));
+    assert!(texts(&system).contains("Portal|Off"), "{}", texts(&system));
     system.call(press("toggle", Some(3))).await;
     let control = texts(&system);
-    assert!(control.contains("勿扰|开"), "{control}");
-    // Do not disturb hides the unread mark; turn it off again.
-    notices.post("静音时", "", None);
+    assert!(control.contains("Quiet|On"), "{control}");
+    // Quiet hides the unread mark; turn it off again.
+    notices.post("While quiet", "", None);
     system.refresh();
     system.call(press("toggle", Some(3))).await;
-    assert!(texts(&system).contains("勿扰|关"));
+    assert!(texts(&system).contains("Quiet|Off"));
     // The brightness tile opens its slider, which sets the panel.
     system.call(press("toggle", Some(4))).await;
     system.call(press("setBrightness", Some(40))).await;
@@ -546,7 +549,11 @@ async fn scenario(spawner: Spawner) {
     // The switcher lists it and closes it.
     system.gesture(swipe(Direction::Left, None)).await;
     assert_eq!(system.screen(), Some(Screen::Running));
-    assert!(texts(&system).contains("计数器|后台"), "{}", texts(&system));
+    assert!(
+        texts(&system).contains("Counter|Background"),
+        "{}",
+        texts(&system)
+    );
     system.call(press("closeApp", Some(0))).await;
     until("the counter to exit", || {
         state_of(&apps, "counter").is_none()
@@ -561,7 +568,7 @@ async fn scenario(spawner: Spawner) {
     system.reconcile().await;
     assert_eq!(system.screen(), Some(Screen::Exited));
     assert!(
-        texts(&system).contains("“Crash”已退出"),
+        texts(&system).contains("\"Crash\" quit"),
         "{}",
         texts(&system)
     );
@@ -569,20 +576,24 @@ async fn scenario(spawner: Spawner) {
     assert_eq!(system.screen(), Some(Screen::Home));
 
     // The Agent's states show on home.
-    agent.set(AgentState::Answering, "明天几点开会？", "9:30 产品评审");
+    agent.set(
+        AgentState::Answering,
+        "When is tomorrow's meeting?",
+        "9:30 product review",
+    );
     system.refresh();
     let home = texts(&system);
     assert!(
-        home.contains("明天几点开会？") && home.contains("9:30 产品评审"),
+        home.contains("When is tomorrow's meeting?") && home.contains("9:30 product review"),
         "{home}"
     );
     agent.set(AgentState::Standby, "", "");
 
     // A question shows on home and is answered from its card.
-    let asked = notices.ask("打开客厅灯带？", "林夏 · Telegram");
+    let asked = notices.ask("Turn on the living room light strip?", "Lin Xia · Telegram");
     system.refresh();
     assert!(
-        texts(&system).contains("Agent 请求确认"),
+        texts(&system).contains("Agent needs approval"),
         "{}",
         texts(&system)
     );
@@ -596,9 +607,9 @@ async fn scenario(spawner: Spawner) {
     system.gesture(swipe(Direction::Up, None)).await;
 
     // A notice marks home; opening the center reads it.
-    let id = notices.post("门铃", "有人在门口", None);
+    let id = notices.post("Doorbell", "Someone is at the door", None);
     system.refresh();
-    assert!(texts(&system).contains("门铃"));
+    assert!(texts(&system).contains("Doorbell"));
     system
         .gesture(swipe(Direction::Down, Some(Edge::Top)))
         .await;
@@ -620,12 +631,12 @@ async fn scenario(spawner: Spawner) {
 
     // Uninstalling an installable app from its menu.
     system.gesture(swipe(Direction::Left, None)).await;
-    let (at, _) = icon(&system, "计数器");
+    let (at, _) = icon(&system, "Counter");
     system
         .gesture(Gesture::LongPress { x: at.0, y: at.1 })
         .await;
     assert_eq!(system.screen(), Some(Screen::Menu));
-    assert!(texts(&system).contains("卸载"));
+    assert!(texts(&system).contains("Uninstall"));
     system.call(press("confirm", None)).await;
     assert_eq!(system.screen(), Some(Screen::Apps));
     until("the counter to end", || {
@@ -633,7 +644,7 @@ async fn scenario(spawner: Spawner) {
     })
     .await;
     assert!(!apps.list().await.apps.iter().any(|app| app.id == "counter"));
-    assert!(!system.launcher().contains(&"计数器"));
+    assert!(!system.launcher().contains(&"Counter"));
 }
 
 #[embassy_executor::task]

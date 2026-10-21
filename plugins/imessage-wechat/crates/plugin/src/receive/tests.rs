@@ -14,8 +14,8 @@ use alloc::vec::Vec;
 
 use barracuda_captive_portal_plugin::{EntryState, EntryStatus, WebText};
 use barracuda_imessage_gateway_plugin::{
-    ChannelControl, ChannelMode, MessageChannel, MessageTarget, ReceiveState, ReceiveTiming,
-    SendMessageRequest, PAIRED_REPLY,
+    ChannelControl, ChannelMode, MessageChannel, MessageTarget, ReceiveFailure, ReceiveState,
+    ReceiveTiming, SendMessageRequest, PAIRED_REPLY,
 };
 use barracuda_platform_test::ScriptStep;
 use embassy_time::Duration;
@@ -25,7 +25,7 @@ use serde_json::{json, Value};
 
 use super::{
     PollTiming, BOT_ID_STORAGE_KEY, CONTEXT_TOKENS_STORAGE_KEY, CURSOR_STORAGE_KEY,
-    SESSION_EXPIRED_MESSAGE,
+    SESSION_EXPIRED_CODE, SESSION_EXPIRED_MESSAGE,
 };
 use crate::bench::{run, scenario, Setup, Stored, API_BASE, PAIRING_CODE};
 use crate::login::LoginTiming;
@@ -405,7 +405,10 @@ fn an_expired_session_halts_until_a_new_login() {
 
         assert_eq!(
             harness.state(),
-            ReceiveState::Error(SESSION_EXPIRED_MESSAGE.into())
+            ReceiveState::Error(ReceiveFailure {
+                message: SESSION_EXPIRED_MESSAGE.into(),
+                code: Some(SESSION_EXPIRED_CODE),
+            })
         );
         assert_eq!(harness.requests().len(), 2, "no retry while halted");
         let (code, body) = harness.status().await;
@@ -415,6 +418,7 @@ fn an_expired_session_halts_until_a_new_login() {
             json!({
                 "state": "error",
                 "message": SESSION_EXPIRED_MESSAGE,
+                "code": SESSION_EXPIRED_CODE,
                 "slots": { "in_use": 1, "capacity": harness.capacity },
             })
         );

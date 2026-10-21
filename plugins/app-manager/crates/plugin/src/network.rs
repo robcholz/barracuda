@@ -30,8 +30,8 @@ pub trait NetworkSource {
     fn state(&self) -> NetworkState;
     /// Whether the setup hotspot is open or opening.
     fn hotspot_open(&self) -> bool;
-    /// How a phone reaches the portal while the hotspot is open, in one
-    /// line.
+    /// How a phone reaches the portal while the hotspot is open: one short
+    /// numbered step per line, joined by `\n`.
     fn hotspot_hint(&self) -> String;
     /// Opens the setup hotspot.
     fn open_hotspot(&self) -> HotspotFuture<'_>;

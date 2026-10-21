@@ -41,13 +41,13 @@ import {
 ## 消息通道模式和授权账号（`inbound.ts`）
 
 每个消息通道在其配置路径下提供同样的 JSON：`GET <endpoint>/status` 回答
-`ChannelStatus`（`{configured, mode, receive?: {state, message?, capacity?}, owners: {count}}`），
+`ChannelStatus`（`{configured, mode, receive?: {state, message?, code?, capacity?}, owners: {count}}`），
 `POST <endpoint>/mode` 接收 `{mode}`，`GET`/`POST <endpoint>/owners` 回答 `OwnersReply`
 （`{owners: [{id, label}], pairing: {code, expires_in} | null, ignored}`），并接收
 `{"remove": id}` 或 `{"rotate": true}`。
 
 - `channelInbound(context, { endpoint, channel, how, command?, modes?, pollMs? = 5000, onStatus? })`
-  返回 `{ rows, alert, attach(form), apply(status), refresh() }`：下面两行，已连接到设备。`onStatus(status)` 会随这两行显示的每个状态运行（当微信的接收状态是“需要重新扫码”错误时，它会提供“重新绑定”）。
+  返回 `{ rows, alert, attach(form), apply(status), refresh() }`：下面两行，已连接到设备。`onStatus(status)` 会随这两行显示的每个状态运行（当微信的接收状态是 `session_expired` 错误时，它会提供“重新绑定”）。
   - `attach(form)` 把它们放在表单的“高级”折叠区（或其页脚）之前。
   - `alert` 是没有名额时的警示提醒：把它放在页面中标题框之下、表单之前
     （`page(header(…), inbound.alert, form.element)`）。

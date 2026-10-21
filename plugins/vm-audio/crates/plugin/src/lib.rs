@@ -138,7 +138,7 @@ where
             .is_present()
             .then_some(barracuda_vm_plugin::PackageInterface::Stable {
                 version: 2,
-                purpose: "播放声音和录音",
+                purpose: "Play and record sound",
             })
     }
 

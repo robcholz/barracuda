@@ -149,7 +149,7 @@ impl Sessions {
                 .map(|session| {
                     json!({
                         "id": format!("{}", session.session),
-                        "title": session.title.unwrap_or_else(|| String::from("新对话")),
+                        "title": session.title.unwrap_or_else(|| String::from("New chat")),
                         "when": session
                             .updated_at
                             .map(|at| words::when(at, now))

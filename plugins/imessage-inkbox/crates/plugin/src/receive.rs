@@ -177,7 +177,7 @@ impl Cursor {
 /// Maps a failed poll's status to the receive error.
 fn status_error(reply: &Polled) -> ReceiveError {
     match reply.status {
-        401 | 403 => ReceiveError::halt("Inkbox 拒绝了 API Key / Inkbox rejected the API key"),
+        401 | 403 => ReceiveError::halt("Inkbox rejected the API key"),
         429 => ReceiveError::new("Inkbox rate limit").retry_after(
             reply
                 .retry_after

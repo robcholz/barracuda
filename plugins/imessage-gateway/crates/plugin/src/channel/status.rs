@@ -74,7 +74,6 @@ pub(crate) fn channel_status<C: ChannelControl + ?Sized>(channel: &C) -> Channel
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::string::String;
 
     fn status(level: ChannelLevel, zh: &'static str, en: &'static str) -> ChannelStatus {
         ChannelStatus { level, zh, en }
@@ -82,7 +81,7 @@ mod tests {
 
     #[test]
     fn maps_every_mode_and_receive_state() {
-        let error = ReceiveState::Error(String::from("closed"));
+        let error = ReceiveState::Error("closed".into());
         let cases = [
             (
                 false,

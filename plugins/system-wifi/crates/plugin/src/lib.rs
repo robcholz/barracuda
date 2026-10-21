@@ -56,7 +56,7 @@ impl NetworkSource for Wifi {
 
     fn hotspot_hint(&self) -> String {
         format!(
-            "连接热点“{}”，打开 http://{SETUP_AP_ADDRESS}/",
+            "1. Join Wi-Fi \"{}\"\n2. Open http://{SETUP_AP_ADDRESS}",
             self.0.setup_ssid()
         )
     }

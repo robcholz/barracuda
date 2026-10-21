@@ -472,7 +472,7 @@ impl LuaPackage for FilePackage {
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         Some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 1,
-            purpose: "读写共享文件",
+            purpose: "Access shared files",
         })
     }
 
