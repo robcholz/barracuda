@@ -228,6 +228,10 @@ pub enum BindingKind {
     I2sStream,
     /// One fixed capacitive-touch channel group.
     CapacitiveTouch,
+    /// One calibrated analog input channel of a shared SoC ADC.
+    AnalogInput,
+    /// One PDM microphone and I2S amplifier stream on one controller.
+    PdmI2sStream,
     /// A semantic power-control binding.
     PowerControl,
     /// A semantic brightness-control binding.
@@ -969,7 +973,11 @@ pub fn resolve_board<'a>(
                     || (schema.kind() == BindingKind::I2sStream
                         && board.peripheral_io().i2s_stream(resource).is_none())
                     || (schema.kind() == BindingKind::CapacitiveTouch
-                        && board.peripheral_io().capacitive_touch(resource).is_none()))
+                        && board.peripheral_io().capacitive_touch(resource).is_none())
+                    || (schema.kind() == BindingKind::AnalogInput
+                        && board.peripheral_io().analog_input(resource).is_none())
+                    || (schema.kind() == BindingKind::PdmI2sStream
+                        && board.peripheral_io().pdm_i2s_stream(resource).is_none()))
             {
                 return Err(ResolveError::UnknownInternalResource {
                     peripheral: name.to_owned(),
@@ -1215,6 +1223,8 @@ const fn hal_binding(kind: BindingKind) -> Option<HalBinding> {
         BindingKind::ParallelOutput => Some(HalBinding::ParallelOutput),
         BindingKind::I2sStream => Some(HalBinding::I2sStream),
         BindingKind::CapacitiveTouch => Some(HalBinding::CapacitiveTouch),
+        BindingKind::AnalogInput => Some(HalBinding::AnalogInput),
+        BindingKind::PdmI2sStream => Some(HalBinding::PdmI2sStream),
         _ => None,
     }
 }
@@ -1306,6 +1316,24 @@ struct RenderedI2cBus {
     error_variant: String,
 }
 
+/// One SPI controller whose clock and data lines several `spi-device`
+/// declarations share.
+#[derive(Debug)]
+struct RenderedSpiBus {
+    local: String,
+    constructor: String,
+}
+
+/// One ADC controller whose channels several analog inputs use.
+#[derive(Debug)]
+struct RenderedAdcConverter {
+    local: String,
+    config: String,
+    controller: String,
+    controller_token: String,
+    channels: Vec<(String, String)>,
+}
+
 #[derive(Default)]
 struct RenderState {
     raw_fields: Vec<(String, String)>,
@@ -1317,6 +1345,8 @@ struct RenderState {
     identifiers: BTreeMap<String, String>,
     reserved_spi_controllers: BTreeSet<String>,
     i2c_buses: BTreeMap<String, RenderedI2cBus>,
+    spi_buses: BTreeMap<String, RenderedSpiBus>,
+    adc_converters: BTreeMap<String, RenderedAdcConverter>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1855,6 +1885,30 @@ fn render_generic_hal(
             bus.error_variant,
         ));
     }
+    for bus in state.spi_buses.values() {
+        source.push_str(&format!(
+            "        let {}: &'static ::barracuda_platform_selected::__platform::hal::SpiBusManager = ::barracuda_platform_selected::__platform::hal::spi_bus_manager!({});\n",
+            bus.local, bus.constructor,
+        ));
+    }
+    // Every channel of one converter is enabled before the converter is
+    // built, so the converter knows each channel's attenuation.
+    for converter in state.adc_converters.values() {
+        source.push_str(&format!(
+            "        let mut {} = ::barracuda_platform_selected::__platform::hal::analog_config::<::barracuda_platform_selected::__platform::hal::controller_binding_type!({})>();\n",
+            converter.config, converter.controller_token,
+        ));
+        for (channel, pin) in &converter.channels {
+            source.push_str(&format!(
+                "        let {channel} = ::barracuda_platform_selected::__platform::hal::analog_channel(&mut {}, bindings.{pin});\n",
+                converter.config,
+            ));
+        }
+        source.push_str(&format!(
+            "        let {} = ::barracuda_platform_selected::__platform::hal::analog_converter!({}, bindings.{}, {});\n",
+            converter.local, converter.controller_token, converter.controller, converter.config,
+        ));
+    }
     if peripheral_models {
         // The HAL attaches each declared peripheral's device model before
         // any implementation starts talking to its bus.
@@ -2041,6 +2095,12 @@ fn optional_binding_type(
         BindingKind::DigitalOutput => Ok(String::from(
             "::barracuda_platform_selected::__platform::hal::DigitalOutput",
         )),
+        BindingKind::DigitalInput => Ok(String::from(
+            "::barracuda_platform_selected::__platform::hal::DigitalInput",
+        )),
+        BindingKind::I2cDevice => Ok(String::from(
+            "::barracuda_platform_selected::__platform::hal::I2cDevice",
+        )),
         _ => Err(GenerateError::UnsupportedBindingKind {
             implementation: peripheral.implementation().id().to_owned(),
             binding: role.to_owned(),
@@ -2121,6 +2181,9 @@ fn render_binding(
                 validate_hardware_identifier(identifier)?;
             }
             let prefix = format!("{}_{}", peripheral.name(), role);
+            if board.peripheral_io().spi_devices_on(spi.peripheral()) > 1 {
+                return render_shared_spi_device(peripheral, role, spi, &prefix, state);
+            }
             let controller =
                 checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
             let sck = checked_identifier(&format!("{prefix}_sck"), &mut state.identifiers)?;
@@ -3072,12 +3135,251 @@ fn render_binding(
                 ),
             ))
         }
+        BindingKind::AnalogInput => {
+            let input = board
+                .peripheral_io()
+                .analog_input(resource)
+                .ok_or_else(|| GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                })?;
+            validate_hardware_identifier(input.peripheral())?;
+            validate_hardware_identifier(input.pin())?;
+            if !state.adc_converters.contains_key(input.peripheral()) {
+                let prefix = format!("shared_adc_{}", input.peripheral());
+                let local = checked_identifier(&prefix, &mut state.identifiers)?;
+                let config =
+                    checked_identifier(&format!("{prefix}_config"), &mut state.identifiers)?;
+                let controller =
+                    checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+                state.raw_fields.push((
+                    controller.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                        input.peripheral()
+                    ),
+                ));
+                state.adc_converters.insert(
+                    input.peripheral().to_owned(),
+                    RenderedAdcConverter {
+                        local,
+                        config,
+                        controller,
+                        controller_token: input.peripheral().to_owned(),
+                        channels: Vec::new(),
+                    },
+                );
+            }
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let pin = checked_identifier(&format!("{prefix}_pin"), &mut state.identifiers)?;
+            let channel =
+                checked_identifier(&format!("analog_channel_{prefix}"), &mut state.identifiers)?;
+            state.raw_fields.push((
+                pin.clone(),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+                    input.pin()
+                ),
+            ));
+            let converter = state
+                .adc_converters
+                .get_mut(input.peripheral())
+                .ok_or_else(|| GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                })?;
+            converter.channels.push((channel.clone(), pin));
+            Ok((
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::AnalogInputChannel<::barracuda_platform_selected::__platform::hal::controller_binding_type!({}), ::barracuda_platform_selected::__platform::hal::pin_binding_type!({})>",
+                    input.peripheral(),
+                    input.pin()
+                ),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::analog_input({}, {channel})",
+                    converter.local
+                ),
+            ))
+        }
+        BindingKind::PdmI2sStream => {
+            let stream = board
+                .peripheral_io()
+                .pdm_i2s_stream(resource)
+                .ok_or_else(|| GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                })?;
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let controller =
+                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            let dma = checked_identifier(&format!("{prefix}_dma"), &mut state.identifiers)?;
+            for (field, token) in [(&controller, stream.peripheral()), (&dma, stream.dma())] {
+                validate_hardware_identifier(token)?;
+                state.raw_fields.push((
+                    field.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::controller_binding_type!({token})"
+                    ),
+                ));
+            }
+            let mut pins = Vec::new();
+            for (name, pin) in [
+                ("clk", Some(stream.clk())),
+                ("din", stream.din()),
+                ("bclk", stream.bclk()),
+                ("dout", stream.dout()),
+            ] {
+                let Some(pin) = pin else {
+                    pins.push(String::from("None"));
+                    continue;
+                };
+                validate_hardware_identifier(pin)?;
+                let field =
+                    checked_identifier(&format!("{prefix}_{name}"), &mut state.identifiers)?;
+                state.raw_fields.push((
+                    field.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({pin})"
+                    ),
+                ));
+                let erased = format!(
+                    "::barracuda_platform_selected::__platform::hal::runtime_pin(bindings.{field})"
+                );
+                pins.push(if name == "clk" {
+                    erased
+                } else {
+                    format!("Some({erased})")
+                });
+            }
+            let variant = format!(
+                "{}{}Binding",
+                pascal_identifier(peripheral.name()),
+                pascal_identifier(role)
+            );
+            state.binding_errors.push((
+                variant.clone(),
+                String::from("::barracuda_platform_selected::__platform::hal::I2sConfigError"),
+            ));
+            Ok((
+                String::from("::barracuda_platform_selected::__platform::hal::PdmI2sStream"),
+                format!(
+                    "{{ let (tx_dma, rx_dma) = ::barracuda_platform_selected::__platform::hal::i2s_dma_buffers!({}).map_err(GeneratedBoardError::{variant})?; ::barracuda_platform_selected::__platform::hal::pdm_i2s_stream(bindings.{controller}, bindings.{dma}, {}, {}, tx_dma, rx_dma).map_err(GeneratedBoardError::{variant})? }}",
+                    stream.dma_buffer_bytes(),
+                    pins.join(", "),
+                    stream.sample_rate_hz(),
+                ),
+            ))
+        }
         kind => Err(GenerateError::UnsupportedBindingKind {
             implementation: peripheral.implementation().id().to_owned(),
             binding: role.to_owned(),
             kind,
         }),
     }
+}
+
+/// Renders one `spi-device` on a controller other devices share: the bus is
+/// built once from the shared clock and data lines, and each device keeps its
+/// chip select and clock rate.
+fn render_shared_spi_device(
+    peripheral: &ResolvedPeripheral<'_>,
+    role: &str,
+    spi: &barracuda_board_config::SpiDeviceDefinition,
+    prefix: &str,
+    state: &mut RenderState,
+) -> Result<(String, String), GenerateError> {
+    if !state.spi_buses.contains_key(spi.peripheral()) {
+        let bus_prefix = format!("shared_spi_{}", spi.peripheral());
+        let local = checked_identifier(&bus_prefix, &mut state.identifiers)?;
+        let controller =
+            checked_identifier(&format!("{bus_prefix}_controller"), &mut state.identifiers)?;
+        let sck = checked_identifier(&format!("{bus_prefix}_sck"), &mut state.identifiers)?;
+        state.raw_fields.extend([
+            (
+                controller.clone(),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                    spi.peripheral()
+                ),
+            ),
+            (
+                sck.clone(),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+                    spi.sck()
+                ),
+            ),
+        ]);
+        let mut line = |name: &str, pin: Option<&str>| -> Result<Option<String>, GenerateError> {
+            pin.map(|pin| {
+                let field =
+                    checked_identifier(&format!("{bus_prefix}_{name}"), &mut state.identifiers)?;
+                state.raw_fields.push((
+                    field.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({pin})"
+                    ),
+                ));
+                Ok(field)
+            })
+            .transpose()
+        };
+        let mosi = line("mosi", spi.mosi())?;
+        let miso = line("miso", spi.miso())?;
+        let variant = format!("{}Binding", pascal_identifier(&bus_prefix));
+        state.binding_errors.push((
+            variant.clone(),
+            String::from("::barracuda_platform_selected::__platform::hal::SpiConfigError"),
+        ));
+        // The bus starts at the first device's clock; each device applies its
+        // own before its transactions.
+        let constructor = match (mosi, miso) {
+            (Some(mosi), Some(miso)) => format!(
+                "::barracuda_platform_selected::__platform::hal::spi_bus_full_duplex(bindings.{controller}, bindings.{sck}, bindings.{mosi}, bindings.{miso}, {}).map_err(GeneratedBoardError::{variant})?",
+                spi.frequency_hz()
+            ),
+            (Some(mosi), None) => format!(
+                "::barracuda_platform_selected::__platform::hal::spi_bus(bindings.{controller}, bindings.{sck}, bindings.{mosi}, {}).map_err(GeneratedBoardError::{variant})?",
+                spi.frequency_hz()
+            ),
+            (None, Some(miso)) => format!(
+                "::barracuda_platform_selected::__platform::hal::spi_bus_rx_only(bindings.{controller}, bindings.{sck}, bindings.{miso}, {}).map_err(GeneratedBoardError::{variant})?",
+                spi.frequency_hz()
+            ),
+            (None, None) => {
+                return Err(GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role}.mosi-or-miso"),
+                });
+            }
+        };
+        state.spi_buses.insert(
+            spi.peripheral().to_owned(),
+            RenderedSpiBus { local, constructor },
+        );
+    }
+    let chip_select = checked_identifier(&format!("{prefix}_chip_select"), &mut state.identifiers)?;
+    state.raw_fields.push((
+        chip_select.clone(),
+        format!(
+            "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+            spi.chip_select()
+        ),
+    ));
+    let bus = state.spi_buses.get(spi.peripheral()).ok_or_else(|| {
+        GenerateError::UnsupportedResolvedValue {
+            peripheral: peripheral.name().to_owned(),
+            parameter: format!("{role} binding"),
+        }
+    })?;
+    Ok((
+        String::from("::barracuda_platform_selected::__platform::hal::SharedSpiDevice"),
+        format!(
+            "::barracuda_platform_selected::__platform::hal::shared_spi_device({}, bindings.{chip_select}, {})",
+            bus.local,
+            spi.frequency_hz()
+        ),
+    ))
 }
 
 fn resolved_initial_level(

@@ -1,4 +1,6 @@
-//! Bare-metal ESP32-S3 SDMMC storage binding backed directly by `esp-hal`.
+//! Bare-metal SDMMC storage binding backed directly by `esp-hal`, shared by
+//! the ESP32-S3 (slot 0) and the ESP32 (slot 1, the ESP32 includes this file);
+//! each Platform names its slot as `SDMMC_SLOT`.
 
 use embedded_io::{ErrorKind, ErrorType, SeekFrom};
 use embedded_io_async::{Read, Seek, Write};
@@ -33,7 +35,7 @@ pub enum SdmmcConfigError {
 
 /// Byte-addressed SD card backed by `esp-hal`'s blocking SDMMC slot.
 pub struct SdmmcDevice {
-    slot: Slot<'static, 0, Blocking>,
+    slot: Slot<'static, { super::SDMMC_SLOT }, Blocking>,
     sector: InternalMemory<[u8; BLOCK_BYTES]>,
     frequency_hz: u32,
     initialized: bool,
@@ -93,16 +95,16 @@ pub fn sdmmc_device_1bit<CLK, CMD, D0>(
     frequency_hz: u32,
 ) -> Result<SdmmcDevice, SdmmcConfigError>
 where
-    CLK: SlotClk<'static, 0>,
-    CMD: SlotCmd<'static, 0>,
-    D0: SlotData<'static, 0, 0>,
+    CLK: SlotClk<'static, { super::SDMMC_SLOT }>,
+    CMD: SlotCmd<'static, { super::SDMMC_SLOT }>,
+    D0: SlotData<'static, { super::SDMMC_SLOT }, 0>,
 {
     let controller =
         SdHostController::new(host, HostConfig::default()).map_err(SdmmcConfigError::Host)?;
     static CONTROLLER: StaticCell<SdHostController<'static>> = StaticCell::new();
     let controller = CONTROLLER.init(controller);
     let slot = controller
-        .slot::<0>(SlotConfig::default())
+        .slot::<{ super::SDMMC_SLOT }>(SlotConfig::default())
         .map_err(SdmmcConfigError::Host)?
         .with_clk(clk)
         .with_cmd(cmd)

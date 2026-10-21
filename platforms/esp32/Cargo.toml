@@ -5,7 +5,9 @@ edition = "2021"
 description = "ESP32 Platform implementation for Barracuda"
 
 [features]
-default = ["runtime-pwm"]
+default = ["fixed-mclk-pins", "runtime-pwm"]
+# The chip routes the I2S master clock only to its fixed CLK_OUT pins.
+fixed-mclk-pins = []
 runtime-i2s = []
 runtime-pwm = []
 
@@ -17,6 +19,7 @@ log.workspace = true
 
 [target.'cfg(target_arch = "xtensa")'.dependencies]
 barracuda-board-hal.workspace = true
+barracuda-peripheral.workspace = true
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.6.0"
 embassy-net = { workspace = true, features = ["dhcpv4"] }
@@ -38,6 +41,7 @@ esp-rtos = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio",
 esp-storage = { version = "0.10.0", default-features = false, features = ["esp32", "embedded-storage"] }
 static_cell.workspace = true
 nb = "1"
+sdio = "0.5.1"
 
 [build-dependencies]
 barracuda-board-config.workspace = true

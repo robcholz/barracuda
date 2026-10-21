@@ -1,5 +1,7 @@
 //! Full-duplex I2S PCM streams through esp-hal's I2S master driver, shared
-//! by the ESP32-S3 and ESP32-P4 Platforms (the ESP32-P4 includes this file).
+//! by the ESP32, ESP32-S3, and ESP32-P4 Platforms (the ESP32 and ESP32-P4
+//! include this file). The ESP32 routes its master clock only to the fixed
+//! `CLK_OUT` pins, so it builds streams without one (`fixed-mclk-pins`).
 
 use barracuda_peripheral::audio::{PcmFormat, PcmStream};
 use esp_hal::{
@@ -50,6 +52,10 @@ pub enum I2sTransferError {
     Dma(DmaError),
     /// DMA completed without producing every requested sample.
     ShortRead,
+    /// The stream has no lines for this direction.
+    Unsupported,
+    /// The controller rejected the mode this transfer needs.
+    Configuration(VendorI2sConfigError),
 }
 
 impl core::fmt::Display for I2sTransferError {
@@ -59,6 +65,10 @@ impl core::fmt::Display for I2sTransferError {
             Self::Peripheral(_) => formatter.write_str("I2S transfer could not start"),
             Self::Dma(_) => formatter.write_str("I2S DMA transfer failed"),
             Self::ShortRead => formatter.write_str("I2S DMA transfer returned a short read"),
+            Self::Unsupported => {
+                formatter.write_str("the I2S stream has no lines for this direction")
+            }
+            Self::Configuration(_) => formatter.write_str("invalid ESP I2S configuration"),
         }
     }
 }
@@ -182,6 +192,7 @@ pub fn i2s_stream<I: I2sInstance + 'static>(
 }
 
 /// Constructs a full-duplex ESP I2S stream with an MCLK output.
+#[cfg(not(feature = "fixed-mclk-pins"))]
 #[allow(clippy::too_many_arguments)]
 pub fn i2s_stream_with_mclk<I: I2sInstance + 'static>(
     controller: I,

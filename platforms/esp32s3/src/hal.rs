@@ -3,12 +3,21 @@
 mod capacitive_touch;
 mod i2s_stream;
 mod parallel_output;
+mod pdm_stream;
 mod sdmmc;
 
 pub use capacitive_touch::{capacitive_touch_buttons, CapacitiveTouchButtons};
 pub use i2s_stream::{
     i2s_stream, i2s_stream_with_mclk, I2sConfigError, I2sDevice, I2sTransferError,
 };
+pub use pdm_stream::{pdm_i2s_stream, PdmI2sStream};
+
+/// The SD host slot a Board's microSD card uses; both slots reach any pin
+/// through the GPIO matrix.
+const SDMMC_SLOT: u8 = 0;
+
+/// The DMA channel type a PDM-I2S stream erases its Board-selected channel to.
+pub type PdmDmaChannel<'d> = esp_hal::dma::AhbGdmaChannel<'d>;
 pub use parallel_output::{
     parallel_output, parallel_output_data_only, ParallelOutputBus, ParallelOutputConfigError,
     ParallelOutputError,

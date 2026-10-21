@@ -372,6 +372,10 @@ pub struct PeripheralIoDefinition {
     i2s_streams: BTreeMap<String, I2sStreamDefinition>,
     #[serde(default, rename = "capacitive-touch")]
     capacitive_touch: BTreeMap<String, CapacitiveTouchDefinition>,
+    #[serde(default, rename = "analog-input")]
+    analog_inputs: BTreeMap<String, AnalogInputDefinition>,
+    #[serde(default, rename = "pdm-i2s-stream")]
+    pdm_i2s_streams: BTreeMap<String, PdmI2sStreamDefinition>,
 }
 
 impl PeripheralIoDefinition {
@@ -390,6 +394,8 @@ impl PeripheralIoDefinition {
             && self.parallel_outputs.is_empty()
             && self.i2s_streams.is_empty()
             && self.capacitive_touch.is_empty()
+            && self.analog_inputs.is_empty()
+            && self.pdm_i2s_streams.is_empty()
     }
 
     /// Finds one MIPI DSI host reserved by a display implementation.
@@ -472,6 +478,37 @@ impl PeripheralIoDefinition {
         self.capacitive_touch.get(name)
     }
 
+    /// Finds one analog input channel reserved by a peripheral implementation.
+    #[must_use]
+    pub fn analog_input(&self, name: &str) -> Option<&AnalogInputDefinition> {
+        self.analog_inputs.get(name)
+    }
+
+    /// Iterates every declared analog input in stable Board-name order.
+    pub fn analog_inputs(&self) -> impl Iterator<Item = (&str, &AnalogInputDefinition)> {
+        self.analog_inputs
+            .iter()
+            .map(|(name, input)| (name.as_str(), input))
+    }
+
+    /// Finds one PDM microphone and I2S amplifier stream reserved by a
+    /// peripheral implementation.
+    #[must_use]
+    pub fn pdm_i2s_stream(&self, name: &str) -> Option<&PdmI2sStreamDefinition> {
+        self.pdm_i2s_streams.get(name)
+    }
+
+    /// Returns how many `spi-device` declarations share the SPI controller
+    /// `peripheral`. Devices on one controller share its clock and data
+    /// lines, each with its own chip select and clock rate.
+    #[must_use]
+    pub fn spi_devices_on(&self, peripheral: &str) -> usize {
+        self.spi_devices
+            .values()
+            .filter(|device| device.peripheral == peripheral)
+            .count()
+    }
+
     /// Returns whether a fixed built-in declaration consumes this controller.
     ///
     /// Runtime I/O controller pools use this to exclude singleton tokens that
@@ -521,6 +558,14 @@ impl PeripheralIoDefinition {
                 .capacitive_touch
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
+            || self
+                .analog_inputs
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .pdm_i2s_streams
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
     }
 
     /// Returns whether a fixed built-in declaration consumes this DMA channel.
@@ -537,6 +582,10 @@ impl PeripheralIoDefinition {
                 .values()
                 .any(|binding| binding.dma == dma)
             || self.i2s_streams.values().any(|binding| binding.dma == dma)
+            || self
+                .pdm_i2s_streams
+                .values()
+                .any(|binding| binding.dma == dma)
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -608,6 +657,22 @@ impl PeripheralIoDefinition {
                 validate_frequency(name, read_frequency_hz)?;
             }
             validate_frequency(name, spi.frequency_hz)?;
+            // Devices on one controller share its clock and data lines; each
+            // keeps its own chip select and clock rate.
+            if let Some((other, _)) = self.spi_devices.iter().find(|(other, candidate)| {
+                *other != name
+                    && candidate.peripheral == spi.peripheral
+                    && (candidate.sck != spi.sck
+                        || candidate.mosi != spi.mosi
+                        || candidate.miso != spi.miso
+                        || candidate.three_wire
+                        || spi.three_wire)
+            }) {
+                return Err(ConfigError::InconsistentSharedSpi {
+                    resource: name.clone(),
+                    other: other.clone(),
+                });
+            }
         }
         for (name, spi) in &self.quad_spi_devices {
             validate_resource_name("internal quad-spi-device", name)?;
@@ -632,6 +697,15 @@ impl PeripheralIoDefinition {
         for (name, touch) in &self.capacitive_touch {
             validate_resource_name("internal capacitive-touch", name)?;
             touch.validate(name)?;
+        }
+        for (name, input) in &self.analog_inputs {
+            validate_resource_name("internal analog-input", name)?;
+            validate_identifier(name, "peripheral", &input.peripheral)?;
+            validate_identifier(name, "pin", &input.pin)?;
+        }
+        for (name, stream) in &self.pdm_i2s_streams {
+            validate_resource_name("internal pdm-i2s-stream", name)?;
+            stream.validate(name)?;
         }
         Ok(())
     }
@@ -1191,6 +1265,130 @@ impl I2sStreamDefinition {
                 resource: name.to_owned(),
             });
         }
+        if self.dma_buffer_bytes == 0 {
+            return Err(ConfigError::ZeroDmaBuffer {
+                resource: name.to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// One analog input pin sampled by a SoC ADC controller.
+///
+/// Several inputs may name one controller; the Board composition builds the
+/// converter once and hands each implementation its own channel.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AnalogInputDefinition {
+    peripheral: String,
+    pin: String,
+}
+
+impl AnalogInputDefinition {
+    /// Returns the chip-native ADC controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the analog-capable pin the controller samples.
+    #[must_use]
+    pub fn pin(&self) -> &str {
+        &self.pin
+    }
+}
+
+/// One I2S controller that records from a PDM microphone and plays to an I2S
+/// amplifier, one direction at a time.
+///
+/// M5Stack products wire the microphone's clock and the amplifier's word
+/// select to one pin, so the controller switches between PDM receive and
+/// standard I2S transmit for each transfer. Either side may be absent: a
+/// microphone-only product leaves out `bclk` and `dout`, an amplifier-only
+/// one leaves out `din`.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PdmI2sStreamDefinition {
+    peripheral: String,
+    dma: String,
+    clk: String,
+    #[serde(default)]
+    din: Option<String>,
+    #[serde(default)]
+    bclk: Option<String>,
+    #[serde(default)]
+    dout: Option<String>,
+    #[serde(rename = "sample-rate-hz")]
+    sample_rate_hz: u32,
+    #[serde(rename = "dma-buffer-bytes")]
+    dma_buffer_bytes: usize,
+}
+
+impl PdmI2sStreamDefinition {
+    /// Returns the chip-native I2S controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+    /// Returns the chip-native DMA channel.
+    #[must_use]
+    pub fn dma(&self) -> &str {
+        &self.dma
+    }
+    /// Returns the microphone clock pin, also the amplifier's word select.
+    #[must_use]
+    pub fn clk(&self) -> &str {
+        &self.clk
+    }
+    /// Returns the microphone data pin, when a microphone is fitted.
+    #[must_use]
+    pub fn din(&self) -> Option<&str> {
+        self.din.as_deref()
+    }
+    /// Returns the amplifier bit-clock pin, when an amplifier is fitted.
+    #[must_use]
+    pub fn bclk(&self) -> Option<&str> {
+        self.bclk.as_deref()
+    }
+    /// Returns the amplifier data pin, when an amplifier is fitted.
+    #[must_use]
+    pub fn dout(&self) -> Option<&str> {
+        self.dout.as_deref()
+    }
+    /// Returns the PCM sample rate of both directions.
+    #[must_use]
+    pub const fn sample_rate_hz(&self) -> u32 {
+        self.sample_rate_hz
+    }
+    /// Returns each statically allocated DMA buffer's capacity.
+    #[must_use]
+    pub const fn dma_buffer_bytes(&self) -> usize {
+        self.dma_buffer_bytes
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        for (field, value) in [
+            ("peripheral", Some(self.peripheral.as_str())),
+            ("dma", Some(self.dma.as_str())),
+            ("clk", Some(self.clk.as_str())),
+            ("din", self.din.as_deref()),
+            ("bclk", self.bclk.as_deref()),
+            ("dout", self.dout.as_deref()),
+        ] {
+            if let Some(value) = value {
+                validate_identifier(name, field, value)?;
+            }
+        }
+        // The amplifier needs both of its lines, and the stream at least one
+        // direction.
+        if self.bclk.is_some() != self.dout.is_some() || (self.din.is_none() && self.dout.is_none())
+        {
+            return Err(ConfigError::InvalidPdmI2sStream {
+                resource: name.to_owned(),
+            });
+        }
+        validate_frequency(name, self.sample_rate_hz)?;
         if self.dma_buffer_bytes == 0 {
             return Err(ConfigError::ZeroDmaBuffer {
                 resource: name.to_owned(),
@@ -2346,6 +2544,25 @@ pub enum ConfigError {
     #[error("Board I2S stream `{resource}` must have channels and sample bits")]
     InvalidI2sFormat {
         /// Board-level I2S resource name.
+        resource: String,
+    },
+    /// SPI devices on one controller disagree on the shared bus lines.
+    #[error(
+        "Board SPI devices `{resource}` and `{other}` share a controller, so they must name the same `sck`, `mosi`, and `miso` and neither may be three-wire"
+    )]
+    InconsistentSharedSpi {
+        /// Board-level SPI resource name.
+        resource: String,
+        /// The other device on the same controller.
+        other: String,
+    },
+    /// A PDM microphone and I2S amplifier stream has no direction or half an
+    /// amplifier.
+    #[error(
+        "Board PDM-I2S stream `{resource}` must declare `din`, or `bclk` with `dout`, or all three"
+    )]
+    InvalidPdmI2sStream {
+        /// Board-level stream resource name.
         resource: String,
     },
     /// A DMA-backed media resource requested no storage.

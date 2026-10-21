@@ -185,6 +185,36 @@ pub trait AnalogInput: AnalogErrorType {
     fn read(&mut self) -> Result<u32, Self::Error>;
 }
 
+/// One analog input a peripheral implementation samples in millivolts.
+///
+/// The Platform applies its converter's calibration, so implementations such
+/// as a battery monitor behind a resistor divider or a resistor-ladder button
+/// array compare voltages instead of raw converter codes, which differ per
+/// chip and per attenuation. `embedded-hal` 1.0 has no analog contract.
+pub trait AnalogVoltageInput: AnalogErrorType {
+    /// Samples the pin once and returns its voltage in millivolts.
+    fn read_millivolts(&mut self) -> Result<u32, Self::Error>;
+}
+
+/// Bus control an SD card in SPI mode needs beyond `embedded-hal`'s
+/// `SpiDevice`.
+///
+/// The SD specification identifies a card at no more than 400 kHz, then runs
+/// it at its full clock, and wakes it with at least 74 clock cycles while its
+/// chip select is high. An `SpiDevice` fixes its clock and always asserts its
+/// chip select, so a Platform's SPI device type also implements this.
+pub trait SpiDeviceControl: embedded_hal::spi::ErrorType {
+    /// Returns the clock of this device's following transactions, initially
+    /// the one the Board declares.
+    fn frequency_hz(&self) -> u32;
+
+    /// Sets the clock of this device's following transactions.
+    fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error>;
+
+    /// Clocks `bytes` out with this device's chip select released.
+    fn write_deselected(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
+}
+
 /// One Board-exposed analog output channel.
 pub trait AnalogOutput: AnalogErrorType {
     /// Highest raw value accepted by this channel.
