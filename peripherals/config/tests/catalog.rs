@@ -1259,7 +1259,7 @@ fn an_sdmmc_card_takes_its_slot_through_the_platform_hand_off() {
         "micro_sd_device_slot: ::barracuda_platform_selected::__platform::hal::sdmmc_slot_binding_type!(SDHOST, 0),"
     ));
     assert!(rust.contains(
-        "::barracuda_platform_selected::__platform::hal::sdmmc_slot_binding!($peripherals, $handoff, SDHOST, 0),"
+        "$crate::__platform_selected::__platform::hal::sdmmc_slot_binding!($peripherals, $handoff, SDHOST, 0),"
     ));
     assert!(!rust.contains("$peripherals.SDHOST"));
     assert!(rust.contains("$peripherals.GPIO43,"));
@@ -1267,7 +1267,7 @@ fn an_sdmmc_card_takes_its_slot_through_the_platform_hand_off() {
         "($peripherals:ident) => {\n        $crate::__barracuda_generated_board_bindings!($peripherals, ())\n    };"
     ));
     assert!(rust.contains(
-        "hal::sdmmc_device(bindings.micro_sd_device_slot, bindings.micro_sd_device_clk, bindings.micro_sd_device_cmd, bindings.micro_sd_device_d0, bindings.micro_sd_device_d1, bindings.micro_sd_device_d2, bindings.micro_sd_device_d3, 4, 4, 3300)"
+        "hal::sdmmc_device(bindings.micro_sd_device_slot, bindings.micro_sd_device_clk, bindings.micro_sd_device_cmd, bindings.micro_sd_device_d0, bindings.micro_sd_device_d1, bindings.micro_sd_device_d2, bindings.micro_sd_device_d3, 4, 4, 3300, 25000000)"
     ));
 
     // The ESP32-S3 keeps building its own controller for a one-bit card.
@@ -1277,7 +1277,7 @@ fn an_sdmmc_card_takes_its_slot_through_the_platform_hand_off() {
     assert_eq!(validate_platform_hal(&board, &resolved, &platform), Ok(()));
     let rust = render_board_hal_for_platform(&board, &resolved, &platform).expect("S3 card HAL");
     assert!(rust.contains(
-        "hal::sdmmc_device_1bit(bindings.micro_sd_device_slot, bindings.micro_sd_device_clk, bindings.micro_sd_device_cmd, bindings.micro_sd_device_d0)"
+        "hal::sdmmc_device_1bit(bindings.micro_sd_device_slot, bindings.micro_sd_device_clk, bindings.micro_sd_device_cmd, bindings.micro_sd_device_d0, 25000000)"
     ));
 }
 

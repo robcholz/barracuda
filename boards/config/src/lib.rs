@@ -819,7 +819,13 @@ pub struct SdmmcDeviceDefinition {
     power_channel: Option<u8>,
     #[serde(rename = "power-millivolts")]
     power_millivolts: Option<u16>,
+    #[serde(default, rename = "frequency-hz")]
+    frequency_hz: Option<u32>,
 }
+
+/// The SD card clock a Board that names none runs its card at: the top of
+/// the default bus speed mode.
+pub const DEFAULT_SDMMC_FREQUENCY_HZ: u32 = 25_000_000;
 
 impl SdmmcDeviceDefinition {
     /// Returns the chip-native SDMMC controller singleton.
@@ -870,6 +876,14 @@ impl SdmmcDeviceDefinition {
         self.power_millivolts
     }
 
+    /// Returns the card clock once the card is identified: the Board's
+    /// `frequency-hz`, or [`DEFAULT_SDMMC_FREQUENCY_HZ`]. Above 25 MHz the
+    /// card is switched to high speed, and stays at 25 MHz if it refuses.
+    #[must_use]
+    pub fn frequency_hz(&self) -> u32 {
+        self.frequency_hz.unwrap_or(DEFAULT_SDMMC_FREQUENCY_HZ)
+    }
+
     fn validate(&self, name: &str) -> Result<(), ConfigError> {
         validate_identifier(name, "peripheral", &self.peripheral)?;
         validate_identifier(name, "clk", &self.clk)?;
@@ -882,7 +896,9 @@ impl SdmmcDeviceDefinition {
             (None, None) => true,
             _ => false,
         };
+        // SD high speed tops out at 50 MHz.
         if self.slot > 1
+            || !(1..=50_000_000).contains(&self.frequency_hz())
             || !matches!(self.bus_width, 1 | 4)
             || usize::from(self.bus_width) != self.data.len()
             || !power_valid

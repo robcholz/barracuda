@@ -2675,7 +2675,7 @@ fn render_binding(
             state.raw_field_values.insert(
                 controller.clone(),
                 format!(
-                    "::barracuda_platform_selected::__platform::hal::sdmmc_slot_binding!($peripherals, $handoff, {}, {})",
+                    "$crate::__platform_selected::__platform::hal::sdmmc_slot_binding!($peripherals, $handoff, {}, {})",
                     device.peripheral(),
                     device.slot()
                 ),
@@ -2717,8 +2717,11 @@ fn render_binding(
             ));
             let value = match device.bus_width() {
                 1 => format!(
-                    "::barracuda_platform_selected::__platform::hal::sdmmc_device_1bit(bindings.{controller}, bindings.{}, bindings.{}, bindings.{}).map_err(GeneratedBoardError::{variant})?",
-                    pin_fields[0], pin_fields[1], pin_fields[2],
+                    "::barracuda_platform_selected::__platform::hal::sdmmc_device_1bit(bindings.{controller}, bindings.{}, bindings.{}, bindings.{}, {}).map_err(GeneratedBoardError::{variant})?",
+                    pin_fields[0],
+                    pin_fields[1],
+                    pin_fields[2],
+                    device.frequency_hz(),
                 ),
                 4 => {
                     let power_channel = device.power_channel().ok_or_else(|| {
@@ -2734,13 +2737,14 @@ fn render_binding(
                         }
                     })?;
                     format!(
-                        "::barracuda_platform_selected::__platform::hal::sdmmc_device(bindings.{controller}, bindings.{}, bindings.{}, bindings.{}, bindings.{}, bindings.{}, bindings.{}, 4, {power_channel}, {power_millivolts}).map_err(GeneratedBoardError::{variant})?",
+                        "::barracuda_platform_selected::__platform::hal::sdmmc_device(bindings.{controller}, bindings.{}, bindings.{}, bindings.{}, bindings.{}, bindings.{}, bindings.{}, 4, {power_channel}, {power_millivolts}, {frequency_hz}).map_err(GeneratedBoardError::{variant})?",
                         pin_fields[0],
                         pin_fields[1],
                         pin_fields[2],
                         pin_fields[3],
                         pin_fields[4],
                         pin_fields[5],
+                        frequency_hz = device.frequency_hz(),
                     )
                 }
                 _ => {

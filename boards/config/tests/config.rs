@@ -1028,6 +1028,7 @@ peripherals:
         bus-width: 4
         power-channel: 4
         power-millivolts: 3300
+        frequency-hz: 40000000
   devices:
     micro-sd:
       implementation: sdmmc-fat-removable-storage
@@ -1053,6 +1054,7 @@ fn an_sdmmc_device_names_the_sd_host_slot_it_is_wired_to() {
         (card.power_channel(), card.power_millivolts()),
         (Some(4), Some(3300))
     );
+    assert_eq!(card.frequency_hz(), 40_000_000);
     assert_eq!(
         io.sdmmc_devices().map(|(name, _)| name).collect::<Vec<_>>(),
         ["micro-sd"]
@@ -1063,6 +1065,21 @@ fn an_sdmmc_device_names_the_sd_host_slot_it_is_wired_to() {
         .expect("card without a slot");
     let card = unnamed.peripheral_io().sdmmc_device("micro-sd");
     assert_eq!(card.map(|card| card.slot()), Some(0));
+
+    // A clock left out is the default speed mode's 25 MHz; SD tops out at 50.
+    let card_clock = "        frequency-hz: 40000000\n  devices:";
+    let default_speed = parse(&CARD_AND_COPROCESSOR_BOARD.replacen(card_clock, "  devices:", 1))
+        .expect("card without a clock");
+    let card = default_speed.peripheral_io().sdmmc_device("micro-sd");
+    assert_eq!(card.map(|card| card.frequency_hz()), Some(25_000_000));
+    assert!(matches!(
+        parse(&CARD_AND_COPROCESSOR_BOARD.replacen(
+            card_clock,
+            "        frequency-hz: 80000000\n  devices:",
+            1
+        )),
+        Err(ConfigError::InvalidSdmmcDevice { .. })
+    ));
 }
 
 #[test]
