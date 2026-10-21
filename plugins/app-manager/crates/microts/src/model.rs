@@ -2,9 +2,6 @@
 use crate::NodeId;
 use alloc::{string::String, vec::Vec};
 use core::cell::Cell;
-#[cfg(target_has_atomic = "32")]
-use core::sync::atomic::{AtomicU32, Ordering};
-#[cfg(not(target_has_atomic = "32"))]
 use portable_atomic::{AtomicU32, Ordering};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
