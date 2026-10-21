@@ -194,7 +194,12 @@ The UI kit runs compiled MicroTS views. A view is a BVIR program
 (`view.bvir`), its compiled stylesheet (`styles.bin`) and baked font atlases
 (`font-<slot>.bin`), produced from MicroTS sources by the MicroTS compiler. The
 crate `barracuda-ui-runtime` reads BVIR, mounts it into a vendored PocketJS
-core tree, and re-evaluates the tree when values change. A view built for
+core tree, and re-evaluates the tree when values change. After a change it
+also wraps text, as a web page does: text wider than its room breaks between
+words, with the core's `wrap_text`, and the view is laid out again. The room
+is the element's own width when something narrower than its parent sets it,
+such as a `flex-1 min-w-0` share, and otherwise the width inside its parent;
+`UiSession::texts` reports text as written. A view built for
 one display carries the rects its build solved: an element marked static
 takes its rect when it mounts and never enters the layout solver, and one
 marked formula follows its own inset and size, as PocketJS's generated views
@@ -437,6 +442,7 @@ baker, and the examples Noto Sans SC (`CJK_FONT_DIR`):
 | `icons` | the icon font and tables from `resources/icons/svg` |
 | `view` | the system view from `resources/view/app.tsx` and its `app.d.ts` contract; it ships no atlases |
 | `examples` | the example installable apps in `resources/examples/` into `crates/appkit/tests/fixtures/<id>.bapp/` |
+| `wrap` | the view in `crates/runtime/tests/fixtures/wrap/` into `crates/runtime/tests/fixtures/wrap.bapp/`, for the UI runtime's text wrapping tests |
 | `baked-360`, `baked-320` | the view in `crates/runtime/tests/fixtures/baked/`, built for 360 × 360 and for 320 × 240 displays, into `crates/runtime/tests/fixtures/baked-<size>.bapp/`; the UI runtime's tests check that the rects they carry are the ones the device solves |
 
 `resources/build-app.ts` builds an app container from its sources; builtin

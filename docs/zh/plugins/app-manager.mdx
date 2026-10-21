@@ -112,7 +112,7 @@ view:close()
 
 ## 视图
 
-UI 工具包运行编译后的 MicroTS 视图。视图由 BVIR 程序（`view.bvir`）、编译后的样式表（`styles.bin`）和烘焙好的字体图集（`font-<slot>.bin`）组成，由 MicroTS 编译器从 MicroTS 源码生成。crate `barracuda-ui-runtime` 读取 BVIR，把它挂载到一个内置的 PocketJS 核心树中，并在值变化时重新求值这棵树。为某块显示屏构建的视图带有构建时解出的矩形：标为 static 的元素在挂载时直接取得自己的矩形，从不进入布局求解器；标为 formula 的元素按自己的 inset 和尺寸计算矩形，与 PocketJS 生成的视图相同。
+UI 工具包运行编译后的 MicroTS 视图。视图由 BVIR 程序（`view.bvir`）、编译后的样式表（`styles.bin`）和烘焙好的字体图集（`font-<slot>.bin`）组成，由 MicroTS 编译器从 MicroTS 源码生成。crate `barracuda-ui-runtime` 读取 BVIR，把它挂载到一个内置的 PocketJS 核心树中，并在值变化时重新求值这棵树。值变化后它还会像网页那样让文字换行：比可用宽度更宽的文字用核心的 `wrap_text` 在词与词之间断行，然后重新布局。可用宽度是元素自身的宽度（当它比父元素窄、由别的因素决定时，例如 `flex-1 min-w-0` 分到的份额），否则是父元素内部的宽度；`UiSession::texts` 报告的是原样的文字。为某块显示屏构建的视图带有构建时解出的矩形：标为 static 的元素在挂载时直接取得自己的矩形，从不进入布局求解器；标为 formula 的元素按自己的 inset 和尺寸计算矩形，与 PocketJS 生成的视图相同。
 
 `UiService::open` 把应用的视图挂载到应用层，
 `UiService::open_on` 把视图挂载到指定的 `Layer`；两者都返回一个 `UiSession`，由呈现该视图的一方持有。它的 `ViewChannel` 是 `Send + Sync` 的那一半，供驱动视图的代码在任意任务上使用：`ViewChannel::set` 写入一个 `ViewValue`，
@@ -246,6 +246,7 @@ plugins:
 | `icons` | 从 `resources/icons/svg` 构建图标字体和码位表 |
 | `view` | 从 `resources/view/app.tsx` 及其 `app.d.ts` 契约构建系统视图；它不带图集 |
 | `examples` | 把 `resources/examples/` 中的示例可安装应用构建到 `crates/appkit/tests/fixtures/<id>.bapp/` |
+| `wrap` | 把 `crates/runtime/tests/fixtures/wrap/` 中的视图构建到 `crates/runtime/tests/fixtures/wrap.bapp/`，供 UI 运行时的文字换行测试使用 |
 | `baked-360`、`baked-320` | 把 `crates/runtime/tests/fixtures/baked/` 中的视图分别为 360 × 360 和 320 × 240 的显示屏构建到 `crates/runtime/tests/fixtures/baked-<size>.bapp/`；UI 运行时的测试检查它们携带的矩形就是设备会解出的矩形 |
 
 `resources/build-app.ts` 从源码构建应用容器；内置应用插件对自己的 `resources/app` 运行它。内置应用不带字体，使用系统字体绘制。示例则像来自其他地方的应用那样烘焙自己的字体：用 Noto Sans SC 覆盖 ASCII 以外的字符，用图标字体中的 `\uE0xx` 转义来指定系统图标，并且只烘焙 24 px 及以上字号的数字和图标。使用 `--target <width>x<height>[@<density>]` 时，它为某一块显示屏构建应用，详见[应用格式](/zh/plugins/app-manager/app-format)中的“为某块显示屏构建”。视图中的图标是 `"\uE008"` 这样的转义，其码位固定在 `resources/icons/codepoints.json` 中。

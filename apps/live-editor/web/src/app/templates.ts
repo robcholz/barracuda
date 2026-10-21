@@ -30,7 +30,7 @@ const POCKET = (title: string) =>
         entry: "app.tsx",
         framework: "solid",
         viewport: {
-          fixed: { logical: [360, 360], presentation: "integer-fit" },
+          fixed: { logical: [135, 135], presentation: "integer-fit" },
         },
         aot: true,
       },
@@ -63,8 +63,8 @@ import { message } from "./app";
 
 export default function App() {
   return (
-    <View class="w-full h-full flex-col items-center justify-center bg-[#09090B]">
-      <Text class="text-xl text-[#FAFAFA]">{message()}</Text>
+    <View class="w-full h-full flex-col items-center justify-center px-[16px] bg-[#09090B]">
+      <Text class="text-xl text-[#FAFAFA] text-center">{message()}</Text>
     </View>
   );
 }
