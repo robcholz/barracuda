@@ -104,7 +104,7 @@ const DEFAULT_MAX_IMAGES_IN_CONTEXT: usize = 2;
 pub struct InputModalities {
     /// JPEG, PNG, GIF and WebP images, sent as image blocks.
     pub image: bool,
-    /// PDF documents, sent as document blocks (Anthropic-compatible only).
+    /// PDF documents, sent as document blocks (Anthropic only).
     pub pdf: bool,
 }
 

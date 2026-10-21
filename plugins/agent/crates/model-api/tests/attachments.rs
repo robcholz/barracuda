@@ -62,8 +62,8 @@ fn sent_body(
     files: Option<&ScopedVfs>,
 ) -> String {
     let reply = match config.backend {
-        BackendKind::OpenAiCompatible => OPENAI_REPLY,
-        BackendKind::AnthropicCompatible => ANTHROPIC_REPLY,
+        BackendKind::OpenAi => OPENAI_REPLY,
+        BackendKind::Anthropic => ANTHROPIC_REPLY,
     };
     let stack = ScriptedStack::new([ScriptStep::json(200, reply)]);
     let mut api = ModelApi::new(ClientFactory::from_network(&stack, &stack));
@@ -99,11 +99,7 @@ fn openai_inlines_the_newest_images_and_names_every_other_attachment() {
                 part("image", "/workspace/cache/d.gif", "image/gif", 16),
             ]),
         ];
-        let body = sent_body(
-            config(BackendKind::OpenAiCompatible, |_| {}),
-            &messages,
-            Some(&files),
-        );
+        let body = sent_body(config(BackendKind::OpenAi, |_| {}), &messages, Some(&files));
         assert_eq!(
             body,
             format!(
@@ -137,7 +133,7 @@ fn oversized_missing_unrecognized_and_disabled_images_become_placeholders() {
             part("image", "/workspace/cache/photo.heic", "image/heic", 22),
         ])];
         let body: Value = serde_json::from_str(&sent_body(
-            config(BackendKind::OpenAiCompatible, |config| {
+            config(BackendKind::OpenAi, |config| {
                 config.image_max_bytes = 64;
             }),
             &messages,
@@ -161,7 +157,7 @@ fn oversized_missing_unrecognized_and_disabled_images_become_placeholders() {
             18,
         )])];
         let body: Value = serde_json::from_str(&sent_body(
-            config(BackendKind::OpenAiCompatible, |config| {
+            config(BackendKind::OpenAi, |config| {
                 config.input_modalities.image = false;
             }),
             &messages,
@@ -177,7 +173,7 @@ fn oversized_missing_unrecognized_and_disabled_images_become_placeholders() {
 
         // A request without a filesystem names every attachment.
         let body: Value = serde_json::from_str(&sent_body(
-            config(BackendKind::OpenAiCompatible, |_| {}),
+            config(BackendKind::OpenAi, |_| {}),
             &messages,
             None,
         ))
@@ -213,7 +209,7 @@ fn only_newest_images_count_toward_the_limit() {
             ]),
         ];
         let body: Value = serde_json::from_str(&sent_body(
-            config(BackendKind::OpenAiCompatible, |config| {
+            config(BackendKind::OpenAi, |config| {
                 config.max_images_in_context = 1;
             }),
             &messages,
@@ -251,7 +247,7 @@ fn anthropic_inlines_images_and_pdfs_as_base64_blocks() {
             ]),
         ];
         let body = sent_body(
-            config(BackendKind::AnthropicCompatible, |config| {
+            config(BackendKind::Anthropic, |config| {
                 config.input_modalities = InputModalities {
                     image: true,
                     pdf: true,
@@ -277,12 +273,9 @@ fn anthropic_inlines_images_and_pdfs_as_base64_blocks() {
             )
         );
 
-        // PDFs stay names while the modality is off, and on OpenAI-compatible
+        // PDFs stay names while the modality is off, and on OpenAI
         // backends, which take no documents.
-        for (backend, pdf) in [
-            (BackendKind::AnthropicCompatible, false),
-            (BackendKind::OpenAiCompatible, true),
-        ] {
+        for (backend, pdf) in [(BackendKind::Anthropic, false), (BackendKind::OpenAi, true)] {
             let body: Value = serde_json::from_str(&sent_body(
                 config(backend, |config| config.input_modalities.pdf = pdf),
                 &messages,
@@ -311,11 +304,7 @@ fn anthropic_body_without_attachments_keeps_its_shape() {
             &json!({"role": "tool", "tool_call_id": "c1", "content": "12:00", "is_error": false}),
         ),
     ];
-    let body = sent_body(
-        config(BackendKind::AnthropicCompatible, |_| {}),
-        &messages,
-        None,
-    );
+    let body = sent_body(config(BackendKind::Anthropic, |_| {}), &messages, None);
     assert_eq!(
         body,
         concat!(
@@ -355,7 +344,7 @@ fn openai_tool_images_follow_the_tool_results_in_a_user_message() {
         ])
         .await;
         let body = sent_body(
-            config(BackendKind::OpenAiCompatible, |_| {}),
+            config(BackendKind::OpenAi, |_| {}),
             &tool_round(),
             Some(&files),
         );
@@ -381,7 +370,7 @@ fn anthropic_tool_results_carry_their_images() {
     block_on(async {
         let files = files(&[("/workspace/cache/shot.png", PNG)]).await;
         let body = sent_body(
-            config(BackendKind::AnthropicCompatible, |_| {}),
+            config(BackendKind::Anthropic, |_| {}),
             &tool_round(),
             Some(&files),
         );
@@ -420,7 +409,7 @@ fn tool_images_count_toward_the_limit() {
         )])];
         messages.extend(tool_round());
         let body: Value = serde_json::from_str(&sent_body(
-            config(BackendKind::AnthropicCompatible, |config| {
+            config(BackendKind::Anthropic, |config| {
                 config.max_images_in_context = 1;
             }),
             &messages,

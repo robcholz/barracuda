@@ -16,7 +16,7 @@ use serde_json::json;
 fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a, ScriptedStack, ScriptedStack> {
     let mut api = ModelApi::new(ClientFactory::from_network(stack, stack));
     api.set_config(ModelApiConfig::new(
-        BackendKind::OpenAiCompatible,
+        BackendKind::OpenAi,
         "secret",
         "model",
         "http://llm.test/v1",
@@ -126,12 +126,8 @@ fn non_success_stream_surfaces_status_and_body() {
 fn stalled_stream_body_times_out_after_the_response_head() {
     let stack = ScriptedStack::new([ScriptStep::pending_after_headers(200, "text/event-stream")]);
     let mut api = ModelApi::new(ClientFactory::from_network(&stack, &stack));
-    let mut config = ModelApiConfig::new(
-        BackendKind::OpenAiCompatible,
-        "secret",
-        "model",
-        "http://llm.test/v1",
-    );
+    let mut config =
+        ModelApiConfig::new(BackendKind::OpenAi, "secret", "model", "http://llm.test/v1");
     config.timeout_ms = 1;
     api.set_config(config).unwrap();
     let messages = [ChatMessage::new(&json!({"role":"user","content":"hi"}))];

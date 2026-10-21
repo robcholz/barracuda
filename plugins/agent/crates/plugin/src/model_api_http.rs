@@ -97,7 +97,7 @@ impl SetApiEndpoint {
 
 /// `GET` [`STATUS_API_PATH`]:
 /// `{"configured":bool,"default":Model|null,"purposes":{"root_agent":Model|null,"sub_agent":…,"memory":…,"compaction":…}}`
-/// with `Model` = `{"backend":"openai_compatible"|"anthropic_compatible","model":"…","base_url":"…"}`.
+/// with `Model` = `{"backend":"openai"|"anthropic","model":"…","base_url":"…"}`.
 /// A purpose is `null` when it has no model of its own and uses the default.
 /// API keys are never reported.
 pub(crate) struct StatusEndpoint(Rc<Mutex<NoopRawMutex, ModelApiManager>>);
@@ -348,17 +348,17 @@ impl SetApiRequest {
 
 #[derive(Clone, Deserialize)]
 enum SetApiBackend {
-    #[serde(rename = "openai_compatible")]
-    OpenAiCompatible,
-    #[serde(rename = "anthropic_compatible")]
-    AnthropicCompatible,
+    #[serde(rename = "openai")]
+    OpenAi,
+    #[serde(rename = "anthropic")]
+    Anthropic,
 }
 
 impl From<SetApiBackend> for BackendKind {
     fn from(value: SetApiBackend) -> Self {
         match value {
-            SetApiBackend::OpenAiCompatible => Self::OpenAiCompatible,
-            SetApiBackend::AnthropicCompatible => Self::AnthropicCompatible,
+            SetApiBackend::OpenAi => Self::OpenAi,
+            SetApiBackend::Anthropic => Self::Anthropic,
         }
     }
 }
@@ -472,7 +472,7 @@ mod tests {
             "image_max_bytes": 1048576,
             "input_modalities": {"image": true, "pdf": false},
             "max_images_in_context": 2,
-            "backend": "openai_compatible",
+            "backend": "openai",
             "purpose": "root_agent",
             "default": true,
             "api_key": "secret",
@@ -485,7 +485,7 @@ mod tests {
             "image_max_bytes": 1048576,
             "input_modalities": {"image": true, "pdf": true},
             "max_images_in_context": 3,
-            "backend": "anthropic_compatible",
+            "backend": "anthropic",
             "purpose": "memory",
             "default": false,
             "api_key": "secret",
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn a_stored_model_without_attachment_settings_loads_with_their_defaults() {
-        let stored = br#"{"backend":"openai_compatible","api_key":"key","model":"m","base_url":"https://example.invalid/v1","timeout_ms":1,"max_tokens":2,"image_max_bytes":3}"#;
+        let stored = br#"{"backend":"openai","api_key":"key","model":"m","base_url":"https://example.invalid/v1","timeout_ms":1,"max_tokens":2,"image_max_bytes":3}"#;
         let api: barracuda_model_api::ModelApiConfig =
             serde_json::from_slice(stored).expect("stored model decodes");
         assert_eq!(
@@ -547,7 +547,7 @@ mod tests {
     #[test]
     fn requests_without_attachment_settings_are_rejected() {
         let endpoint = SetApiEndpoint::with_handler(|_api, _purpose, _default| Ok(()));
-        let body = br#"[{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"https://example.invalid/v1"}]"#;
+        let body = br#"[{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"backend":"openai","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"https://example.invalid/v1"}]"#;
 
         let response = futures_lite::future::block_on(
             endpoint.handle(HttpRequest::new(HttpMethod::Post, body.to_vec())),
@@ -564,8 +564,8 @@ mod tests {
             RecordingPersistence(Rc::clone(&persisted)),
             barracuda_agent_runtime::ModelApiManager::default(),
         );
-        let first = br#"[{"timeout_ms":1,"max_tokens":2,"image_max_bytes":3,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"root-key","model":"root","base_url":"https://root.example/v1"}]"#;
-        let second = br#"[{"timeout_ms":4,"max_tokens":5,"image_max_bytes":6,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"anthropic_compatible","purpose":"memory","default":false,"api_key":"memory-key","model":"memory","base_url":"https://memory.example/v1"}]"#;
+        let first = br#"[{"timeout_ms":1,"max_tokens":2,"image_max_bytes":3,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"openai","purpose":"root_agent","default":true,"api_key":"root-key","model":"root","base_url":"https://root.example/v1"}]"#;
+        let second = br#"[{"timeout_ms":4,"max_tokens":5,"image_max_bytes":6,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"anthropic","purpose":"memory","default":false,"api_key":"memory-key","model":"memory","base_url":"https://memory.example/v1"}]"#;
 
         for body in [first.as_slice(), second.as_slice()] {
             let response = futures_lite::future::block_on(
@@ -625,7 +625,7 @@ mod tests {
     fn model_configuration_round_trips_through_plugin_kv() {
         let mut configuration = barracuda_agent_runtime::ModelApiManager::default();
         let mut root = barracuda_model_api::ModelApiConfig::new(
-            barracuda_model_api::BackendKind::OpenAiCompatible,
+            barracuda_model_api::BackendKind::OpenAi,
             "root-key",
             "root",
             "https://root.example/v1",
@@ -635,7 +635,7 @@ mod tests {
             .set_api(root, ApiPurpose::RootAgent, true)
             .expect("set root API");
         let memory = barracuda_model_api::ModelApiConfig::new(
-            barracuda_model_api::BackendKind::AnthropicCompatible,
+            barracuda_model_api::BackendKind::Anthropic,
             "memory-key",
             "memory",
             "https://memory.example/v1",
@@ -694,7 +694,7 @@ mod tests {
     #[test]
     fn unknown_fields_are_rejected() {
         let endpoint = SetApiEndpoint::with_handler(|_api, _purpose, _default| Ok(()));
-        let body = br#"[{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"https://example.invalid/v1","extra":true}]"#;
+        let body = br#"[{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"input_modalities":{"image":true,"pdf":false},"max_images_in_context":2,"backend":"openai","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"https://example.invalid/v1","extra":true}]"#;
 
         let response = futures_lite::future::block_on(
             endpoint.handle(HttpRequest::new(HttpMethod::Post, body.to_vec())),
@@ -728,7 +728,7 @@ mod tests {
     fn has_model_counts_explicit_and_default_bindings() {
         let api = |model: &str| {
             barracuda_model_api::ModelApiConfig::new(
-                barracuda_model_api::BackendKind::OpenAiCompatible,
+                barracuda_model_api::BackendKind::OpenAi,
                 "key",
                 model,
                 "https://example.invalid/v1",
@@ -758,7 +758,7 @@ mod tests {
 
         for base_url in ["not a url", "ftp://example.invalid/v1", "https://"] {
             let body = alloc::format!(
-                r#"[{{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"input_modalities":{{"image":true,"pdf":false}},"max_images_in_context":2,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"{base_url}"}}]"#
+                r#"[{{"timeout_ms":1,"max_tokens":1,"image_max_bytes":1,"input_modalities":{{"image":true,"pdf":false}},"max_images_in_context":2,"backend":"openai","purpose":"root_agent","default":true,"api_key":"secret","model":"model","base_url":"{base_url}"}}]"#
             );
             let response = futures_lite::future::block_on(
                 endpoint.handle(HttpRequest::new(HttpMethod::Post, body.into_bytes())),
@@ -789,8 +789,9 @@ mod tests {
             endpoint.handle(HttpRequest::new(HttpMethod::Post, VALID_JSON.to_vec())),
         );
         assert_eq!(response.status(), 204);
-        let root = r#"{"backend":"openai_compatible","model":"root-model","base_url":"https://example.invalid/v1"}"#;
-        let memory = r#"{"backend":"anthropic_compatible","model":"memory-model","base_url":"https://example.invalid/v1"}"#;
+        let root =
+            r#"{"backend":"openai","model":"root-model","base_url":"https://example.invalid/v1"}"#;
+        let memory = r#"{"backend":"anthropic","model":"memory-model","base_url":"https://example.invalid/v1"}"#;
         let reported = get();
         assert_eq!(
             reported,

@@ -64,7 +64,7 @@ impl ToolHandler for TimeNowTool {
 /// A test LLM config; its base URL is never dialed (HTTP is the scripted double).
 fn scripted_llm() -> ModelApiConfig {
     ModelApiConfig::new(
-        BackendKind::OpenAiCompatible,
+        BackendKind::OpenAi,
         "sk-example",
         "gpt-example",
         "http://example.invalid",

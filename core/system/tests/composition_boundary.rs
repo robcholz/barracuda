@@ -49,7 +49,11 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(system.contains("take_removable_storage()"));
     assert!(system.contains("start_removable_storage_task"));
     assert!(system.contains("detach(&mount_point)"));
-    assert!(system.contains("$manager.register_all()"));
+    assert!(
+        system.contains("barracuda_plugin_selection::register_plugins!(plugins, plugin_context)")
+    );
+    let plugin_selection = std::fs::read_to_string(root.join("tools/plugin-tool/src/lib.rs"))?;
+    assert!(plugin_selection.contains("$manager.register_all()?;"));
     assert!(system.contains("plugins.start()"));
     assert!(system.contains("plugins.install_vfs(global_namespace().await)"));
     assert!(!system.contains("StorageNotConstructed"));
@@ -94,8 +98,10 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
         assert!(!plugin_api.contains(duplicate_hal));
     }
 
+    let plugin_selection = std::fs::read_to_string(root.join("tools/plugin-tool/src/lib.rs"))?;
     assert!(
-        system.contains("::new(&mut plugin_context)"),
+        system.contains("register_plugins!(plugins, plugin_context)")
+            && plugin_selection.contains("::new(&mut $context)"),
         "System constructs Plugins from the shared PluginContext"
     );
 

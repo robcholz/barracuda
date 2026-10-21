@@ -1,4 +1,4 @@
-//! Anthropic-compatible backend.
+//! Anthropic backend.
 //!
 //! Converts OpenAI-style messages/tools to the Anthropic Messages API shape and
 //! parses the Anthropic content-block response back into a [`LlmResponse`].

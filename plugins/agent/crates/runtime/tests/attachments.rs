@@ -49,12 +49,7 @@ fn an_appended_image_reaches_the_model_inline_and_the_audio_by_name() {
     .expect("runtime builds");
     runtime
         .set_api(
-            ModelApiConfig::new(
-                BackendKind::OpenAiCompatible,
-                "key",
-                "model",
-                "http://llm.test/v1",
-            ),
+            ModelApiConfig::new(BackendKind::OpenAi, "key", "model", "http://llm.test/v1"),
             ApiPurpose::RootAgent,
             true,
         )
@@ -205,12 +200,7 @@ fn a_tool_image_reaches_the_next_request_and_the_call_knows_its_session() {
     runtime.start_all().expect("tools start");
     runtime
         .set_api(
-            ModelApiConfig::new(
-                BackendKind::OpenAiCompatible,
-                "key",
-                "model",
-                "http://llm.test/v1",
-            ),
+            ModelApiConfig::new(BackendKind::OpenAi, "key", "model", "http://llm.test/v1"),
             ApiPurpose::RootAgent,
             true,
         )

@@ -53,7 +53,7 @@ name = "Time tool"
 
 [model]
 mode = "scripted"          # scripted | recorded | none
-# backend = "anthropic_compatible"  # recorded only; default openai_compatible
+# backend = "anthropic"  # recorded only; default openai
 
 [[model.responses]]        # one per /chat/completions call, in order
 tool_calls = [{ name = "tool_load", arguments = { group_id = "time" } }]
@@ -147,7 +147,7 @@ bytes`，每一行结果都会显示该场景的峰值。`[memory] heap_high_wat
 
 ### scripted、recorded 和 none
 
-- `scripted` 根据 `[[model.responses]]` 合成一个兼容 OpenAI 的流式录制带；它完全离线且是确定性的。
+- `scripted` 根据 `[[model.responses]]` 合成一个 OpenAI 流式录制带；它完全离线且是确定性的。
 - `recorded` 回放 `tapes/<scenario>.jsonl`。针对真实的服务商录制或刷新它（请求体和凭据从不被存储）：
 
   ```bash

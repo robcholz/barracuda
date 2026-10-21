@@ -75,11 +75,11 @@ export const mount = definePage((context) => {
               kind: "radio",
               name: "backend",
               label: { zh: "接口协议", en: "API format" },
-              value: "openai_compatible",
+              value: "openai",
               options: [
                 {
-                  value: "openai_compatible",
-                  label: { zh: "OpenAI 兼容", en: "OpenAI-compatible" },
+                  value: "openai",
+                  label: { zh: "OpenAI", en: "OpenAI" },
                   hint: {
                     zh: "Chat Completions，适用于多数服务商",
                     en: "Chat Completions; works with most providers",
@@ -87,8 +87,8 @@ export const mount = definePage((context) => {
                   icon: MARK_OPENAI,
                 },
                 {
-                  value: "anthropic_compatible",
-                  label: { zh: "Anthropic 兼容", en: "Anthropic-compatible" },
+                  value: "anthropic",
+                  label: { zh: "Anthropic", en: "Anthropic" },
                   hint: { zh: "Messages 接口", en: "Messages API" },
                   icon: MARK_ANTHROPIC,
                 },

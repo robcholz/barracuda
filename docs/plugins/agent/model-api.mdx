@@ -1,10 +1,10 @@
 ---
 title: "barracuda-model-api"
 sidebarTitle: "Model API"
-description: "Call OpenAI- and Anthropic-compatible models for chat, streaming, and structured JSON output."
+description: "Call OpenAI and Anthropic models for chat, streaming, and structured JSON output."
 ---
 
-LLM client: OpenAI- and Anthropic-compatible chat and structured JSON output
+LLM client: OpenAI and Anthropic chat and structured JSON output
 over an Agent-owned persistent HTTP transport, with the image and PDF
 attachments a conversation references inlined into each request.
 
@@ -20,7 +20,7 @@ The standalone LLM surface can be reused independently of agent execution.
 | `ModelApi::chat_json` | `ChatRequest` + `StaticOutputSchema` | `ChatJsonResponse` (parsed `T` + tool calls) |
 | `ModelApi::chat_stream` | `ChatRequest` | `ChatStream` of `ChatStreamEvent` values containing `barracuda_runtime_utils::stream::StreamPart`; the stream exclusively borrows the HTTP transport until Drop |
 
-Both `openai_compatible` and `anthropic_compatible` backends are supported; the
+Both `openai` and `anthropic` backends are supported; the
 crate converts the unified request shape (and tool definitions, tool-call /
 tool-result roles, structured-output config) into each provider's wire format.
 
@@ -31,7 +31,7 @@ User and tool messages reference files by `media` content parts
 before its first attempt, the newest attachments it may inline from
 `ChatRequest::files`: JPEG, PNG, GIF and WebP images (recognized by their
 bytes) while `input_modalities.image` is on, and PDFs on the
-Anthropic-compatible backend while `input_modalities.pdf` is on, at most
+Anthropic backend while `input_modalities.pdf` is on, at most
 `max_images_in_context` files of at most `image_max_bytes` each. The body
 encoder base64-encodes them into the request body in place. Every other
 attachment is sent as a text placeholder naming the file, its type, size and

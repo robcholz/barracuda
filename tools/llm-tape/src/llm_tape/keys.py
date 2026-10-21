@@ -19,7 +19,7 @@ from typing import Any
 def conversation_key(body: bytes) -> str | None:
     """Key of the request's conversation, or None for non-chat bodies.
 
-    Understands OpenAI-compatible and Anthropic Messages request bodies; the
+    Understands OpenAI and Anthropic Messages request bodies; the
     first user message's text (string content or text blocks) is hashed.
     """
 

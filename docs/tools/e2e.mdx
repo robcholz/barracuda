@@ -73,7 +73,7 @@ name = "Time tool"
 
 [model]
 mode = "scripted"          # scripted | recorded | none
-# backend = "anthropic_compatible"  # recorded only; default openai_compatible
+# backend = "anthropic"  # recorded only; default openai
 
 [[model.responses]]        # one per /chat/completions call, in order
 tool_calls = [{ name = "tool_load", arguments = { group_id = "time" } }]
@@ -195,7 +195,7 @@ host figure is an upper bound on the device's.
 
 ### Scripted, recorded, and none
 
-- `scripted` synthesizes an OpenAI-compatible streaming tape from
+- `scripted` synthesizes an OpenAI streaming tape from
   `[[model.responses]]`; it is fully offline and deterministic.
 - `recorded` replays `tapes/<scenario>.jsonl`. Record or refresh it against a
   live provider (request bodies and credentials are never stored):

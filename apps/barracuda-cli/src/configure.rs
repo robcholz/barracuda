@@ -88,44 +88,52 @@ enum DefaultValue {
 const CONFIGURATIONS: &[Configuration] = &[
     Configuration {
         id: "agent",
-        title: "模型配置",
+        title: "Models",
         endpoint: "/api/model-api",
-        description: "为指定 Agent 用途注册模型。每次提交一个模型配置。",
+        description: "Register a model for one Agent purpose. Each submission sends one model.",
         fields: &[
-            Field::new("backend", "接口协议", FieldKind::Choice)
-                .with_options(&["openai_compatible", "anthropic_compatible"]),
-            Field::new("purpose", "用途", FieldKind::Choice).with_options(&[
+            Field::new("backend", "API format", FieldKind::Choice)
+                .with_options(&["openai", "anthropic"]),
+            Field::new("purpose", "Purpose", FieldKind::Choice).with_options(&[
                 "root_agent",
                 "sub_agent",
                 "memory",
                 "compaction",
             ]),
-            Field::new("default", "设为该用途默认模型", FieldKind::Boolean)
-                .with_default(DefaultValue::Boolean(true)),
+            Field::new(
+                "default",
+                "Make it the default model for this purpose",
+                FieldKind::Boolean,
+            )
+            .with_default(DefaultValue::Boolean(true)),
             Field::new("base_url", "API Base URL", FieldKind::Url),
-            Field::new("model", "模型名称", FieldKind::Text),
+            Field::new("model", "Model", FieldKind::Text),
             Field::new("api_key", "API Key", FieldKind::Password),
-            Field::new("timeout_ms", "请求超时（毫秒）", FieldKind::Number)
+            Field::new("timeout_ms", "Request timeout (ms)", FieldKind::Number)
                 .with_default(DefaultValue::Number(120_000)),
-            Field::new("max_tokens", "最大输出 tokens", FieldKind::Number)
+            Field::new("max_tokens", "Max output tokens", FieldKind::Number)
                 .with_default(DefaultValue::Number(8_192)),
-            Field::new("image_max_bytes", "图片大小上限（字节）", FieldKind::Number)
-                .with_default(DefaultValue::Number(524_288)),
+            Field::new(
+                "image_max_bytes",
+                "Image size limit (bytes)",
+                FieldKind::Number,
+            )
+            .with_default(DefaultValue::Number(524_288)),
             Field::new(
                 "input_modalities.image",
-                "模型直接看图片",
+                "Send images to the model",
                 FieldKind::Boolean,
             )
             .with_default(DefaultValue::Boolean(true)),
             Field::new(
                 "input_modalities.pdf",
-                "PDF 作为文档发给模型",
+                "Send PDFs to the model as documents",
                 FieldKind::Boolean,
             )
             .with_default(DefaultValue::Boolean(false)),
             Field::new(
                 "max_images_in_context",
-                "上下文中的图片（张）",
+                "Images in context",
                 FieldKind::Number,
             )
             .with_default(DefaultValue::Number(2)),
@@ -134,9 +142,9 @@ const CONFIGURATIONS: &[Configuration] = &[
     },
     Configuration {
         id: "agent-websearch",
-        title: "网页搜索",
+        title: "Web search",
         endpoint: "/api/tavily",
-        description: "配置 Tavily 搜索服务；配置保存到设备存储。",
+        description: "Configure the Tavily search service; the settings are saved on the device.",
         fields: &[
             Field::new("api_key", "Tavily API Key", FieldKind::Password),
             Field::new("api_base", "API Base URL", FieldKind::Url)
@@ -148,7 +156,7 @@ const CONFIGURATIONS: &[Configuration] = &[
         id: "imessage-qq",
         title: "QQ",
         endpoint: "/api/gateway/qq",
-        description: "配置 QQ Bot 消息通道；替换当前运行时通道。",
+        description: "Configure the QQ Bot channel; replaces the running channel.",
         fields: &[
             Field::new("app_id", "App ID", FieldKind::Text),
             Field::new("access_token", "Access Token", FieldKind::Password),
@@ -159,19 +167,19 @@ const CONFIGURATIONS: &[Configuration] = &[
     },
     Configuration {
         id: "imessage-wechat",
-        title: "微信",
+        title: "WeChat",
         endpoint: "/api/gateway/wechat",
-        description: "配置微信消息通道；替换当前运行时通道。",
+        description: "Configure the WeChat channel; replaces the running channel.",
         fields: &[
             Field::new("token", "Token", FieldKind::Password),
             Field::new("api_base", "API Base URL", FieldKind::Url)
                 .with_default(DefaultValue::Text("https://ilinkai.weixin.qq.com")),
             Field::new("app_id", "App ID", FieldKind::Text).with_default(DefaultValue::Text("bot")),
-            Field::new("client_version", "客户端版本", FieldKind::Text)
+            Field::new("client_version", "Client version", FieldKind::Text)
                 .with_default(DefaultValue::Text("131329")),
             Field::new("x_wechat_uin", "X-Wechat-UIN", FieldKind::Text)
                 .with_default(DefaultValue::Text("MA==")),
-            Field::new("route_tag", "路由标签（可选）", FieldKind::Text).optional(),
+            Field::new("route_tag", "Route tag (optional)", FieldKind::Text).optional(),
         ],
         batch: false,
     },
@@ -179,19 +187,19 @@ const CONFIGURATIONS: &[Configuration] = &[
         id: "imessage-bluebubble",
         title: "BlueBubbles",
         endpoint: "/api/gateway/bluebubbles",
-        description: "连接 BlueBubbles 服务器；替换当前运行时通道。",
+        description: "Connect to a BlueBubbles server; replaces the running channel.",
         fields: &[
-            Field::new("server_url", "服务器 URL", FieldKind::Url),
-            Field::new("password", "服务器密码", FieldKind::Password),
-            Field::new("use_private_api", "使用 Private API", FieldKind::Boolean)
+            Field::new("server_url", "Server URL", FieldKind::Url),
+            Field::new("password", "Server password", FieldKind::Password),
+            Field::new("use_private_api", "Use the Private API", FieldKind::Boolean)
                 .with_default(DefaultValue::Boolean(true)),
             Field::new(
                 "stream_edit_min_delta_bytes",
-                "流式编辑最小增量（字节）",
+                "Minimum streaming edit delta (bytes)",
                 FieldKind::Number,
             )
             .with_default(DefaultValue::Number(128)),
-            Field::new("stream_max_edits", "最大流式编辑次数", FieldKind::Number)
+            Field::new("stream_max_edits", "Max streaming edits", FieldKind::Number)
                 .with_default(DefaultValue::Number(4)),
         ],
         batch: false,
@@ -200,14 +208,14 @@ const CONFIGURATIONS: &[Configuration] = &[
         id: "imessage-telegram",
         title: "Telegram",
         endpoint: "/api/gateway/telegram",
-        description: "配置 Telegram Bot；替换当前运行时通道。",
+        description: "Configure the Telegram Bot; replaces the running channel.",
         fields: &[
             Field::new("token", "Bot Token", FieldKind::Password),
             Field::new("api_base", "API Base URL", FieldKind::Url)
                 .with_default(DefaultValue::Text("https://api.telegram.org")),
             Field::new(
                 "draft_min_delta_bytes",
-                "草稿最小增量（字节）",
+                "Minimum draft delta (bytes)",
                 FieldKind::Number,
             )
             .with_default(DefaultValue::Number(24)),
@@ -218,7 +226,7 @@ const CONFIGURATIONS: &[Configuration] = &[
         id: "imessage-inkbox",
         title: "Inkbox",
         endpoint: "/api/gateway/inkbox",
-        description: "配置 Inkbox 身份与服务；替换当前运行时通道。",
+        description: "Configure the Inkbox identity and service; replaces the running channel.",
         fields: &[
             Field::new("api_key", "API Key", FieldKind::Password),
             Field::new("identity_id", "Identity ID", FieldKind::Text),

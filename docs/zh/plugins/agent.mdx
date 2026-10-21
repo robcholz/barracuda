@@ -77,7 +77,7 @@ Action。Workflow 插件保持独立于 Agent；Agent 是能力的使用方。
 `BackgroundToolHandler`），其调用返回一个已接受的输出并继续运行。是否为后台工具属于工具定义的一部分，而不是每次调用时的选择。
 
 每次调用除了参数之外还会收到一个 `ToolContext`；它的 `session` 是该调用所属 Agent 会话的 `SessionId`，对根 Agent 和它的子 Agent 都一样。适配插件用它代表该会话行事，例如在它绑定的对话中作答。
-`ToolOutput` 由 `content`、`ok` 和 `attachments` 组成：`attachments` 是对结果要向模型展示的文件的引用（`ToolOutput::with_attachments`），从不包含文件字节。对话记录把它们保存为工具消息的 `media` 部分，每次请求像处理用户附件一样内联最新的附件；OpenAI 兼容的请求让工具消息保持为文本，并在工具结果之后用一条用户消息附上图片。后台调用的进度和结果会把它们的附件带进传递它们的那条更新消息中。
+`ToolOutput` 由 `content`、`ok` 和 `attachments` 组成：`attachments` 是对结果要向模型展示的文件的引用（`ToolOutput::with_attachments`），从不包含文件字节。对话记录把它们保存为工具消息的 `media` 部分，每次请求像处理用户附件一样内联最新的附件；OpenAI 请求让工具消息保持为文本，并在工具结果之后用一条用户消息附上图片。后台调用的进度和结果会把它们的附件带进传递它们的那条更新消息中。
 
 每个 Agent 拥有一个 `BackgroundToolPool`。这个池比工具低一层：它就是通用的
 `barracuda_runtime_utils::background::BackgroundPool`，用池分配的 id 存储任务，并在旁边保存它从不检查的元数据，传递任务的进度和完成结果，让持有者按 id 等待或移除任务。工具层用 `BackgroundToolCall` 元数据（调用本身、工具的控制钩子和 `toolcall` span）实例化它，并负责所有工具层面的行为。

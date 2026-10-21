@@ -3,7 +3,7 @@
 // nothing, so values only traced look unused there.
 #![cfg_attr(not(target_has_atomic = "ptr"), allow(unused))]
 
-//! `barracuda-model-api` — LLM client: OpenAI-/Anthropic-compatible chat and
+//! `barracuda-model-api` — LLM client: OpenAI/Anthropic chat and
 //! structured JSON output over an injected HTTP transport, with the image and
 //! PDF attachments a conversation references inlined into each request.
 //!

@@ -72,7 +72,7 @@ fn profile_tape_replay(output_file: &Path) -> Result<AllocationStats, Box<dyn st
     let network = ScriptedStack::new(steps);
     let mut api = ModelApi::new(ClientFactory::from_network(&network, &network));
     api.set_config(ModelApiConfig::new(
-        BackendKind::OpenAiCompatible,
+        BackendKind::OpenAi,
         "replay-key",
         "replay-model",
         "http://tape.invalid",

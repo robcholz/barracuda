@@ -17,10 +17,7 @@ use barracuda_model_api::{BackendKind, ModelApiConfig, ParseBackendKindError, Re
 
 fn main() -> anyhow::Result<()> {
     // ---- BackendKind: stable id, Display, and parsing round-trip -----------
-    for kind in [
-        BackendKind::OpenAiCompatible,
-        BackendKind::AnthropicCompatible,
-    ] {
+    for kind in [BackendKind::OpenAi, BackendKind::Anthropic] {
         let id = kind.as_str();
         let shown = format!("{kind}"); // Display
         let parsed = BackendKind::from_str(id)?; // FromStr
@@ -42,7 +39,7 @@ fn main() -> anyhow::Result<()> {
 
     // ---- ModelApiConfig: constructor + every public field -------------------
     let mut config = ModelApiConfig::new(
-        BackendKind::OpenAiCompatible,
+        BackendKind::OpenAi,
         "sk-demo",
         "gpt-4o-mini",
         "https://api.example.com/v1",
