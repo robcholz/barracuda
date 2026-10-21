@@ -22,3 +22,11 @@ peripherals:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO32, dc: GPIO27, reset: GPIO33, spi: display-spi }
       parameters: { controller: ili9342c, width: 320, height: 240, invert-colors: true }
+exposed-io:
+  pins:
+    # Ports B and C (M5Unified `_pin_table_port_bc`). Port A is the internal I2C bus
+    # (G21/G22) and stays unexposed.
+    port-b-g26: { pin: GPIO26 }
+    port-b-g36: { pin: GPIO36 }
+    port-c-g16: { pin: GPIO16 }
+    port-c-g17: { pin: GPIO17 }

@@ -7,3 +7,8 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+exposed-io:
+  pins:
+    # Grove port G26/G32 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g26: { pin: GPIO26 }
+    grove-g32: { pin: GPIO32 }

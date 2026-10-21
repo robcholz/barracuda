@@ -30,3 +30,18 @@ This Board declares no peripherals yet. The network, the Agent, and the
 portal run on it; add its devices to
 `boards/configs/m5stack-atom-echo/board.yml` to drive them. See
 [Peripheral composition](/boards/peripherals).
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g26` | `GPIO26` |
+| `grove-g32` | `GPIO32` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g26", "up")
+print(pin:read())
+```

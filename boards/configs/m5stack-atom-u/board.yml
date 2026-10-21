@@ -7,3 +7,18 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    spi-output:
+      rgb-led-data:
+        # SK6812 on GPIO27 (M5Unified `_pin_table_other0` (RGBLED)).
+        data: GPIO27
+        frequency-hz: 2400000
+  devices:
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb

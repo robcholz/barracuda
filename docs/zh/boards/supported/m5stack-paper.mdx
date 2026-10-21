@@ -31,3 +31,24 @@ cargo image deploy
 | `display` | 电子墨水屏，4.7 英寸 540 x 960 竖屏，16 级灰度（IT8951E 控制器） | [`display`](/zh/plugins/vm-display) |
 
 平台入口在构建任何其他部分之前就把主电源锁存脚 `GPIO2`（`hardware.power-hold`）驱动为高电平，因此不接 USB 时松开电源键后开发板也会保持开机。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO32` |
+| `port-a-sda` | `GPIO25` |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g33` | `GPIO33` |
+| `port-c-g18` | `GPIO18` |
+| `port-c-g19` | `GPIO19` |
+
+`GPIO5` 开关端口的 5 V 供电，没有开放。
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

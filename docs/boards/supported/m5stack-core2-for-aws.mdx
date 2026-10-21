@@ -34,3 +34,22 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 The touch panel reports a 320x280 span: the strip below the screen holds the
 three touch keys. The display implementation's PMIC power-up resets the touch
 controller with the panel.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO33` |
+| `port-a-sda` | `GPIO32` |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g36` | `GPIO36` |
+| `port-c-g13` | `GPIO13` |
+| `port-c-g14` | `GPIO14` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

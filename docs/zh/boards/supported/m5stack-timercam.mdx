@@ -26,6 +26,23 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-timercam/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `status-led` | 指示 LED | — |
 
 平台入口在构建任何其他部分之前就把电池电源锁存脚 `GPIO33`（`hardware.power-hold`）驱动为高电平，因此不接 USB 时开发板也会保持开机。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g4` | `GPIO4` |
+| `grove-g13` | `GPIO13` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g4", "up")
+print(pin:read())
+```

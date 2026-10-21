@@ -31,3 +31,24 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `display` | E-paper display, 4.7-inch 540 x 960 portrait, 16 gray levels (IT8951E controller) | [`display`](/plugins/vm-display) |
 
 The Platform entry drives `GPIO2`, the main power latch (`hardware.power-hold`), high before anything else is built, so the Board stays on without USB power once its power button is released.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO32` |
+| `port-a-sda` | `GPIO25` |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g33` | `GPIO33` |
+| `port-c-g18` | `GPIO18` |
+| `port-c-g19` | `GPIO19` |
+
+`GPIO5` switches the ports' 5 V supply and is not exposed.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

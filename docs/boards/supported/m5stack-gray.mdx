@@ -29,3 +29,22 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g36` | `GPIO36` |
+| `port-c-g16` | `GPIO16` |
+| `port-c-g17` | `GPIO17` |
+
+Port A is the internal I2C bus (`GPIO21` / `GPIO22`), so it is not exposed.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-b-g26", "up")
+print(pin:read())
+```
