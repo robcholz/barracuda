@@ -12,7 +12,22 @@ toolchain:
 native-layout:
   artifact: partitions.csv
 peripherals:
+  io:
+    spi-output:
+      rgb-led-data:
+        # ESP32-S3-DevKitC-1 v1.1: one WS2812 on GPIO38 (Espressif esp_boards
+        # `esp32_s3_devkitc_1`, GRB). v1.0 boards drive it on GPIO48 instead.
+        data: GPIO38
+        frequency-hz: 2400000
   devices:
+    # The WS2812 RGB LED, GRB order (Espressif esp_boards `esp32_s3_devkitc_1`).
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
     # BOOT on GPIO0, active low, with the pull-up Espressif's esp_boards
     # `esp32_s3_devkitc_1` enables.
     buttons:

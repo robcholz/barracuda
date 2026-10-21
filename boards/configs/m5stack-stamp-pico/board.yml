@@ -8,7 +8,22 @@ toolchain:
 native-layout:
   artifact: partitions.csv
 peripherals:
+  io:
+    spi-output:
+      rgb-led-data:
+        # SK6812 on GPIO27 (M5Unified `_pin_table_other0` (RGBLED); EBM `m5stack_stamp_pico`,
+        # GRB).
+        data: GPIO27
+        frequency-hz: 2400000
   devices:
+    # The RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
     # The button on GPIO39, active low with the Board's pull-up (M5Unified
     # `M5Unified::update`); GPIO39 has no internal bias.
     buttons:

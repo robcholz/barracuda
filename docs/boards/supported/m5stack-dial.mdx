@@ -28,10 +28,15 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 | Device | What it is | Lua package |
 | --- | --- | --- |
+| `led-strip` | RGB LED (WS2812, GPIO21) | [`light`](/plugins/vm-led-strip) |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `touch` | Touch controller (FT3267) | — |
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `buttons` | Buttons A (knob press) and B (GPIO42, GPIO0) | — |
+
+This Board describes the Dial with a StampS3. Dial v1.1 carries a Stamp-S3A,
+whose RGB LED is powered through GPIO38; this Board does not drive GPIO38, so
+the LED stays dark on v1.1.
 
 ## Exposed pins
 

@@ -28,8 +28,12 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 | Device | What it is | Lua package |
 | --- | --- | --- |
+| `led-strip` | RGB LED (WS2812, GPIO21) | [`light`](/plugins/vm-led-strip) |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `buttons` | G0 button (GPIO0) | — |
+
+On Cardputer v1.1 the RGB LED takes its supply from GPIO38, the display
+backlight, so it lights only while the backlight is on.
 
 ## Exposed pins
 

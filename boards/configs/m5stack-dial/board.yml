@@ -26,7 +26,22 @@ peripherals:
         mosi: GPIO5
         chip-select: GPIO7
         frequency-hz: 80000000
+    spi-output:
+      rgb-led-data:
+        # StampS3 module WS2812B-2020 on GPIO21 (M5Unified `_pin_table_other0` (RGBLED)).
+        # Dial v1.1 carries a Stamp-S3A, whose LED supply is switched by GPIO38
+        # (docs.m5stack.com K130-V11); this Board does not drive GPIO38.
+        data: GPIO21
+        frequency-hz: 2400000
   devices:
+    # The StampS3's RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
     display:
       implementation: mipi-dbi-display
       bindings:

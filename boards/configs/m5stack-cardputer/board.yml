@@ -17,7 +17,23 @@ peripherals:
         mosi: GPIO35
         chip-select: GPIO37
         frequency-hz: 40000000
+    spi-output:
+      rgb-led-data:
+        # StampS3 module WS2812B-2020 on GPIO21 (M5Unified `_pin_table_other0` (RGBLED);
+        # EBM `m5stack_cardputer`, GRB). On Cardputer v1.1 the LED's supply follows
+        # GPIO38, which the display drives as its backlight (docs.m5stack.com
+        # Cardputer v1.1 pin map), so the LED lights only with the backlight on.
+        data: GPIO21
+        frequency-hz: 2400000
   devices:
+    # The StampS3's RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO38, dc: GPIO34, reset: GPIO33, spi: display-spi }

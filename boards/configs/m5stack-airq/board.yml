@@ -26,7 +26,20 @@ peripherals:
         mosi: GPIO6
         chip-select: GPIO4
         frequency-hz: 40000000
+    spi-output:
+      rgb-led-data:
+        # StampS3 module WS2812B-2020 on GPIO21 (M5Unified `_pin_table_other0` (RGBLED)).
+        data: GPIO21
+        frequency-hz: 2400000
   devices:
+    # The StampS3's RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
     display:
       implementation: epaper-1in54-display
       bindings:

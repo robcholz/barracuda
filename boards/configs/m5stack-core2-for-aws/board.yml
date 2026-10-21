@@ -30,7 +30,21 @@ peripherals:
         mosi: GPIO23
         chip-select: GPIO5
         frequency-hz: 40000000
+    spi-output:
+      led-bar-data:
+        # M5GO-Bottom for AWS: 10 SK6812 LEDs in one chain on GPIO25
+        # (docs.m5stack.com Core2 for AWS pin map, "SK6812*10"; M5Unified `_pin_table_other0` (RGBLED)).
+        data: GPIO25
+        frequency-hz: 2400000
   devices:
+    # The base's two five-LED side bars, one 10-LED chain, GRB order.
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: led-bar-data
+      parameters:
+        led-count: 10
+        color-order: grb
     display:
       # ILI9342C 320x240. LCD power, reset, and backlight are PMIC outputs; the
       # implementation identifies which PMIC is fitted.

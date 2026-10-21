@@ -8,7 +8,22 @@ toolchain:
 native-layout:
   artifact: partitions.csv
 peripherals:
+  io:
+    spi-output:
+      rgb-led-data:
+        # SK6812 on GPIO2 (M5Unified `_pin_table_other0` (RGBLED); EBM `m5stack_stamp_c3u`, GRB).
+        # GPIO2 is a strapping pin sampled only at reset.
+        data: GPIO2
+        frequency-hz: 2400000
   devices:
+    # The RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
     # The button on GPIO9, active low, with the internal pull-up M5Unified
     # enables.
     buttons:

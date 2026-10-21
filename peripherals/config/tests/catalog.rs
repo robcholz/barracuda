@@ -206,7 +206,7 @@ exposed-io:
 }
 
 #[test]
-fn repository_esp32s3_devkit_exposes_runtime_gpio_i2c_and_spi() {
+fn repository_esp32s3_devkit_exposes_runtime_io_beside_its_led() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let board = parse(
         &fs::read_to_string(root.join("boards/configs/esp32s3-devkitc-1/board.yml"))
@@ -225,11 +225,15 @@ fn repository_esp32s3_devkit_exposes_runtime_gpio_i2c_and_spi() {
     let rust = render_board_hal_for_platform(&board, &resolved, &platform)
         .expect("generated ESP32-S3 runtime owner");
     assert_valid_rust(&rust);
-    assert!(rust.contains("hal::RuntimeIo<4, 2, 2, 1, 1, 1, 1>"));
+    // The on-board WS2812 holds SPI2, so only SPI3 joins the runtime pool.
+    assert!(rust.contains("hal::RuntimeIo<4, 2, 1, 1, 1, 1, 1>"));
     assert!(rust.contains("controller_binding_type!(I2C0)"));
     assert!(rust.contains("controller_binding_type!(I2C1)"));
     assert!(rust.contains("controller_binding_type!(SPI2)"));
     assert!(rust.contains("controller_binding_type!(SPI3)"));
+    assert!(rust.contains("pin_binding_type!(GPIO38)"));
+    assert!(rust.contains("runtime_controller_spi3"));
+    assert!(!rust.contains("runtime_controller_spi2"));
     assert!(rust.contains("controller_binding_type!(UART1)"));
     assert!(rust.contains("controller_binding_type!(ADC1)"));
     assert!(rust.contains("runtime_adc_channel!(ADC1_CH0, GPIO1)"));

@@ -28,8 +28,11 @@ cargo image deploy
 
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
+| `led-strip` | RGB LED（WS2812，GPIO21） | [`light`](/zh/plugins/vm-led-strip) |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 | `buttons` | G0 按键（GPIO0） | — |
+
+Cardputer v1.1 的 RGB LED 由显示屏背光引脚 GPIO38 供电，因此只在背光打开时点亮。
 
 ## 可用引脚
 

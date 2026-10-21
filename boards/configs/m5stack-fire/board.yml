@@ -29,7 +29,21 @@ peripherals:
         mosi: GPIO23
         chip-select: GPIO14
         frequency-hz: 40000000
+    spi-output:
+      led-bar-data:
+        # Two five-LED SK6812 side bars, one 10-LED chain on GPIO15 (EBM
+        # `m5stack_fire`, GRB; M5Unified `_pin_table_other0` (RGBLED), board_M5Stack).
+        data: GPIO15
+        frequency-hz: 2400000
   devices:
+    # The base's two five-LED side bars, one 10-LED chain, GRB order.
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: led-bar-data
+      parameters:
+        led-count: 10
+        color-order: grb
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO32, dc: GPIO27, reset: GPIO33, spi: display-spi }
