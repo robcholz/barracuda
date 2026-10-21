@@ -34,6 +34,8 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `inertial-measurement` | Motion sensor (MPU6886) | [`motion`](/plugins/vm-imu) |
 | `power-monitor` | Battery gauge (AXP192 or AXP2101) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `audio` | Audio (NS4168 amplifier, SPM1423 PDM microphone) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
 
 The touch panel reports a 320x280 span: the strip below the screen holds the
 three touch keys. The display implementation's PMIC power-up resets the touch
@@ -44,6 +46,8 @@ measurement registers, and the display keeps its regulators.
 
 On v1.1 units the AXP2101 measures no current; an INA3221 at `40h` senses the
 battery current instead.
+
+The microSD card shares the display's SPI bus through its own chip select.
 
 ## Exposed pins
 

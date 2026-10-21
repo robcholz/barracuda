@@ -29,7 +29,29 @@ peripherals:
         mosi: GPIO39
         chip-select: GPIO41
         frequency-hz: 40000000
+    i2s-stream:
+      audio-stream:
+        # M5Unified `_begin_audio` (board_M5StickS3): MCLK GPIO18, BCK
+        # GPIO17, WS GPIO15, data out GPIO14, data in GPIO16.
+        peripheral: I2S0
+        dma: DMA_CH1
+        bclk: GPIO17
+        ws: GPIO15
+        dout: GPIO14
+        din: GPIO16
+        mclk: GPIO18
+        sample-rate-hz: 16000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
   devices:
+    audio-codec:
+      # ES8311 (18h) on the internal bus; the M5PM1's G3 enables the AW8737
+      # amplifier (M5Unified `_speaker_enabled_cb_sticks3`).
+      implementation: es8311-audio-codec
+      bindings: { control: internal-i2c, stream: audio-stream }
+      parameters:
+        m5pm1-amplifier-pin: 3
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO38, dc: GPIO45, reset: GPIO21, spi: display-spi }

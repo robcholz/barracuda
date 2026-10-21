@@ -24,12 +24,23 @@ peripherals:
         mosi: GPIO5
         chip-select: GPIO7
         frequency-hz: 40000000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` (DinMeter, Cardputer, Cardputer-ADV):
+        # the battery on ADC1 GPIO10 through a divider of two.
+        peripheral: ADC1
+        pin: GPIO10
     spi-output:
       rgb-led-data:
         # StampS3 module WS2812B-2020 on GPIO21 (M5Unified `_pin_table_other0` (RGBLED)).
         data: GPIO21
         frequency-hz: 2400000
   devices:
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 2
     # The StampS3's RGB LED, one LED, GRB order.
     led-strip:
       implementation: ws2812-spi-led-strip

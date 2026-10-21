@@ -32,8 +32,11 @@ cargo image deploy
 | `power-monitor` | 电源监测（INA226） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `real-time-clock` | 实时时钟（RX8130CE） | — |
 | `buttons` | 按键 A、B、C（PI4IOE5V6408 P2、P1、P0） | — |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
 
 按键与显示屏背光共用 `43h` 的 PI4IOE5V6408；每个实现只配置自己的引脚。
+
+microSD 卡通过自己的片选与显示屏共用 SPI 总线。
 
 ## 可用引脚
 

@@ -23,8 +23,20 @@ peripherals:
         peripheral: SPI3
         sck: GPIO18
         mosi: GPIO23
+        # The microSD card's data out; the LCD only listens.
+        miso: GPIO19
         chip-select: GPIO14
         frequency-hz: 40000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5Stack): the microSD card shares
+        # the LCD's bus with its own chip select, GPIO4. 20 MHz stays within
+        # the SD default-speed mode's 25 MHz.
+        peripheral: SPI3
+        sck: GPIO18
+        mosi: GPIO23
+        miso: GPIO19
+        chip-select: GPIO4
+        frequency-hz: 20000000
     spi-output:
       led-bar-data:
         # M5GO base: 10 SK6812 3535 LEDs in one chain on GPIO15 (docs.m5stack.com
@@ -32,6 +44,9 @@ peripherals:
         data: GPIO15
         frequency-hz: 2400000
   devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
     # The M5GO base's two five-LED side bars, one 10-LED chain, GRB order.
     led-strip:
       implementation: ws2812-spi-led-strip

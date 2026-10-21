@@ -30,7 +30,30 @@ peripherals:
         mosi: GPIO16
         chip-select: GPIO45
         frequency-hz: 40000000
+    i2s-stream:
+      audio-stream:
+        # M5Unified `_begin_audio` (board_M5ChainCaptain): MCLK GPIO40, BCK
+        # GPIO38, WS GPIO41, data out GPIO42, data in GPIO39.
+        peripheral: I2S0
+        dma: DMA_CH1
+        bclk: GPIO38
+        ws: GPIO41
+        dout: GPIO42
+        din: GPIO39
+        mclk: GPIO40
+        sample-rate-hz: 16000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
   devices:
+    audio-codec:
+      # ES8311 (18h) on the internal bus; the M5IOE1's G5 switches the audio
+      # rail and GPIO21 the AW8737A amplifier (M5Unified
+      # `_speaker_enabled_cb_chain_captain`).
+      implementation: es8311-audio-codec
+      bindings: { control: internal-i2c, stream: audio-stream, amplifier-enable: GPIO21 }
+      parameters:
+        m5ioe1-supply-pin: 5
     display:
       # 1.54-inch 240 x 240 HSD015BPN2-A0 on a JD9853; supply, reset, and
       # backlight on the M5IOE1 at 0x4F.

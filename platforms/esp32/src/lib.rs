@@ -4,6 +4,7 @@
 
 /// Platform-owned GPIO, SPI, I2C, and delay implementation.
 #[cfg(target_arch = "xtensa")]
+#[path = "chip_hal.rs"]
 pub mod hal;
 
 #[cfg(target_arch = "xtensa")]

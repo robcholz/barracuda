@@ -30,6 +30,7 @@ cargo image deploy
 | --- | --- | --- |
 | `status-led` | 指示 LED | — |
 | `real-time-clock` | 实时时钟（BM8563） | — |
+| `battery` | 电池电压（ADC 电阻分压） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 
 平台入口在构建任何其他部分之前就把电池电源锁存脚 `GPIO33`（`hardware.power-hold`）驱动为高电平，因此不接 USB 时开发板也会保持开机。
 

@@ -31,7 +31,29 @@ peripherals:
         mosi: GPIO37
         chip-select: GPIO3
         frequency-hz: 40000000
+    i2s-stream:
+      audio-stream:
+        # M5Unified `_begin_audio` (board_M5StackCoreS3) and Espressif's board
+        # files: MCLK GPIO0, BCK GPIO34, WS GPIO33, speaker data out GPIO13,
+        # microphone data in GPIO14, on I2S1 as M5Unified does.
+        peripheral: I2S1
+        dma: DMA_CH1
+        bclk: GPIO34
+        ws: GPIO33
+        dout: GPIO13
+        din: GPIO14
+        mclk: GPIO0
+        sample-rate-hz: 48000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
   devices:
+    audio-codec:
+      # AW88298 amplifier (36h) and ES7210 microphone ADC (40h) on the internal
+      # bus; AXP2101 ALDO1/ALDO2 supply them and AW9523B P0_2 releases the
+      # amplifier's reset.
+      implementation: aw88298-es7210-audio-codec
+      bindings: { control: internal-i2c, stream: audio-stream }
     display:
       # ILI9342C 320x240. AW9523B P1_1 resets it and AXP2101 DLDO1 lights it.
       implementation: m5stack-pmic-display

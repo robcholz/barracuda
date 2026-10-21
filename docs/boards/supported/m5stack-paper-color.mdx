@@ -33,6 +33,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `real-time-clock` | Real-time clock (RX8130CE) | — |
 | `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `buttons` | Buttons A, B, C (GPIO10, GPIO9, GPIO1) | — |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
 
 Spectra 6 has no partial update: every refresh redraws the whole panel and
 takes 10 to 20 seconds.
@@ -40,6 +41,8 @@ takes 10 to 20 seconds.
 The M5PM1 measures the battery voltage only. This Board does not route the
 charger's status to it, so the battery reads as charging while VIN is present
 and the cell is below 4.1 V.
+
+The microSD card shares the e-paper panel's SPI bus through its own chip select.
 
 ## Exposed pins
 

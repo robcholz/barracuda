@@ -32,12 +32,14 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `touch` | Touch controller (CST3530) | — |
 | `real-time-clock` | Real-time clock (RX8130CE) | — |
 | `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `audio-codec` | Audio codec (ES8311 and ES7210) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
 
 The display implementation powers the panel, releases its reset, and dims its
 backlight through the M5IOE1 expander at `4Fh`, and turns on the 5 V boost of
 the M5PM1 at `6Eh`; neither chip is a device of its own. It also releases the
-touch controller's reset, M5IOE1 G8. The ES8311/ES7210 audio path, the BMI270
-and BMM150 motion sensors, and the microSD slot are not declared yet.
+touch controller's reset, M5IOE1 G8. The BMI270 and BMM150 motion sensors
+are not declared yet.
 
 The IP101GRI Ethernet PHY is not declared either: its RMII pins on the
 CoreP4X are not published, and the ESP32-P4 Platform does not drive the

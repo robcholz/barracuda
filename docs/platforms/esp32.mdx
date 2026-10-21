@@ -94,6 +94,29 @@ these controllers on a Board's exposed pins:
 | `esp32c3` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 | `esp32c6` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 
+Several `spi-device` declarations may name one SPI controller, such as a
+display and a microSD card on one bus: the controller is built once, and each
+device keeps its chip select and runs at its own clock. A transaction takes
+the bus out of a short critical section, so a long display transfer never
+holds interrupts off.
+
+ESP32, ESP32-S3, ESP32-C3, and ESP32-C6 sample analog inputs for peripherals
+(`analog-input`): each Board input names its ADC controller and pin, inputs on
+one controller share its converter, and implementations read calibrated
+millivolts at 11 dB attenuation, up to about 3.1 V. A battery behind a
+resistor divider and a resistor-ladder button array use it.
+
+ESP32 and ESP32-S3 drive a PDM microphone and an I2S amplifier on one I2S0
+controller (`pdm-i2s-stream`). M5Stack wires the microphone's clock and the
+amplifier's word select to one pin, so the controller switches to PDM receive,
+with the chip's PDM-to-PCM filter, for each read and to standard I2S transmit
+for each write; either side may be absent.
+
+ESP32 adds I2S audio streams (`i2s-stream`, without an MCLK pin: the chip
+routes its master clock only to fixed pins) and SD/MMC cards on slot 1 of its
+SD host, whose fixed pins are CLK `GPIO14`, CMD `GPIO15`, and D0 `GPIO2`.
+esp-hal has no camera receiver for the ESP32, so it has no `camera-capture`.
+
 ESP32-S3 adds quad SPI devices, SD/MMC cards, camera capture, an 8-bit
 parallel output (`parallel-output`, the LCD_CAM controller in i8080 mode, with
 or without a data/command line), I2S audio streams, and capacitive touch.

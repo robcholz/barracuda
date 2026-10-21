@@ -33,6 +33,8 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `inertial-measurement` | Motion sensor (MPU6886) | [`motion`](/plugins/vm-imu) |
 | `buttons` | Buttons A, B, and power (GPIO37, GPIO39, GPIO35) | — |
+| `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `microphone` | Microphone (SPM1423 PDM) | [`audio`](/plugins/vm-audio) |
 
 The Platform entry drives `GPIO4`, the battery power latch
 (`hardware.power-hold`), high before anything else is built, so the Board

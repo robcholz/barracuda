@@ -11,29 +11,55 @@ native-layout:
 peripherals:
   io:
     spi-device:
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5Cardputer, board_M5CardputerADV);
+        # the LCD keeps SPI3. With both SPI controllers taken, none is left
+        # for an spi-output, so the StampS3's WS2812B on GPIO21 (M5Unified
+        # `_pin_table_other0`) is not declared.
+        peripheral: SPI2
+        sck: GPIO40
+        mosi: GPIO14
+        miso: GPIO39
+        chip-select: GPIO12
+        frequency-hz: 20000000
       display-spi:
         peripheral: SPI3
         sck: GPIO36
         mosi: GPIO35
         chip-select: GPIO37
         frequency-hz: 40000000
-    spi-output:
-      rgb-led-data:
-        # StampS3 module WS2812B-2020 on GPIO21 (M5Unified `_pin_table_other0` (RGBLED);
-        # EBM `m5stack_cardputer`, GRB). On Cardputer v1.1 the LED's supply follows
-        # GPIO38, which the display drives as its backlight (docs.m5stack.com
-        # Cardputer v1.1 pin map), so the LED lights only with the backlight on.
-        data: GPIO21
-        frequency-hz: 2400000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` (DinMeter, Cardputer, Cardputer-ADV):
+        # the battery on ADC1 GPIO10 through a divider of two.
+        peripheral: ADC1
+        pin: GPIO10
+    pdm-i2s-stream:
+      audio:
+        # M5Unified `_begin_audio` Cardputer: the SPM1423 PDM microphone
+        # (clock GPIO43, data GPIO46) and the NS4168 amplifier (BCK GPIO41,
+        # LRCK GPIO43, data GPIO42) share GPIO43, so one I2S controller
+        # serves them in turn. I2S0 is the ESP32-S3's PDM receiver.
+        peripheral: I2S0
+        dma: DMA_CH1
+        clk: GPIO43
+        din: GPIO46
+        bclk: GPIO41
+        dout: GPIO42
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
   devices:
-    # The StampS3's RGB LED, one LED, GRB order.
-    led-strip:
-      implementation: ws2812-spi-led-strip
-      bindings:
-        spi: rgb-led-data
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    audio:
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: audio }
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
       parameters:
-        led-count: 1
-        color-order: grb
+        divider-numerator: 2
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO38, dc: GPIO34, reset: GPIO33, spi: display-spi }

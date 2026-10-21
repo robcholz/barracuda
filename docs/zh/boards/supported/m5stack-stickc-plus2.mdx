@@ -33,6 +33,8 @@ cargo image deploy
 | `real-time-clock` | 实时时钟（BM8563） | — |
 | `inertial-measurement` | 运动传感器（MPU6886） | [`motion`](/zh/plugins/vm-imu) |
 | `buttons` | 按键 A、B 和电源键（GPIO37、GPIO39、GPIO35） | — |
+| `battery` | 电池电压（ADC 电阻分压） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `microphone` | 麦克风（SPM1423 PDM） | [`audio`](/zh/plugins/vm-audio) |
 
 平台入口在构建任何其他部分之前就把电池电源锁存脚 `GPIO4`（`hardware.power-hold`）驱动为高电平，因此不接 USB 时松开电源键后开发板也会保持开机。
 

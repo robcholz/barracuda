@@ -26,7 +26,19 @@ peripherals:
         mosi: GPIO23
         chip-select: GPIO9
         frequency-hz: 40000000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` CoreInk: the battery on ADC1 GPIO35
+        # through 25.1 k over 5.1 k (`_adc_ratio = 25.1f / 5.1f`).
+        peripheral: ADC1
+        pin: GPIO35
   devices:
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 251
+        divider-denominator: 51
     display:
       implementation: epaper-1in54-display
       bindings:

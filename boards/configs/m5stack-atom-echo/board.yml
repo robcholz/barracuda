@@ -9,12 +9,29 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    pdm-i2s-stream:
+      audio:
+        # M5Unified `_begin_audio` (board_M5AtomVoice): the SPM1423 PDM
+        # microphone (clock GPIO33, data GPIO23) and the NS4168 amplifier
+        # (BCK GPIO19, LRCK GPIO33, data GPIO22) share GPIO33, so one I2S
+        # controller serves them in turn.
+        peripheral: I2S0
+        dma: DMA_I2S0
+        clk: GPIO33
+        din: GPIO23
+        bclk: GPIO19
+        dout: GPIO22
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
     spi-output:
       rgb-led-data:
         # SK6812 on GPIO27 (EBM `m5stack_atom_echo`, GRB).
         data: GPIO27
         frequency-hz: 2400000
   devices:
+    audio:
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: audio }
     # The RGB LED under the button, one LED, GRB order.
     led-strip:
       implementation: ws2812-spi-led-strip

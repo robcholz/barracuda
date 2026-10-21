@@ -16,7 +16,7 @@ build:
       cargo install espup
       espup install --toolchain-version 1.98.1.0
 hal:
-  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, power-hold]
+  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, i2s-stream, pdm-i2s-stream, analog-input, power-hold]
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2, SPI3]
   runtime-uart-controllers: [UART1]
@@ -35,6 +35,11 @@ hal:
     - controller: LEDC
       timers: [Timer0]
       channels: [Channel0]
+  # A Board's microSD card takes slot 1 of the SD host, on its fixed IO_MUX
+  # pins (CLK GPIO14, CMD GPIO15, D0 GPIO2); slot 0 is wired to the module's
+  # flash. The slot runs from the Board's own 3.3 V.
+  sdmmc-slots:
+    - slot: 1
 selection:
   board-chips:
     - esp32

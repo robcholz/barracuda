@@ -153,6 +153,77 @@ the SD host, because the Wi-Fi co-processor's link uses its other slot: the
 Platform entry builds the host once and hands slot 0 to the Board composition
 beside the chip peripherals, and the card implementation receives that slot.
 
+Several `spi-device` declarations may name one SPI controller when devices
+share its bus, such as an LCD and a microSD card. They name the same `sck`,
+`mosi`, and `miso`, and each its own `chip-select` and `frequency-hz`; the
+composition builds the bus once and hands each implementation a device that
+selects itself and applies its clock. The M5Stack Core2's display and card:
+
+~~~yaml
+spi-device:
+  display-spi:
+    peripheral: SPI3
+    sck: GPIO18
+    mosi: GPIO23
+    miso: GPIO38
+    chip-select: GPIO5
+    frequency-hz: 40000000
+  card-spi:
+    peripheral: SPI3
+    sck: GPIO18
+    mosi: GPIO23
+    miso: GPIO38
+    chip-select: GPIO4
+    frequency-hz: 20000000
+~~~
+
+A microSD card on SPI (`spi-sd-fat-removable-storage`) also changes its
+device's clock and clocks it with the chip select released, which the SD
+specification asks for while it identifies the card; the Platform's SPI device
+types provide that through `SpiDeviceControl`.
+
+An `spi-output`, the data line of an LED strip clocked out of an SPI
+controller, takes a whole controller of its own: one that no `spi-device`
+names. A Board therefore needs a free controller for each `spi-output` beside
+the buses its `spi-device` entries use.
+
+An `analog-input` is one ADC channel: the controller and the pin. Several
+inputs may name one controller; the composition enables every channel, builds
+the converter once, and hands each implementation its channel, which reads
+calibrated millivolts (`AnalogVoltageInput`). The ESP32-S3-Korvo-2's button
+ladder and battery:
+
+~~~yaml
+analog-input:
+  button-ladder:
+    peripheral: ADC1
+    pin: GPIO5
+  battery-sense:
+    peripheral: ADC1
+    pin: GPIO6
+~~~
+
+A `pdm-i2s-stream` is a PDM microphone and an I2S amplifier on one I2S
+controller, one direction at a time: `clk` is the microphone's clock and the
+amplifier's word select, `din` the microphone's data, and `bclk` with `dout`
+the amplifier's lines. A product with only one of them leaves the other's
+lines out. The stream carries mono 16-bit PCM at `sample-rate-hz`; the
+Platform sizes its DMA buffers with `dma-buffer-bytes`. The M5Stack Atom
+Echo:
+
+~~~yaml
+pdm-i2s-stream:
+  audio:
+    peripheral: I2S0
+    dma: DMA_I2S0
+    clk: GPIO33
+    din: GPIO23
+    bclk: GPIO19
+    dout: GPIO22
+    sample-rate-hz: 16000
+    dma-buffer-bytes: 4096
+~~~
+
 Every generated semantic slot is optional. A Board with no real-time clock has
 no `RealTimeClock` value; a Board with one has `Some(concrete_clock)`. Absence
 does not require fake hardware, and presence does not expose helper chips.

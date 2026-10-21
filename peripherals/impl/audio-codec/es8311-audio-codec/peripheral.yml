@@ -6,16 +6,39 @@ implementation:
   crate: barracuda_es8311_audio_codec
   factory: "::{{crate}}::Es8311AudioCodecImplementation<{{binding.control.type}}, {{binding.stream.type}}, {{binding.amplifier-enable.type}}, {{hal.delay.type}}>"
   bindings-expression: "::{{crate}}::Es8311Bindings::new({{binding.control.value}}, {{binding.stream.value}}, {{binding.amplifier-enable.value}}, {{hal.delay.value}})"
-  config-expression: "::{{crate}}::Es8311Config::new({{parameter.address}})"
+  config-expression: "::{{crate}}::Es8311Config::new({{parameter.address}}).with_clock({{parameter.clock-source}}).with_helper_enables(::{{crate}}::HelperEnables::new({{parameter.m5ioe1-supply-pin}}, {{parameter.m5ioe1-amplifier-pin}}, {{parameter.m5pm1-amplifier-pin}}))"
 bindings:
   control:
     kind: i2c-device
   stream:
     kind: i2s-stream
+  # The speaker amplifier's enable, when a GPIO switches it.
   amplifier-enable:
     kind: digital-output
+    required: false
     initial: low
 parameters:
   address:
     type: integer
     default: 24
+  # The codec's master clock: its MCLK pin, or the bit clock on Boards that
+  # wire no MCLK.
+  clock-source:
+    type: enum
+    values: [mclk, bclk]
+    rust-values:
+      mclk: "::barracuda_es8311_audio_codec::ClockSource::Mclk"
+      bclk: "::barracuda_es8311_audio_codec::ClockSource::Bclk"
+    default: mclk
+  # Pins of M5Stack's M5IOE1 expander (0x4F, pins 1 to 14) and M5PM1 power
+  # controller (0x6E, pins 0 to 4) on the control bus that switch the audio
+  # supply and the speaker amplifier; 0 and -1 mean none.
+  m5ioe1-supply-pin:
+    type: integer
+    default: 0
+  m5ioe1-amplifier-pin:
+    type: integer
+    default: 0
+  m5pm1-amplifier-pin:
+    type: integer
+    default: -1

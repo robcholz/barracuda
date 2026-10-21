@@ -29,6 +29,7 @@ cargo image deploy
 | --- | --- | --- |
 | `camera` | 摄像头（OV2640） | [`camera`](/zh/plugins/vm-camera) |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
-| `buttons` | BOOT 按键（GPIO0） | — |
+| `buttons` | 按键（ADC 电阻阶梯） | — |
 
-ADC 分压按键（GPIO1）上的四个按键还没有声明：目前没有平台提供模拟输入绑定。
+正面的四个按键共用 GPIO1 上的一条 ADC 电阻阶梯。一个开发板只声明一个 `buttons`
+设备，因此 BOOT 按键（GPIO0）没有声明。

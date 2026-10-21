@@ -32,12 +32,15 @@ cargo image deploy
 | `touch` | 触摸控制器（FT6336U） | — |
 | `real-time-clock` | 实时时钟（BM8563） | — |
 | `power-monitor` | 电量计（AXP2101） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `audio-codec` | 音频编解码器（AW88298 功放、ES7210 麦克风 ADC） | [`audio`](/zh/plugins/vm-audio) |
 
 触摸实现通过 `58h` 处 AW9523B 扩展芯片的 P0_0 释放控制器的复位，该扩展芯片本身不是设备。
 
 电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。
 
 AXP2101 不测量电池电流，所以 `measure` 报告电池电压，电流为零。
+
+microSD 卡槽没有声明：它的 MISO（GPIO35）同时是显示屏的 D/C 线，共享的 SPI 总线无法在两者之间切换。
 
 ## 可用引脚
 

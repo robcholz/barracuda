@@ -16,6 +16,12 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` TimerCam: the battery on ADC1 GPIO38
+        # with `_adc_ratio = 1.513f`.
+        peripheral: ADC1
+        pin: GPIO38
     i2c-device:
       internal-i2c:
         # M5Unified `_pin_table_i2c_ex_in` board_M5TimerCam: SCL G14 / SDA G12.
@@ -24,6 +30,12 @@ peripherals:
         sda: GPIO12
         frequency-hz: 400000
   devices:
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 1513
+        divider-denominator: 1000
     # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
     real-time-clock:
       implementation: bm8563-rtc

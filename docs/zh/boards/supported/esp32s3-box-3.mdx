@@ -31,6 +31,7 @@ cargo image deploy
 | `touch` | 触摸控制器（GT911 或 TT21100，启动时识别） | — |
 | `inertial-measurement` | 运动传感器（ICM-42607-P） | [`motion`](/zh/plugins/vm-imu) |
 | `buttons` | BOOT 按键（GPIO0） | — |
+| `audio-codec` | 音频编解码器（ES8311 和 ES7210） | [`audio`](/zh/plugins/vm-audio) |
 
 与乐鑫 BSP 一样，触摸实现先在 `5Dh` 和 `14h` 查找 GT911，再在 `24h` 查找 TT21100；两者都由显示屏的复位线（GPIO48）复位。静音开关的状态线（GPIO1）不是按键，没有声明。
 

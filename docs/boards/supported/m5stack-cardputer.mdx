@@ -28,12 +28,15 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 | Device | What it is | Lua package |
 | --- | --- | --- |
-| `led-strip` | RGB LED (WS2812, GPIO21) | [`light`](/plugins/vm-led-strip) |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `buttons` | G0 button (GPIO0) | — |
+| `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `audio` | Audio (NS4168 amplifier, SPM1423 PDM microphone) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
 
-On Cardputer v1.1 the RGB LED takes its supply from GPIO38, the display
-backlight, so it lights only while the backlight is on.
+The StampS3's WS2812 RGB LED on GPIO21 is not declared: the microSD card and
+the display each take one of the ESP32-S3's two SPI controllers, which leaves
+none for the LED's SPI output.
 
 ## Exposed pins
 

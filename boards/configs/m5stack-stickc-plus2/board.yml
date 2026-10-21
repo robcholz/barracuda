@@ -33,7 +33,33 @@ peripherals:
         mosi: GPIO15
         chip-select: GPIO5
         frequency-hz: 40000000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` StickC Plus2: the battery on
+        # ADC1 GPIO38 through a divider of two (`_adc_ratio = 2.0f`).
+        peripheral: ADC1
+        pin: GPIO38
+    pdm-i2s-stream:
+      microphone:
+        # M5Unified `_begin_audio` StickC Plus2: the SPM1423 PDM microphone,
+        # clock GPIO0 and data GPIO34, on I2S0 (the ESP32's PDM receiver).
+        peripheral: I2S0
+        dma: DMA_I2S0
+        clk: GPIO0
+        din: GPIO34
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
   devices:
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 2
+    microphone:
+      # SPM1423 PDM microphone; the StickC Plus2 has no speaker amplifier (its
+      # GPIO2 buzzer is not an I2S device).
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: microphone }
     display:
       # ST7789 135x240 at offset (52, 40) in its 240x320 frame; backlight on
       # GPIO27, active high.

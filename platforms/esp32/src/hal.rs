@@ -5,11 +5,14 @@ extern crate alloc;
 use alloc::boxed::Box;
 
 use barracuda_board_hal::{
-    AnalogErrorType, AnalogInput, ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig,
-    OutputDrive, Pull as BoardPull, RuntimeAnalogPlatform, RuntimePlatform, RuntimePwmPlatform,
-    RuntimeUartPlatform, SharedI2cBus, UartConfig, UartDataBits, UartParity, UartStopBits,
-    UnavailableAnalogOutput,
+    AnalogErrorType, AnalogInput, AnalogVoltageInput, ConfigurableDigitalPin, DigitalLevel,
+    InputConfig, OutputConfig, OutputDrive, Pull as BoardPull, RuntimeAnalogPlatform,
+    RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SharedI2cBus, SpiDeviceControl,
+    UartConfig, UartDataBits, UartParity, UartStopBits, UnavailableAnalogOutput,
 };
+use core::cell::RefCell;
+use embassy_sync::blocking_mutex::CriticalSectionMutex;
+use esp_hal::analog::adc::{AdcCalLine, AdcCalScheme, RegisterAccess as AdcRegisterAccess};
 use embedded_hal::{
     digital::{ErrorType, StatefulOutputPin},
     i2c::Operation as I2cOperation,
@@ -75,8 +78,374 @@ pub type DigitalOutput = Output<'static>;
 pub type DigitalInput = Input<'static>;
 /// Blocking SPI bus used by statically selected devices.
 pub type SpiBus = Spi<'static, Blocking>;
+
 /// Standards-compliant single-owner SPI device.
-pub type SpiDevice = ExclusiveDevice<SpiBus, DigitalOutput, Delay>;
+///
+/// It is `embedded-hal-bus`'s exclusive device, and also lets an
+/// implementation change its clock and clock bytes with its chip select
+/// released ([`SpiDeviceControl`]), which an SD card in SPI mode needs.
+pub struct SpiDevice {
+    device: ExclusiveDevice<SpiBus, DigitalOutput, Delay>,
+    config: SpiConfig,
+    frequency_hz: u32,
+}
+
+impl embedded_hal::spi::ErrorType for SpiDevice {
+    type Error = embedded_hal_bus::spi::DeviceError<esp_hal::spi::Error, core::convert::Infallible>;
+}
+
+impl embedded_hal::spi::SpiDevice for SpiDevice {
+    fn transaction(
+        &mut self,
+        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
+    ) -> Result<(), Self::Error> {
+        self.device.transaction(operations)
+    }
+}
+
+impl SpiDeviceControl for SpiDevice {
+    fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+
+    fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error> {
+        let config = self.config.with_frequency(Rate::from_hz(frequency_hz));
+        self.device
+            .bus_mut()
+            .apply_config(&config)
+            .map_err(|_| embedded_hal_bus::spi::DeviceError::Spi(esp_hal::spi::Error::Unsupported))?;
+        self.config = config;
+        self.frequency_hz = frequency_hz;
+        Ok(())
+    }
+
+    fn write_deselected(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        // The exclusive device holds its chip select high between
+        // transactions, so writing to the bus directly clocks deselected.
+        let bus = self.device.bus_mut();
+        embedded_hal::spi::SpiBus::write(bus, bytes)
+            .and_then(|()| embedded_hal::spi::SpiBus::flush(bus))
+            .map_err(embedded_hal_bus::spi::DeviceError::Spi)
+    }
+}
+
+/// Static owner of one SPI controller whose clock and data lines several
+/// statically selected devices share.
+///
+/// A transaction takes the bus out of a short critical section and returns
+/// it afterwards, so a long display transfer never holds interrupts off.
+/// Board peripherals run on one cooperative executor and their transfers are
+/// blocking, so two transactions never overlap there; a device that finds the
+/// bus taken reports [`SharedSpiError::Busy`] instead of waiting.
+pub struct SpiBusManager {
+    state: CriticalSectionMutex<RefCell<SharedSpiState>>,
+}
+
+struct SharedSpiState {
+    bus: Option<SpiBus>,
+    /// The device whose configuration the controller holds; 0 for none.
+    configured: u32,
+    next_device: u32,
+}
+
+impl SpiBusManager {
+    /// Wraps one exclusively owned bus for chip-select-level sharing.
+    #[must_use]
+    pub const fn new(bus: SpiBus) -> Self {
+        Self {
+            state: CriticalSectionMutex::new(RefCell::new(SharedSpiState {
+                bus: Some(bus),
+                configured: 0,
+                next_device: 1,
+            })),
+        }
+    }
+
+    fn register(&self) -> u32 {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            let id = state.next_device;
+            state.next_device = state.next_device.wrapping_add(1).max(1);
+            id
+        })
+    }
+
+    /// Takes the bus for `device`, telling whether another device's
+    /// configuration is applied.
+    fn take(&self, device: u32) -> Option<(SpiBus, bool)> {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            let bus = state.bus.take()?;
+            let reconfigure = state.configured != device;
+            Some((bus, reconfigure))
+        })
+    }
+
+    fn restore(&self, bus: SpiBus, configured: u32) {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            state.bus = Some(bus);
+            state.configured = configured;
+        });
+    }
+
+    fn forget_configuration(&self, device: u32) {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            if state.configured == device {
+                state.configured = 0;
+            }
+        });
+    }
+}
+
+/// Statically allocates one shared SPI bus owner at the Board call site.
+#[macro_export]
+macro_rules! __barracuda_esp_spi_bus_manager {
+    ($bus:expr) => {{
+        static MANAGER: $crate::hal::__StaticCell<$crate::hal::SpiBusManager> =
+            $crate::hal::__StaticCell::new();
+        MANAGER.init($crate::hal::SpiBusManager::new($bus))
+    }};
+}
+
+#[doc(hidden)]
+pub use __barracuda_esp_spi_bus_manager as spi_bus_manager;
+
+/// Failure of one device's transaction on a shared SPI bus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedSpiError {
+    /// Another device's transaction holds the bus.
+    Busy,
+    /// The controller rejected this device's clock.
+    Configuration,
+    /// The transfer failed.
+    Bus(esp_hal::spi::Error),
+}
+
+impl core::fmt::Display for SharedSpiError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Busy => formatter.write_str("the shared SPI bus is in use"),
+            Self::Configuration => formatter.write_str("invalid SPI device clock"),
+            Self::Bus(_) => formatter.write_str("SPI transfer failed"),
+        }
+    }
+}
+
+impl core::error::Error for SharedSpiError {}
+
+impl embedded_hal::spi::Error for SharedSpiError {
+    fn kind(&self) -> embedded_hal::spi::ErrorKind {
+        match self {
+            Self::Bus(error) => embedded_hal::spi::Error::kind(error),
+            Self::Busy | Self::Configuration => embedded_hal::spi::ErrorKind::Other,
+        }
+    }
+}
+
+/// One chip-selected device on a shared SPI controller, at its own clock.
+pub struct SharedSpiDevice {
+    manager: &'static SpiBusManager,
+    chip_select: DigitalOutput,
+    config: SpiConfig,
+    frequency_hz: u32,
+    id: u32,
+}
+
+/// Constructs one device on a shared SPI controller.
+#[must_use]
+pub fn shared_spi_device(
+    manager: &'static SpiBusManager,
+    chip_select: impl OutputPin + 'static,
+    frequency_hz: u32,
+) -> SharedSpiDevice {
+    SharedSpiDevice {
+        manager,
+        chip_select: digital_output(chip_select, DigitalLevel::High),
+        config: SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
+        frequency_hz,
+        id: manager.register(),
+    }
+}
+
+impl SharedSpiDevice {
+    /// Runs `transfer` with the bus configured for this device, selecting
+    /// the device around it when `select` is set.
+    fn with_bus(
+        &mut self,
+        select: bool,
+        transfer: impl FnOnce(&mut SpiBus) -> Result<(), esp_hal::spi::Error>,
+    ) -> Result<(), SharedSpiError> {
+        let (mut bus, reconfigure) = self.manager.take(self.id).ok_or(SharedSpiError::Busy)?;
+        if reconfigure && bus.apply_config(&self.config).is_err() {
+            self.manager.restore(bus, 0);
+            return Err(SharedSpiError::Configuration);
+        }
+        if select {
+            self.chip_select.set_low();
+        }
+        let result = transfer(&mut bus).and_then(|()| embedded_hal::spi::SpiBus::flush(&mut bus));
+        if select {
+            self.chip_select.set_high();
+        }
+        self.manager.restore(bus, self.id);
+        result.map_err(SharedSpiError::Bus)
+    }
+}
+
+impl embedded_hal::spi::ErrorType for SharedSpiDevice {
+    type Error = SharedSpiError;
+}
+
+impl embedded_hal::spi::SpiDevice for SharedSpiDevice {
+    fn transaction(
+        &mut self,
+        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
+    ) -> Result<(), Self::Error> {
+        self.with_bus(true, |bus| {
+            for operation in operations {
+                match operation {
+                    embedded_hal::spi::Operation::Read(words) => {
+                        embedded_hal::spi::SpiBus::read(bus, words)?;
+                    }
+                    embedded_hal::spi::Operation::Write(words) => {
+                        embedded_hal::spi::SpiBus::write(bus, words)?;
+                    }
+                    embedded_hal::spi::Operation::Transfer(read, write) => {
+                        embedded_hal::spi::SpiBus::transfer(bus, read, write)?;
+                    }
+                    embedded_hal::spi::Operation::TransferInPlace(words) => {
+                        embedded_hal::spi::SpiBus::transfer_in_place(bus, words)?;
+                    }
+                    embedded_hal::spi::Operation::DelayNs(nanoseconds) => {
+                        embedded_hal::spi::SpiBus::flush(bus)?;
+                        embedded_hal::delay::DelayNs::delay_ns(&mut Delay::new(), *nanoseconds);
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+}
+
+impl SpiDeviceControl for SharedSpiDevice {
+    fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+
+    fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error> {
+        self.config = self.config.with_frequency(Rate::from_hz(frequency_hz));
+        self.frequency_hz = frequency_hz;
+        self.manager.forget_configuration(self.id);
+        Ok(())
+    }
+
+    fn write_deselected(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.with_bus(false, |bus| embedded_hal::spi::SpiBus::write(bus, bytes))
+    }
+}
+
+/// Calibration the Board's analog inputs apply: the chip's eFuse
+/// line fit, which every ESP chip this file serves has.
+type AnalogCalibration<ADC> = AdcCalLine<ADC>;
+
+/// Static owner of one ADC controller whose channels several peripheral
+/// implementations sample. A conversion takes tens of microseconds, inside
+/// a critical section.
+pub struct AnalogConverter<ADC: 'static> {
+    adc: CriticalSectionMutex<RefCell<Adc<'static, ADC, Blocking>>>,
+}
+
+impl<ADC: 'static> AnalogConverter<ADC> {
+    /// Wraps one configured converter for channel-level sharing.
+    #[must_use]
+    pub const fn new(adc: Adc<'static, ADC, Blocking>) -> Self {
+        Self {
+            adc: CriticalSectionMutex::new(RefCell::new(adc)),
+        }
+    }
+}
+
+/// Starts the configuration of one ADC controller's Board channels.
+#[must_use]
+pub fn analog_config<ADC>() -> AdcConfig<ADC> {
+    AdcConfig::new()
+}
+
+/// Enables one Board analog input on its controller at 11 dB attenuation,
+/// the range (to about 3.1 V) that resistor dividers and button ladders on
+/// these Boards are built for.
+pub fn analog_channel<ADC, P>(
+    config: &mut AdcConfig<ADC>,
+    pin: P,
+) -> AdcPin<P, ADC, AnalogCalibration<ADC>>
+where
+    P: AdcChannel + AnalogPin,
+    AnalogCalibration<ADC>: AdcCalScheme<ADC>,
+{
+    config.enable_pin_with_cal(pin, Attenuation::_11dB)
+}
+
+/// Builds one shared ADC controller from its Board channels' configuration
+/// and allocates its owner statically at the Board call site.
+#[macro_export]
+macro_rules! __barracuda_esp_analog_converter {
+    ($adc:ident, $controller:expr, $config:expr) => {{
+        static CONVERTER: $crate::hal::__StaticCell<
+            $crate::hal::AnalogConverter<$crate::hal::__vendor::peripherals::$adc<'static>>,
+        > = $crate::hal::__StaticCell::new();
+        let converter: &'static $crate::hal::AnalogConverter<
+            $crate::hal::__vendor::peripherals::$adc<'static>,
+        > = CONVERTER.init($crate::hal::AnalogConverter::new(
+            $crate::hal::__vendor::analog::adc::Adc::new($controller, $config),
+        ));
+        converter
+    }};
+}
+
+#[doc(hidden)]
+pub use __barracuda_esp_analog_converter as analog_converter;
+
+/// One Board analog input, sampled in calibrated millivolts.
+pub struct AnalogInputChannel<ADC: 'static, P> {
+    converter: &'static AnalogConverter<ADC>,
+    pin: AdcPin<P, ADC, AnalogCalibration<ADC>>,
+}
+
+/// Hands one enabled channel of a shared converter to its implementation.
+#[must_use]
+pub fn analog_input<ADC, P>(
+    converter: &'static AnalogConverter<ADC>,
+    pin: AdcPin<P, ADC, AnalogCalibration<ADC>>,
+) -> AnalogInputChannel<ADC, P> {
+    AnalogInputChannel { converter, pin }
+}
+
+impl<ADC, P> AnalogErrorType for AnalogInputChannel<ADC, P> {
+    type Error = ExposedAnalogError;
+}
+
+impl<ADC, P> AnalogVoltageInput for AnalogInputChannel<ADC, P>
+where
+    ADC: AdcRegisterAccess + 'static,
+    P: AdcChannel,
+    AnalogCalibration<ADC>: AdcCalScheme<ADC>,
+{
+    fn read_millivolts(&mut self) -> Result<u32, Self::Error> {
+        let pin = &mut self.pin;
+        self.converter.adc.lock(|adc| {
+            let mut adc = adc.borrow_mut();
+            loop {
+                match adc.read_oneshot(pin) {
+                    Ok(millivolts) => return Ok(u32::from(millivolts)),
+                    Err(nb::Error::WouldBlock) => {}
+                    Err(nb::Error::Other(())) => return Err(ExposedAnalogError::Conversion),
+                }
+            }
+        })
+    }
+}
 /// Single-owner SPI device whose one data line carries writes and reads.
 pub type ThreeWireSpiDevice = ExclusiveDevice<ThreeWireSpiBus, DigitalOutput, Delay>;
 
@@ -1102,7 +1471,7 @@ pub fn spi_device(
     )?
     .with_sck(sck)
     .with_mosi(mosi);
-    Ok(exclusive_spi_device(bus, chip_select))
+    Ok(exclusive_spi_device(bus, chip_select, frequency_hz))
 }
 
 /// Constructs one transmit-only SPI bus from Board-selected resources.
@@ -1183,7 +1552,7 @@ pub fn spi_device_rx_only(
     )?
     .with_sck(sck)
     .with_miso(miso);
-    Ok(exclusive_spi_device(bus, chip_select))
+    Ok(exclusive_spi_device(bus, chip_select, frequency_hz))
 }
 
 /// Constructs one full-duplex SPI device from Board-selected resources.
@@ -1206,7 +1575,7 @@ pub fn spi_device_full_duplex(
     .with_sck(sck)
     .with_mosi(mosi)
     .with_miso(miso);
-    Ok(exclusive_spi_device(bus, chip_select))
+    Ok(exclusive_spi_device(bus, chip_select, frequency_hz))
 }
 
 /// Constructs one three-wire SPI device whose `data` line carries both
@@ -1239,10 +1608,18 @@ pub fn spi_device_three_wire(
     }
 }
 
-fn exclusive_spi_device(bus: SpiBus, chip_select: impl OutputPin + 'static) -> SpiDevice {
+fn exclusive_spi_device(
+    bus: SpiBus,
+    chip_select: impl OutputPin + 'static,
+    frequency_hz: u32,
+) -> SpiDevice {
     let chip_select = digital_output(chip_select, DigitalLevel::High);
     match ExclusiveDevice::new(bus, chip_select, Delay::new()) {
-        Ok(device) => device,
+        Ok(device) => SpiDevice {
+            device,
+            config: SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
+            frequency_hz,
+        },
         Err(never) => match never {},
     }
 }

@@ -34,7 +34,44 @@ peripherals:
         scl: GPIO9
         sda: GPIO11
         frequency-hz: 100000
+    i2s-stream:
+      audio-stream:
+        # M5Unified `_begin_audio` (board_M5CoreP4X): MCLK GPIO2, BCK GPIO6,
+        # WS GPIO4, data out GPIO3, data in GPIO5.
+        peripheral: I2S0
+        dma: DMA_CH0
+        bclk: GPIO6
+        ws: GPIO4
+        dout: GPIO3
+        din: GPIO5
+        mclk: GPIO2
+        sample-rate-hz: 48000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+    spi-device:
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5CoreP4X): SCK GPIO10, MOSI GPIO7,
+        # MISO GPIO8, chip select GPIO50.
+        peripheral: SPI2
+        sck: GPIO10
+        mosi: GPIO7
+        miso: GPIO8
+        chip-select: GPIO50
+        frequency-hz: 20000000
   devices:
+    audio-codec:
+      # ES8311 (18h) and ES7210 (40h) on the internal bus; the M5IOE1's G1
+      # switches their shared supply and its G3 the AW8737A amplifier
+      # (M5Unified `_corep4x_audio_power`, `_speaker_enabled_cb_corep4x`).
+      implementation: es8311-es7210-audio-codec
+      bindings: { control: internal, stream: audio-stream }
+      parameters:
+        m5ioe1-supply-pin: 1
+        m5ioe1-amplifier-pin: 3
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
     # 2.64-inch 480x480 ST7102 MIPI DSI panel. Its power, reset, and
     # backlight sit behind the M5IOE1 at 4Fh; the 5 V boost behind the M5PM1
     # at 6Eh.

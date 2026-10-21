@@ -31,6 +31,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `touch` | Touch controller (GT911 or TT21100, detected at start) | — |
 | `inertial-measurement` | Motion sensor (ICM-42607-P) | [`motion`](/plugins/vm-imu) |
 | `buttons` | BOOT button (GPIO0) | — |
+| `audio-codec` | Audio codec (ES8311 and ES7210) | [`audio`](/plugins/vm-audio) |
 
 As Espressif's BSP does, the touch implementation looks for a GT911 at `5Dh`
 and `14h` and then for a TT21100 at `24h`; the display's reset line (GPIO48)

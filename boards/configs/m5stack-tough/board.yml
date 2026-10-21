@@ -28,9 +28,40 @@ peripherals:
         peripheral: SPI3
         sck: GPIO18
         mosi: GPIO23
+        miso: GPIO38
         chip-select: GPIO5
         frequency-hz: 40000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5StackCore2, board_M5Tough): the
+        # microSD card shares the LCD's bus with its own chip select, GPIO4.
+        peripheral: SPI3
+        sck: GPIO18
+        mosi: GPIO23
+        miso: GPIO38
+        chip-select: GPIO4
+        frequency-hz: 20000000
+    pdm-i2s-stream:
+      speaker:
+        # M5Unified `_begin_audio` (Tough shares the Core2 path): the NS4168
+        # amplifier, BCK GPIO12, LRCK GPIO0, data GPIO2.
+        peripheral: I2S0
+        dma: DMA_I2S0
+        clk: GPIO0
+        bclk: GPIO12
+        dout: GPIO2
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
   devices:
+    audio:
+      # NS4168 amplifier, switched on through AXP192 GPIO2 (M5Unified
+      # `_speaker_enabled_cb_core2`).
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: speaker, pmic: internal-i2c }
+      parameters:
+        pmic-power: core2-speaker
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
     display:
       # ILI9342C 320x240. AXP192 LDO2 powers it, GPIO4 resets it, LDO3 lights it.
       implementation: m5stack-pmic-display

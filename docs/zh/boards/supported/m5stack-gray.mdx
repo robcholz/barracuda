@@ -32,8 +32,11 @@ cargo image deploy
 | `power-monitor` | 电池电量（IP5306） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `inertial-measurement` | 运动传感器（MPU6886，早期单元为 MPU9250） | [`motion`](/zh/plugins/vm-imu) |
 | `buttons` | 按键 A、B、C（GPIO39、GPIO38、GPIO37） | — |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
 
 IP5306 只以 25% 的步长报告电池电量和是否在充电；它不测量电压和电流，所以在这块开发板上 `measure` 会失败。
+
+microSD 卡通过自己的片选与显示屏共用 SPI 总线。
 
 ## 可用引脚
 

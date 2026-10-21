@@ -41,6 +41,12 @@ pub enum HalBinding {
     I2sStream,
     /// Fixed capacitive-touch channel group construction.
     CapacitiveTouch,
+    /// Calibrated ADC channel construction, several channels sharing one
+    /// converter.
+    AnalogInput,
+    /// Time-shared PDM-microphone receive and I2S-amplifier transmit stream
+    /// construction.
+    PdmI2sStream,
     /// Platform IP link over a Board-declared RMII Ethernet PHY
     /// (`hardware.ethernet` in `board.yml`).
     EthernetRmii,

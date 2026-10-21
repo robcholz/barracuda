@@ -45,9 +45,22 @@ peripherals:
         peripheral: SPI2
         sck: GPIO15
         mosi: GPIO13
+        miso: GPIO14
         chip-select: GPIO44
         frequency-hz: 4000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5PaperColor). The card's supply,
+        # M5PM1 G3, is switched on by the display with the panel's.
+        peripheral: SPI2
+        sck: GPIO15
+        mosi: GPIO13
+        miso: GPIO14
+        chip-select: GPIO47
+        frequency-hz: 20000000
   devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
     display:
       implementation: paper-color-display
       bindings:

@@ -284,6 +284,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-adc-battery-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-adc-ladder-buttons"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-peripheral",
+ "embassy-futures",
+]
+
+[[package]]
 name = "barracuda-agent"
 version = "0.1.0"
 dependencies = [
@@ -808,6 +827,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-aw88298-es7210-audio-codec"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-aw88298",
+ "barracuda-driver-aw9523",
+ "barracuda-driver-axp2101",
+ "barracuda-driver-es7210",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-axp192-axp2101-power-monitor"
 version = "0.1.0"
 dependencies = [
@@ -888,9 +920,12 @@ dependencies = [
 name = "barracuda-board-selection"
 version = "0.0.0"
 dependencies = [
+ "barracuda-adc-battery-power-monitor",
+ "barracuda-adc-ladder-buttons",
  "barracuda-apa102-led-strip",
  "barracuda-atom-s3-display",
  "barracuda-atom-s3r-display",
+ "barracuda-aw88298-es7210-audio-codec",
  "barracuda-axp192-axp2101-power-monitor",
  "barracuda-bm8563-rtc",
  "barracuda-bmi270-imu",
@@ -928,9 +963,11 @@ dependencies = [
  "barracuda-paper-color-display",
  "barracuda-paper-diy-display",
  "barracuda-paper-mono-display",
+ "barracuda-pdm-i2s-audio-codec",
  "barracuda-pi4ioe5v6408-buttons",
  "barracuda-rx8130ce-rtc",
  "barracuda-sdmmc-fat-removable-storage",
+ "barracuda-spi-sd-fat-removable-storage",
  "barracuda-ssd1306-spi-display",
  "barracuda-st77916-qspi-display",
  "barracuda-stopwatch-co5300-display",
@@ -1175,6 +1212,13 @@ dependencies = [
 
 [[package]]
 name = "barracuda-driver-apa102"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-aw88298"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
@@ -1498,6 +1542,8 @@ name = "barracuda-es8311-audio-codec"
 version = "0.1.0"
 dependencies = [
  "barracuda-driver-es8311",
+ "barracuda-driver-m5ioe1",
+ "barracuda-driver-m5pm1",
  "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
@@ -1510,6 +1556,8 @@ version = "0.1.0"
 dependencies = [
  "barracuda-driver-es7210",
  "barracuda-driver-es8311",
+ "barracuda-driver-m5ioe1",
+ "barracuda-driver-m5pm1",
  "barracuda-peripheral",
  "embedded-hal 1.0.0",
 ]
@@ -2190,6 +2238,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-pdm-i2s-audio-codec"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-axp192",
+ "barracuda-driver-axp2101",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-peripheral"
 version = "0.1.0"
 dependencies = [
@@ -2247,6 +2306,7 @@ dependencies = [
  "barracuda-board-config",
  "barracuda-board-hal",
  "barracuda-bulk-memory",
+ "barracuda-peripheral",
  "barracuda-platform",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
@@ -2270,6 +2330,7 @@ dependencies = [
  "esp-storage",
  "log",
  "nb 1.1.0",
+ "sdio",
  "static_cell",
 ]
 
@@ -2898,6 +2959,20 @@ dependencies = [
  "futures-lite",
  "portable-atomic",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-spi-sd-fat-removable-storage"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-peripheral",
+ "barracuda-sdmmc-fat-removable-storage",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "embedded-sdmmc",
 ]
 
 [[package]]
@@ -5025,6 +5100,18 @@ checksum = "eb5a1bd585135d302f8f6d7de329310938093da6271b37a6c94b8798795c0c6d"
 dependencies = [
  "embedded-io-async 0.7.0",
  "embedded-nal",
+]
+
+[[package]]
+name = "embedded-sdmmc"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce3c7f9ea039eeafc4a49597b7bd5ae3a1c8e51b2803a381cb0f29ce90fe1ec6"
+dependencies = [
+ "byteorder",
+ "embedded-hal 1.0.0",
+ "embedded-io 0.6.1",
+ "heapless 0.8.0",
 ]
 
 [[package]]

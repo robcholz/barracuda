@@ -32,8 +32,12 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `touch` | Touch controller (GT911) | — |
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `buttons` | Rocker up, press, down (GPIO37, GPIO38, GPIO39) | — |
+| `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
 
 The Platform entry drives `GPIO2`, the main power latch (`hardware.power-hold`), high before anything else is built, so the Board stays on without USB power once its power button is released.
+
+The microSD card shares the e-paper controller's SPI bus through its own chip select.
 
 ## Exposed pins
 

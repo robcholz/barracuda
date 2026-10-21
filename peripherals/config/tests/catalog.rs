@@ -1580,3 +1580,191 @@ fn single_instance_peripherals_reject_a_second_device() {
         "{error}"
     );
 }
+
+const ANALOG_MANIFEST: &str = r#"
+id: test-analog
+api-version: 1
+peripheral: buttons
+implementation:
+  package: test-analog
+  crate: test_analog
+  factory: "::{{crate}}::Implementation<{{binding.sense.type}}, {{binding.charging.type}}>"
+  bindings-expression: "::{{crate}}::Bindings::new({{binding.sense.value}}, {{binding.charging.value}})"
+  config-expression: "()"
+bindings:
+  sense:
+    kind: analog-input
+  charging:
+    kind: digital-input
+    required: false
+parameters: {}
+"#;
+
+const ANALOG_MONITOR_MANIFEST: &str = r#"
+id: test-analog-monitor
+api-version: 1
+peripheral: power-monitor
+implementation:
+  package: test-analog-monitor
+  crate: test_analog_monitor
+  factory: "::{{crate}}::Implementation<{{binding.sense.type}}>"
+  bindings-expression: "{{binding.sense.value}}"
+  config-expression: "()"
+bindings:
+  sense:
+    kind: analog-input
+parameters: {}
+"#;
+
+#[test]
+fn analog_inputs_on_one_controller_share_one_converter() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-analog", ANALOG_MANIFEST);
+    add_driver(root.path(), "test-analog-monitor", ANALOG_MONITOR_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: analog-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    analog-input:
+      ladder:
+        peripheral: ADC1
+        pin: GPIO5
+      battery-sense:
+        peripheral: ADC1
+        pin: GPIO6
+  devices:
+    buttons:
+      implementation: test-analog
+      bindings: { sense: ladder }
+    battery:
+      implementation: test-analog-monitor
+      bindings: { sense: battery-sense }
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved analog Implementations");
+    let rust = render_board_hal(&board, &resolved).expect("generated analog HAL");
+
+    assert_valid_rust(&rust);
+    assert_eq!(rust.matches("hal::analog_converter!(ADC1").count(), 1);
+    assert_eq!(
+        rust.matches("hal::analog_channel(&mut shared_adc_adc1_config")
+            .count(),
+        2
+    );
+    // The converter is built after both channels are enabled.
+    let converter = rust.find("hal::analog_converter!").expect("converter");
+    let last_channel = rust.rfind("hal::analog_channel(").expect("channel");
+    assert!(last_channel < converter);
+    assert!(rust.contains(
+        "hal::AnalogInputChannel<::barracuda_platform_selected::__platform::hal::controller_binding_type!(ADC1), ::barracuda_platform_selected::__platform::hal::pin_binding_type!(GPIO6)>"
+    ));
+    assert!(rust.contains("hal::analog_input(shared_adc_adc1, analog_channel_buttons_sense)"));
+    // An optional digital input left out is `None` of the Platform's input type.
+    assert!(rust.contains("analog_channel_buttons_sense), None)"));
+    assert!(board.peripheral_io().uses_controller("ADC1"));
+}
+
+#[test]
+fn renders_a_pdm_microphone_and_amplifier_stream() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-pdm",
+        r#"
+id: test-pdm
+api-version: 1
+peripheral: audio-codec
+implementation:
+  package: test-pdm
+  crate: test_pdm
+  factory: "::{{crate}}::Implementation<{{binding.stream.type}}>"
+  bindings-expression: "{{binding.stream.value}}"
+  config-expression: "()"
+bindings:
+  stream:
+    kind: pdm-i2s-stream
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let yaml = |amplifier: &str| {
+        format!(
+            "name: pdm-board\nhardware:\n  chip: test-chip\nnative-layout:\n  artifact: memory.x\nperipherals:\n  io:\n    pdm-i2s-stream:\n      audio:\n        peripheral: I2S0\n        dma: DMA_I2S0\n        clk: GPIO33\n        din: GPIO23\n{amplifier}        sample-rate-hz: 16000\n        dma-buffer-bytes: 4096\n  devices:\n    audio:\n      implementation: test-pdm\n      bindings: {{ stream: audio }}\n"
+        )
+    };
+    let board = parse(&yaml("        bclk: GPIO19\n        dout: GPIO22\n")).expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved PDM Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated PDM HAL");
+    assert_valid_rust(&rust);
+    assert!(rust.contains("hal::i2s_dma_buffers!(4096)"));
+    assert!(rust.contains("hal::pdm_i2s_stream(bindings.audio_stream_controller, bindings.audio_stream_dma, ::barracuda_platform_selected::__platform::hal::runtime_pin(bindings.audio_stream_clk), Some(::barracuda_platform_selected::__platform::hal::runtime_pin(bindings.audio_stream_din)), Some("));
+    assert!(rust.contains("16000, tx_dma, rx_dma"));
+    assert!(board.peripheral_io().uses_dma("DMA_I2S0"));
+    assert!(board.peripheral_io().uses_controller("I2S0"));
+
+    let microphone = parse(&yaml("")).expect("microphone-only Board YAML");
+    let resolved = resolve_board(&microphone, &catalog).expect("resolved PDM Implementation");
+    let rust = render_board_hal(&microphone, &resolved).expect("generated PDM HAL");
+    assert!(rust.contains("runtime_pin(bindings.audio_stream_din)), None, None, 16000"));
+
+    let half_amplifier = parse(&yaml("        bclk: GPIO19\n"));
+    assert!(half_amplifier.is_err());
+}
+
+#[test]
+fn spi_devices_on_one_controller_share_one_bus_owner() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-display", DISPLAY_MANIFEST);
+    add_driver(
+        root.path(),
+        "test-card",
+        r#"
+id: test-card
+api-version: 1
+peripheral: removable-storage
+implementation:
+  package: test-card
+  crate: test_card
+  factory: "::{{crate}}::Implementation<{{binding.spi.type}}>"
+  bindings-expression: "{{binding.spi.value}}"
+  config-expression: "()"
+bindings:
+  spi:
+    kind: spi-device
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let yaml = |card_miso: &str| {
+        format!(
+            "name: shared-spi\nhardware:\n  chip: test-chip\nnative-layout:\n  artifact: memory.x\nperipherals:\n  io:\n    spi-device:\n      display-spi:\n        peripheral: SPI3\n        sck: GPIO18\n        mosi: GPIO23\n        miso: GPIO38\n        chip-select: GPIO5\n        frequency-hz: 40000000\n      card-spi:\n        peripheral: SPI3\n        sck: GPIO18\n        mosi: GPIO23\n        miso: {card_miso}\n        chip-select: GPIO4\n        frequency-hz: 20000000\n  devices:\n    display:\n      implementation: test-display\n      bindings: {{ spi: display-spi, dc: GPIO15 }}\n    card:\n      implementation: test-card\n      bindings: {{ spi: card-spi }}\n"
+        )
+    };
+    let board = parse(&yaml("GPIO38")).expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved shared SPI");
+    let rust = render_board_hal(&board, &resolved).expect("generated shared SPI HAL");
+
+    assert_valid_rust(&rust);
+    assert_eq!(rust.matches("hal::spi_bus_manager!(").count(), 1);
+    assert!(rust.contains("hal::spi_bus_full_duplex(bindings.shared_spi_spi3_controller, bindings.shared_spi_spi3_sck, bindings.shared_spi_spi3_mosi, bindings.shared_spi_spi3_miso, "));
+    assert!(rust.contains(
+        "hal::shared_spi_device(shared_spi_spi3, bindings.display_spi_chip_select, 40000000)"
+    ));
+    assert!(rust.contains(
+        "hal::shared_spi_device(shared_spi_spi3, bindings.card_spi_chip_select, 20000000)"
+    ));
+    assert!(rust.contains("hal::SharedSpiDevice"));
+    // One controller binding field, not one per device.
+    assert!(!rust.contains("display_spi_controller"));
+    assert!(!rust.contains("card_spi_controller"));
+
+    // Devices on one controller must agree on its lines.
+    assert!(parse(&yaml("GPIO19")).is_err());
+}

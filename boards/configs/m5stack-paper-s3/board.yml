@@ -37,7 +37,32 @@ peripherals:
         data: [GPIO6, GPIO14, GPIO7, GPIO12, GPIO9, GPIO11, GPIO8, GPIO10]
         frequency-hz: 16000000
         dma-buffer-bytes: 256
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` PaperS3: the battery on ADC1 GPIO3
+        # through a divider of two; the charger's CHG_STAT (GPIO4) reads low
+        # while it charges (`M5PaperS3_CHG_STAT_PIN`, `isCharging`).
+        peripheral: ADC1
+        pin: GPIO3
+    spi-device:
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5PaperS3, board_M5PaperDIY).
+        peripheral: SPI2
+        sck: GPIO39
+        mosi: GPIO38
+        miso: GPIO40
+        chip-select: GPIO47
+        frequency-hz: 20000000
   devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense, charging: GPIO4 }
+      parameters:
+        divider-numerator: 2
+        charging-level: low
     display:
       implementation: ed047tc1-display
       bindings:

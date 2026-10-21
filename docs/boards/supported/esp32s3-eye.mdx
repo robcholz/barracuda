@@ -29,7 +29,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | --- | --- | --- |
 | `camera` | Camera (OV2640) | [`camera`](/plugins/vm-camera) |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
-| `buttons` | BOOT button (GPIO0) | — |
+| `buttons` | Buttons (ADC resistor ladder) | — |
 
-The four buttons on the ADC ladder (GPIO1) are not declared yet: no Platform
-has an analog binding.
+The four front buttons share one ADC ladder on GPIO1. A Board declares one
+`buttons` device, so the BOOT button (GPIO0) is not declared.

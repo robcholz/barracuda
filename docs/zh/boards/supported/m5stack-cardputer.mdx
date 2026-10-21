@@ -28,11 +28,13 @@ cargo image deploy
 
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
-| `led-strip` | RGB LED（WS2812，GPIO21） | [`light`](/zh/plugins/vm-led-strip) |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 | `buttons` | G0 按键（GPIO0） | — |
+| `battery` | 电池电压（ADC 电阻分压） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `audio` | 音频（NS4168 功放、SPM1423 PDM 麦克风） | [`audio`](/zh/plugins/vm-audio) |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
 
-Cardputer v1.1 的 RGB LED 由显示屏背光引脚 GPIO38 供电，因此只在背光打开时点亮。
+StampS3 上 GPIO21 的 WS2812 RGB LED 没有声明：microSD 卡和显示屏各占用 ESP32-S3 两个 SPI 控制器中的一个，没有剩余的控制器给 LED 的 SPI 输出。
 
 ## 可用引脚
 

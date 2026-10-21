@@ -41,7 +41,23 @@ peripherals:
         data: [GPIO11, GPIO9, GPIO8, GPIO10, GPIO12, GPIO18, GPIO17, GPIO16]
         xclk-frequency-hz: 16000000
         dma-buffer-bytes: 65536
+    analog-input:
+      button-ladder:
+        # Espressif board manager `esp32_s3_eye`: `adc_button_group` on ADC1
+        # channel 0, GPIO1.
+        peripheral: ADC1
+        pin: GPIO1
   devices:
+    buttons:
+      # BUTTON_4, BUTTON_3, BUTTON_2, BUTTON_1 in button-index order
+      # (`voltage_range`, `max_voltage` 3000 mV). A Board declares one
+      # `buttons` device, so the separate BOOT button (GPIO0, active low)
+      # is not declared.
+      implementation: adc-ladder-buttons
+      bindings: { sense: button-ladder }
+      parameters:
+        levels-millivolts: "380 820 1980 2410"
+        idle-millivolts: 3000
     camera:
       implementation: ov2640-camera
       bindings:
@@ -64,11 +80,3 @@ peripherals:
         color-order: rgb
         invert-colors: true
         backlight-active-high: false
-    # BOOT on GPIO0, active low, with the pull-up Espressif's esp_boards
-    # `esp32_s3_eye` enables. The four ADC-ladder buttons are not declared.
-    buttons:
-      implementation: gpio-buttons
-      bindings:
-        button-1: GPIO0
-      parameters:
-        pull: up

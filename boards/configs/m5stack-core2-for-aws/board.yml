@@ -28,8 +28,32 @@ peripherals:
         peripheral: SPI3
         sck: GPIO18
         mosi: GPIO23
+        miso: GPIO38
         chip-select: GPIO5
         frequency-hz: 40000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5StackCore2, board_M5Tough): the
+        # microSD card shares the LCD's bus with its own chip select, GPIO4.
+        peripheral: SPI3
+        sck: GPIO18
+        mosi: GPIO23
+        miso: GPIO38
+        chip-select: GPIO4
+        frequency-hz: 20000000
+    pdm-i2s-stream:
+      audio:
+        # M5Unified `_begin_audio`: the SPM1423 PDM microphone (clock GPIO0,
+        # data GPIO34) and the NS4168 amplifier (BCK GPIO12, LRCK GPIO0,
+        # data GPIO2) share GPIO0, so one I2S controller serves them in
+        # turn. I2S0 is the ESP32's PDM receiver.
+        peripheral: I2S0
+        dma: DMA_I2S0
+        clk: GPIO0
+        din: GPIO34
+        bclk: GPIO12
+        dout: GPIO2
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
     spi-output:
       led-bar-data:
         # M5GO-Bottom for AWS: 10 SK6812 LEDs in one chain on GPIO25
@@ -37,6 +61,16 @@ peripherals:
         data: GPIO25
         frequency-hz: 2400000
   devices:
+    audio:
+      # Codec-less: the NS4168 is switched on through the PMIC, AXP192 GPIO2
+      # or AXP2101 ALDO3 (M5Unified `_speaker_enabled_cb_core2`).
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: audio, pmic: internal-i2c }
+      parameters:
+        pmic-power: core2-speaker
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
     # The base's two five-LED side bars, one 10-LED chain, GRB order.
     led-strip:
       implementation: ws2812-spi-led-strip

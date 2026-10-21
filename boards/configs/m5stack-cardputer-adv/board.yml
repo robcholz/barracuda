@@ -11,13 +11,65 @@ native-layout:
 peripherals:
   io:
     spi-device:
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5Cardputer, board_M5CardputerADV);
+        # the LCD keeps SPI3.
+        peripheral: SPI2
+        sck: GPIO40
+        mosi: GPIO14
+        miso: GPIO39
+        chip-select: GPIO12
+        frequency-hz: 20000000
       display-spi:
         peripheral: SPI3
         sck: GPIO36
         mosi: GPIO35
         chip-select: GPIO37
         frequency-hz: 40000000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` (DinMeter, Cardputer, Cardputer-ADV):
+        # the battery on ADC1 GPIO10 through a divider of two.
+        peripheral: ADC1
+        pin: GPIO10
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_in` (board_M5CardputerADV): SCL GPIO9,
+        # SDA GPIO8; the ES8311 answers at 18h.
+        peripheral: I2C0
+        scl: GPIO9
+        sda: GPIO8
+        frequency-hz: 400000
+    i2s-stream:
+      audio-stream:
+        # M5Unified `_begin_audio` (board_M5CardputerADV): BCK GPIO41, WS
+        # GPIO43, data out GPIO42, data in GPIO46; no MCLK.
+        peripheral: I2S0
+        dma: DMA_CH1
+        bclk: GPIO41
+        ws: GPIO43
+        dout: GPIO42
+        din: GPIO46
+        sample-rate-hz: 16000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
   devices:
+    audio-codec:
+      # ES8311 clocked from BCLK (M5Unified `_speaker_enabled_cb_cardputer_adv`:
+      # MCLK=BCLK, MULT_PRE=3); its NS4150B amplifier has no enable line.
+      implementation: es8311-audio-codec
+      bindings: { control: internal-i2c, stream: audio-stream }
+      parameters:
+        clock-source: bclk
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 2
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO38, dc: GPIO34, reset: GPIO33, spi: display-spi }

@@ -49,7 +49,20 @@ peripherals:
         channels: 2
         bits-per-sample: 16
         dma-buffer-bytes: 4096
+    spi-device:
+      card-spi:
+        # Espressif board manager `esp32_s3_box_2` `fs_sdcard`: SPI2_HOST, SCK
+        # GPIO17, MOSI GPIO16, MISO GPIO18, chip select GPIO15, 20 MHz.
+        peripheral: SPI2
+        sck: GPIO17
+        mosi: GPIO16
+        miso: GPIO18
+        chip-select: GPIO15
+        frequency-hz: 20000000
   devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
     audio-codec:
       implementation: es8389-audio-codec
       bindings:

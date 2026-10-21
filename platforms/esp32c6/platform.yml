@@ -15,7 +15,7 @@ build:
       cargo install espup
       espup install --stable-version 1.98.1 --targets esp32c6 --esp-riscv-gcc
 hal:
-  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, power-hold]
+  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, analog-input, power-hold]
   runtime-i2c-controllers: [I2C0]
   runtime-spi-controllers: [SPI2]
   runtime-uart-controllers: [UART1]

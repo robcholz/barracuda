@@ -8,6 +8,9 @@ description = "ESP32-S3 Platform implementation for Barracuda"
 default = ["runtime-i2s", "runtime-pwm"]
 runtime-i2s = []
 runtime-pwm = []
+# Set by the ESP32 Platform, whose I2S master clock reaches only fixed pins;
+# declared here because this Platform shares its I2S stream adapter.
+fixed-mclk-pins = []
 
 [dependencies]
 barracuda-board.workspace = true
