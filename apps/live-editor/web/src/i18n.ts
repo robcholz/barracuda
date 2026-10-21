@@ -279,7 +279,7 @@ const en = {
   folder: "Folder",
   installText: "You choose Install in the portal window",
   chooseInstall:
-    "The portal window shows what it received. Choose 安装到设备 (Install on device) there.",
+    'The portal window shows what it received. Choose "Install on device" there.',
   writing: "Writing ",
   onDevice: (name: string) => `${name} is on the device`,
   openFromLauncher: "Open it from the device's launcher.",
