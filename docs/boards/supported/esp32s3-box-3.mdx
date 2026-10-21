@@ -28,3 +28,34 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `pmod1-io1` | `GPIO42` |
+| `pmod1-io3` | `GPIO39` |
+| `pmod1-io4` | `GPIO40` |
+| `pmod1-io5` | `GPIO21` |
+| `pmod1-io7` | `GPIO38` |
+| `pmod1-io8` | `GPIO41` |
+| `pmod2-io1` | `GPIO13` |
+| `pmod2-io2` | `GPIO9` |
+| `pmod2-io3` | `GPIO12` |
+| `pmod2-io4` | `GPIO44` |
+| `pmod2-io5` | `GPIO10` |
+| `pmod2-io6` | `GPIO14` |
+| `pmod2-io7` | `GPIO11` |
+| `pmod2-io8` | `GPIO43` |
+
+The pins are on the PMOD1 and PMOD2 headers of the ESP32-S3-BOX-3-DOCK,
+labelled IO1 to IO8. PMOD1 IO2 and IO6 are the USB D+ and D- lines and are not
+exposed.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("pmod1-io1", "up")
+print(pin:read())
+```

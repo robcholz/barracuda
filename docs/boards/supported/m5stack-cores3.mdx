@@ -30,6 +30,26 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `touch` | Touch controller (FT6336U) | — |
+| `inertial-measurement` | IMU (BMI270) | [`motion`](/plugins/vm-imu) |
 
 The touch implementation releases the controller's reset, P0_0 of the AW9523B
 expander at `58h`, which is not a device of its own.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO1` |
+| `port-a-sda` | `GPIO2` |
+| `port-b-g8` | `GPIO8` |
+| `port-b-g9` | `GPIO9` |
+| `port-c-g17` | `GPIO17` |
+| `port-c-g18` | `GPIO18` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

@@ -29,3 +29,19 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `status-led` | Indicator LED | — |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g32` | `GPIO32` |
+| `grove-g33` | `GPIO33` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g32", "up")
+print(pin:read())
+```

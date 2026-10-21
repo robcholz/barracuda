@@ -32,6 +32,11 @@ toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+exposed-io:
+  pins:
+    # Grove port G53/G54 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g53: { pin: GPIO53 }
+    grove-g54: { pin: GPIO54 }
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.

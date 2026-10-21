@@ -11,3 +11,25 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+exposed-io:
+  pins:
+    # Port A (red) and Port C (blue): M5Stack PowerHub pin map; M5Unified
+    # `_pin_table_i2c_ex_in` (external SCL/SDA).
+    port-a-scl: { pin: GPIO16 }
+    port-a-sda: { pin: GPIO15 }
+    port-c-g1: { pin: GPIO1 }
+    port-c-g2: { pin: GPIO2 }
+    # EXT 2.54-16P header (M5Stack PowerHub pin map).
+    header-g4: { pin: GPIO4 }
+    header-g5: { pin: GPIO5 }
+    header-g6: { pin: GPIO6 }
+    header-g7: { pin: GPIO7 }
+    header-g41: { pin: GPIO41 }
+    header-g42: { pin: GPIO42 }
+    header-g43: { pin: GPIO43 }
+    header-g44: { pin: GPIO44 }
+    # RS485 transceiver MCU_485_TXD, MCU_485_RXD, MCU_485_DIR (M5Stack PowerHub pin
+    # map).
+    rs485-tx: { pin: GPIO8 }
+    rs485-rx: { pin: GPIO17 }
+    rs485-dir: { pin: GPIO18 }

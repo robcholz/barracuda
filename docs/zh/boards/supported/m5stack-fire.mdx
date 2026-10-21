@@ -29,3 +29,20 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g36` | `GPIO36` |
+
+Port A 就是内部 I2C 总线，Port C 的 `GPIO16` / `GPIO17` 接 PSRAM，所以两者都没有开放。
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-b-g26", "up")
+print(pin:read())
+```

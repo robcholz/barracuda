@@ -14,3 +14,18 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  devices:
+    status-led:
+      implementation: indicator-led
+      bindings:
+        # Status LED on GPIO2, active high: M5Unified drives it low for off
+        # (`TimerCam_LED_PIN`).
+        pin: GPIO2
+      parameters:
+        active-level: high
+exposed-io:
+  pins:
+    # Grove port G4/G13 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g4: { pin: GPIO4 }
+    grove-g13: { pin: GPIO13 }

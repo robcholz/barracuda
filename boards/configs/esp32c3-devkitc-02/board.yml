@@ -7,3 +7,18 @@ toolchain:
   target: riscv32imc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    spi-output:
+      rgb-led-data:
+        # One WS2812 on GPIO8 (Espressif esp32_c3_devkitc_02 board_devices.yaml).
+        data: GPIO8
+        frequency-hz: 2400000
+  devices:
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb

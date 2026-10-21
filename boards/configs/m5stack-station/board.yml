@@ -41,3 +41,18 @@ peripherals:
         offset-y: 40
         invert-colors: true
         orientation: deg90
+exposed-io:
+  pins:
+    # Ports A1/A2 share one bus (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA));
+    # B1 and C1 from `_pin_table_port_bc`, B2 and C2 from `_pin_table_port_de`
+    # (M5Unified).
+    port-a-scl: { pin: GPIO33 }
+    port-a-sda: { pin: GPIO32 }
+    port-b1-g25: { pin: GPIO25 }
+    port-b1-g35: { pin: GPIO35 }
+    port-b2-g26: { pin: GPIO26 }
+    port-b2-g36: { pin: GPIO36 }
+    port-c1-g13: { pin: GPIO13 }
+    port-c1-g14: { pin: GPIO14 }
+    port-c2-g16: { pin: GPIO16 }
+    port-c2-g17: { pin: GPIO17 }

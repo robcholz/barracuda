@@ -11,3 +11,38 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified internal bus of the AtomS3R family: SCL G0, SDA G45.
+        peripheral: I2C0
+        scl: GPIO0
+        sda: GPIO45
+        frequency-hz: 400000
+  devices:
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 68h (M5Stack pin map).
+        address: 104
+exposed-io:
+  pins:
+    # Grove (PORT.CUSTOM) G1/G2: M5Stack AtomS3R-Ext pin map.
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }
+    # 2.54 mm proto header, as printed (M5Stack AtomS3R-Ext pin map).
+    header-g3: { pin: GPIO3 }
+    header-g4: { pin: GPIO4 }
+    header-g9: { pin: GPIO9 }
+    header-g10: { pin: GPIO10 }
+    header-g11: { pin: GPIO11 }
+    header-g12: { pin: GPIO12 }
+    header-g13: { pin: GPIO13 }
+    header-g17: { pin: GPIO17 }
+    header-g21: { pin: GPIO21 }
+    header-g40: { pin: GPIO40 }
+    header-g42: { pin: GPIO42 }
+    header-g46: { pin: GPIO46 }
+    header-g48: { pin: GPIO48 }

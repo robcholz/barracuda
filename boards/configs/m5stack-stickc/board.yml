@@ -41,3 +41,16 @@ peripherals:
         offset-y: 1
         invert-colors: true
         orientation: deg180
+    status-led:
+      implementation: indicator-led
+      bindings:
+        # Red status LED on GPIO10, active low (Espressif m5stack_stickc
+        # board_devices.yaml).
+        pin: GPIO10
+      parameters:
+        active-level: low
+exposed-io:
+  pins:
+    # Grove port G32/G33 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g32: { pin: GPIO32 }
+    grove-g33: { pin: GPIO33 }

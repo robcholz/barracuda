@@ -33,3 +33,8 @@ peripherals:
         height: 48
         column-offset: 32
         com-pins: 18
+exposed-io:
+  pins:
+    # Grove port G4/G5 (M5Unified `_pin_table_port_bc`).
+    grove-g4: { pin: GPIO4 }
+    grove-g5: { pin: GPIO5 }

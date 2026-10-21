@@ -29,5 +29,22 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 彩色电子墨水屏，4 英寸 400 x 600，六色（E Ink Spectra 6，ED2208 控制器） | [`display`](/zh/plugins/vm-display) |
+| `audio-codec` | 音频编解码器（ES8311 和 ES7210） | [`audio`](/zh/plugins/vm-audio) |
+| `real-time-clock` | 实时时钟（RX8130CE） | — |
 
 Spectra 6 不支持局部刷新：每次刷新都会重绘整块屏幕，耗时 10 到 20 秒。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO5` |
+| `port-a-sda` | `GPIO4` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

@@ -30,3 +30,35 @@ This Board declares no peripherals yet. The network, the Agent, and the
 portal run on it; add its devices to
 `boards/configs/m5stack-powerhub/board.yml` to drive them. See
 [Peripheral composition](/boards/peripherals).
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO16` |
+| `port-a-sda` | `GPIO15` |
+| `port-c-g1` | `GPIO1` |
+| `port-c-g2` | `GPIO2` |
+| `header-g4` | `GPIO4` |
+| `header-g5` | `GPIO5` |
+| `header-g6` | `GPIO6` |
+| `header-g7` | `GPIO7` |
+| `header-g41` | `GPIO41` |
+| `header-g42` | `GPIO42` |
+| `header-g43` | `GPIO43` |
+| `header-g44` | `GPIO44` |
+| `rs485-tx` | `GPIO8` |
+| `rs485-rx` | `GPIO17` |
+| `rs485-dir` | `GPIO18` |
+
+The `header-*` pins are on the EXT 2.54-16P header. `rs485-tx`, `rs485-rx`,
+and `rs485-dir` are the UART and direction pins of the on-board RS485
+transceiver.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

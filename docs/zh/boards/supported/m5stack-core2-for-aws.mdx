@@ -32,3 +32,22 @@ cargo image deploy
 | `touch` | 触摸控制器（FT6336U） | — |
 
 触摸屏报告的范围是 320x280：屏幕下方的一条区域是三个触摸按键。显示屏实现的 PMIC 上电过程会连同面板一起复位触摸控制器。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO33` |
+| `port-a-sda` | `GPIO32` |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g36` | `GPIO36` |
+| `port-c-g13` | `GPIO13` |
+| `port-c-g14` | `GPIO14` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

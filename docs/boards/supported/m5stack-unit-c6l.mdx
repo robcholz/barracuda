@@ -29,3 +29,18 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | OLED display (SSD1306) | [`display`](/plugins/vm-display) |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g4` | `GPIO4` |
+| `grove-g5` | `GPIO5` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g4", "up")
+print(pin:read())
+```

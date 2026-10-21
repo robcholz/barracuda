@@ -14,6 +14,13 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # Internal bus SCL G48, SDA G47 (M5Unified).
+        peripheral: I2C0
+        scl: GPIO48
+        sda: GPIO47
+        frequency-hz: 400000
     spi-device:
       display-spi:
         peripheral: SPI3
@@ -32,3 +39,15 @@ peripherals:
         offset-x: 52
         offset-y: 40
         invert-colors: true
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 68h (M5Stack StickS3 pin map). M5Unified rotates its axes (X=+Y,
+        # Y=-X).
+        address: 104
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA).
+    port-a-scl: { pin: GPIO10 }
+    port-a-sda: { pin: GPIO9 }

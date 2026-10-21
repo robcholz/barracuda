@@ -27,3 +27,16 @@ peripherals:
         dc: GPIO15
         reset: GPIO0
         spi: display-spi
+    status-led:
+      implementation: indicator-led
+      bindings:
+        # Status LED on GPIO10, active low (Espressif m5stack_coreink; CoreInk
+        # FactoryTest `set_led`).
+        pin: GPIO10
+      parameters:
+        active-level: low
+exposed-io:
+  pins:
+    # Grove port G32/G33 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g32: { pin: GPIO32 }
+    grove-g33: { pin: GPIO33 }

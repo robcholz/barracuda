@@ -10,6 +10,14 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # Internal bus SCL G12, SDA G11 (M5GFX `board_M5Dial` touch configuration;
+        # M5Unified).
+        peripheral: I2C0
+        scl: GPIO12
+        sda: GPIO11
+        frequency-hz: 400000
     spi-device:
       display-spi:
         peripheral: SPI2
@@ -34,3 +42,20 @@ peripherals:
         invert-colors: true
         orientation: deg0
         width: 240
+    touch:
+      # FT3267 at 38h, 240x240, interrupt on G14, reset with the display
+      # (M5GFX `board_M5Dial` Touch_FT5x06 configuration).
+      implementation: ft5x06-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 56
+        width: 240
+        height: 240
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Port B: M5Unified
+    # `_pin_table_port_bc`.
+    port-a-scl: { pin: GPIO15 }
+    port-a-sda: { pin: GPIO13 }
+    port-b-g1: { pin: GPIO1 }
+    port-b-g2: { pin: GPIO2 }

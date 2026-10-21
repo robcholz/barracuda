@@ -25,10 +25,9 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/esp32p4-function-ev-board/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `audio-codec` | Audio codec (ES8311) | [`audio`](/plugins/vm-audio) |
 
 ## Wired Ethernet
 
@@ -38,7 +37,8 @@ over it: the EMAC on the RMII pads, the PHY at address 1 with its reset on
 `GPIO51`, and a DHCP client. Plug in a cable and the console logs
 `network is up at <address>`; the portal answers there on port 8787.
 
-`GPIO35`, the BOOT button, is RMII TXD1: the button is unusable while Ethernet runs.
+`GPIO35`, the BOOT button, is RMII TXD1: the button is unusable while Ethernet
+runs.
 
 | Signal | Pin |
 | --- | --- |

@@ -39,3 +39,16 @@ peripherals:
         offset-x: 52
         offset-y: 40
         invert-colors: true
+    status-led:
+      implementation: indicator-led
+      bindings:
+        # Red status LED, shared with the IR emitter, on GPIO19, active high (Espressif
+        # m5stack_stickc_plus2; M5Unified `StickCPlus2_LED_PIN`).
+        pin: GPIO19
+      parameters:
+        active-level: high
+exposed-io:
+  pins:
+    # Grove port G32/G33 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g32: { pin: GPIO32 }
+    grove-g33: { pin: GPIO33 }

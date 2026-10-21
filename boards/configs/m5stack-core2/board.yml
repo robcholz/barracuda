@@ -53,3 +53,13 @@ peripherals:
       parameters:
         width: 320
         height: 280
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:
+    # M5Unified `_pin_table_port_bc`.
+    port-a-scl: { pin: GPIO33 }
+    port-a-sda: { pin: GPIO32 }
+    port-b-g26: { pin: GPIO26 }
+    port-b-g36: { pin: GPIO36 }
+    port-c-g13: { pin: GPIO13 }
+    port-c-g14: { pin: GPIO14 }

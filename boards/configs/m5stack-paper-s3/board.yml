@@ -14,6 +14,13 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # Internal bus SCL G42, SDA G41 (M5Unified; Espressif m5stack_papers3).
+        peripheral: I2C0
+        scl: GPIO42
+        sda: GPIO41
+        frequency-hz: 400000
     parallel-output:
       epd-bus:
         # M5GFX board_M5PaperS3 Bus_EPD: the ED047TC1 source data DB0..DB7 on
@@ -44,3 +51,14 @@ peripherals:
       parameters:
         # M5GFX offset_rotation 3: upright portrait, 540 x 960.
         mounting: deg270
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 68h (Espressif m5stack_papers3; M5Stack PaperS3 pin map).
+        address: 104
+exposed-io:
+  pins:
+    # Grove port G1/G2 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }

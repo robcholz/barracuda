@@ -29,3 +29,21 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (FT3267) | — |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO15` |
+| `port-a-sda` | `GPIO13` |
+| `port-b-g1` | `GPIO1` |
+| `port-b-g2` | `GPIO2` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

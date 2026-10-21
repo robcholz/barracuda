@@ -29,3 +29,28 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO33` |
+| `port-a-sda` | `GPIO32` |
+| `port-b1-g25` | `GPIO25` |
+| `port-b1-g35` | `GPIO35` |
+| `port-b2-g26` | `GPIO26` |
+| `port-b2-g36` | `GPIO36` |
+| `port-c1-g13` | `GPIO13` |
+| `port-c1-g14` | `GPIO14` |
+| `port-c2-g16` | `GPIO16` |
+| `port-c2-g17` | `GPIO17` |
+
+Ports A1 and A2 carry the same bus.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

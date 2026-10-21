@@ -43,3 +43,14 @@ peripherals:
         height: 540
         # M5GFX offset_rotation 3: upright portrait, 540 x 960.
         mounting: deg270
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:
+    # M5Unified `_pin_table_port_bc`. The ports' 5 V supply is switched by GPIO5
+    # (M5Unified `M5Paper_EXT5V_ENABLE_PIN`).
+    port-a-scl: { pin: GPIO32 }
+    port-a-sda: { pin: GPIO25 }
+    port-b-g26: { pin: GPIO26 }
+    port-b-g33: { pin: GPIO33 }
+    port-c-g18: { pin: GPIO18 }
+    port-c-g19: { pin: GPIO19 }

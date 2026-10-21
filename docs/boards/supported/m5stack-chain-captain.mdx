@@ -29,3 +29,21 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (JD9853) | [`display`](/plugins/vm-display) |
+| `real-time-clock` | Real-time clock (RX8130CE) | — |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO6` |
+| `port-a-sda` | `GPIO7` |
+| `port-b-g17` | `GPIO17` |
+| `port-b-g18` | `GPIO18` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```
