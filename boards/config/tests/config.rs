@@ -26,6 +26,21 @@ fn parses_concrete_board_hardware_and_native_layout() {
 }
 
 #[test]
+fn a_power_latch_is_a_hardware_fact_with_a_pin() {
+    let board = parse(&VALID.replace("  chip: macos\n", "  chip: macos\n  power-hold: GPIO4\n"))
+        .expect("Board with a power latch");
+    assert_eq!(board.hardware().power_hold(), Some("GPIO4"));
+    assert_eq!(
+        parse(VALID).expect("valid Board").hardware().power_hold(),
+        None
+    );
+    assert!(matches!(
+        parse(&VALID.replace("  chip: macos\n", "  chip: macos\n  power-hold: ' '\n")),
+        Err(ConfigError::EmptyHardwareIdentifier { .. })
+    ));
+}
+
+#[test]
 fn keeps_plugin_settings_without_interpreting_them() {
     let yaml = format!(
         "{VALID}profile: screen\nplugins:\n  example:\n    slots: 3\n    label: kitchen\n    enabled: true\n    peripherals:\n      display.main: front\n  other:\n    enabled: false\n"

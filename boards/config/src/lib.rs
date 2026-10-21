@@ -253,6 +253,9 @@ impl BoardDefinition {
         if let Some(coprocessor) = &self.hardware.wifi_coprocessor {
             coprocessor.validate()?;
         }
+        if let Some(pin) = &self.hardware.power_hold {
+            validate_identifier("power-hold", "pin", pin)?;
+        }
         if let Some(toolchain) = &self.toolchain {
             if toolchain.target.trim().is_empty() {
                 return Err(ConfigError::EmptyToolchainTarget);
@@ -1571,9 +1574,20 @@ pub struct HardwareDefinition {
     ethernet: Option<EthernetDefinition>,
     #[serde(default, rename = "wifi-coprocessor")]
     wifi_coprocessor: Option<WifiCoprocessorDefinition>,
+    #[serde(default, rename = "power-hold")]
+    power_hold: Option<String>,
 }
 
 impl HardwareDefinition {
+    /// Returns the chip pin that latches the Board's battery power on, when
+    /// the Board has one: the Platform entry drives it high before anything
+    /// else, or the Board switches itself off when its power button is
+    /// released.
+    #[must_use]
+    pub fn power_hold(&self) -> Option<&str> {
+        self.power_hold.as_deref()
+    }
+
     /// Returns the canonical HAL chip name.
     #[must_use]
     pub fn chip(&self) -> &str {

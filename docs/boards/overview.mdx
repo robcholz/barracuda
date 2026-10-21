@@ -195,6 +195,19 @@ A Board may declare both `ethernet` and `wifi-coprocessor`. It still has one
 IP stack: the Platform runs it on Ethernet while the cable is up and on the
 Wi-Fi station otherwise, and restarts DHCP when it switches.
 
+`power-hold` names the pin of a battery power latch: a Board such as the
+M5StickC Plus2 switches itself off on battery once its power button is
+released, unless that pin is high. The Platform entry drives it high right
+after the chip starts, before any peripheral is built, and keeps it there. A
+Platform without the `power-hold` binding rejects the Board, and the pin is
+never also a peripheral binding or an exposed pin.
+
+```yaml
+hardware:
+  chip: esp32
+  power-hold: GPIO4
+```
+
 Select a concrete Board once, then use the ordinary build command:
 
 ```bash

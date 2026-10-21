@@ -47,6 +47,9 @@ pub enum HalBinding {
     /// Platform Wi-Fi and IP link over a Board-declared ESP-Hosted
     /// co-processor on SDIO (`hardware.wifi-coprocessor` in `board.yml`).
     WifiCoprocessorSdio,
+    /// A battery power latch pin the Platform entry drives high at start
+    /// (`hardware.power-hold` in `board.yml`).
+    PowerHold,
 }
 
 /// One ADC channel route owned by a Platform ADC controller pool.

@@ -123,30 +123,22 @@ impl It8951DisplayConfig {
 }
 
 /// Move-only resources consumed by the implementation.
-pub struct It8951Bindings<SPI, READY, PANEL, HOLD, DELAY> {
+pub struct It8951Bindings<SPI, READY, PANEL, DELAY> {
     spi: SPI,
     ready: READY,
     panel_power: PANEL,
-    power_hold: HOLD,
     delay: DELAY,
 }
 
-impl<SPI, READY, PANEL, HOLD, DELAY> It8951Bindings<SPI, READY, PANEL, HOLD, DELAY> {
+impl<SPI, READY, PANEL, DELAY> It8951Bindings<SPI, READY, PANEL, DELAY> {
     /// Combines the controller's SPI device, `HRDY` input, panel supply, and
     /// Board power latch.
     #[must_use]
-    pub const fn new(
-        spi: SPI,
-        ready: READY,
-        panel_power: PANEL,
-        power_hold: HOLD,
-        delay: DELAY,
-    ) -> Self {
+    pub const fn new(spi: SPI, ready: READY, panel_power: PANEL, delay: DELAY) -> Self {
         Self {
             spi,
             ready,
             panel_power,
-            power_hold,
             delay,
         }
     }
@@ -154,40 +146,34 @@ impl<SPI, READY, PANEL, HOLD, DELAY> It8951Bindings<SPI, READY, PANEL, HOLD, DEL
 
 /// Initialization or display-control failure.
 #[derive(Debug)]
-pub enum It8951DisplayError<SPI, READY, PANEL, HOLD> {
+pub enum It8951DisplayError<SPI, READY, PANEL> {
     /// The controller transaction failed or timed out.
     Controller(it8951::Error<SPI, READY>),
     /// The panel supply output failed.
     PanelPower(PANEL),
-    /// The Board power latch failed.
-    PowerHold(HOLD),
     /// This panel has no brightness control.
     BrightnessUnsupported,
     /// Only the Board's upright orientation is supported.
     OrientationUnsupported,
 }
 
-impl<SPI, READY, PANEL, HOLD> From<it8951::Error<SPI, READY>>
-    for It8951DisplayError<SPI, READY, PANEL, HOLD>
-{
+impl<SPI, READY, PANEL> From<it8951::Error<SPI, READY>> for It8951DisplayError<SPI, READY, PANEL> {
     fn from(error: it8951::Error<SPI, READY>) -> Self {
         Self::Controller(error)
     }
 }
 
 /// Error type of one concrete display.
-pub type ErrorOf<SPI, READY, PANEL, HOLD> = It8951DisplayError<
+pub type ErrorOf<SPI, READY, PANEL> = It8951DisplayError<
     <SPI as embedded_hal::spi::ErrorType>::Error,
     <READY as embedded_hal::digital::ErrorType>::Error,
     <PANEL as embedded_hal::digital::ErrorType>::Error,
-    <HOLD as embedded_hal::digital::ErrorType>::Error,
 >;
 
 /// Initialized IT8951 display.
-pub struct It8951Display<SPI, READY, PANEL, HOLD, DELAY> {
+pub struct It8951Display<SPI, READY, PANEL, DELAY> {
     controller: It8951<SPI, READY>,
     panel_power: PANEL,
-    power_hold: HOLD,
     delay: DELAY,
     config: It8951DisplayConfig,
     image_buffer: u32,
@@ -197,27 +183,25 @@ pub struct It8951Display<SPI, READY, PANEL, HOLD, DELAY> {
 }
 
 /// Static implementation factory.
-pub struct It8951DisplayImplementation<SPI, READY, PANEL, HOLD, DELAY>(
-    PhantomData<(SPI, READY, PANEL, HOLD, DELAY)>,
+pub struct It8951DisplayImplementation<SPI, READY, PANEL, DELAY>(
+    PhantomData<(SPI, READY, PANEL, DELAY)>,
 );
 
-impl<SPI, READY, PANEL, HOLD, DELAY> PeripheralImplementation
-    for It8951DisplayImplementation<SPI, READY, PANEL, HOLD, DELAY>
+impl<SPI, READY, PANEL, DELAY> PeripheralImplementation
+    for It8951DisplayImplementation<SPI, READY, PANEL, DELAY>
 where
     SPI: SpiDevice + 'static,
     READY: InputPin + 'static,
     PANEL: OutputPin + 'static,
-    HOLD: OutputPin + 'static,
     DELAY: DelayNs + 'static,
     SPI::Error: 'static,
     READY::Error: 'static,
     PANEL::Error: 'static,
-    HOLD::Error: 'static,
 {
-    type Bindings = It8951Bindings<SPI, READY, PANEL, HOLD, DELAY>;
+    type Bindings = It8951Bindings<SPI, READY, PANEL, DELAY>;
     type Config = It8951DisplayConfig;
-    type Peripheral = It8951Display<SPI, READY, PANEL, HOLD, DELAY>;
-    type Error = ErrorOf<SPI, READY, PANEL, HOLD>;
+    type Peripheral = It8951Display<SPI, READY, PANEL, DELAY>;
+    type Error = ErrorOf<SPI, READY, PANEL>;
 
     async fn initialize(
         bindings: Self::Bindings,
@@ -227,19 +211,14 @@ where
             spi,
             ready,
             panel_power,
-            mut power_hold,
             delay,
         } = bindings;
-        power_hold
-            .set_high()
-            .map_err(It8951DisplayError::PowerHold)?;
         let bytes = usize::from(config.width)
             .div_ceil(2)
             .saturating_mul(usize::from(config.height));
         let mut display = It8951Display {
             controller: It8951::new(spi, ready),
             panel_power,
-            power_hold,
             delay,
             config,
             image_buffer: M5PAPER_DEFAULT_IMAGE_BUFFER,
@@ -251,12 +230,11 @@ where
     }
 }
 
-impl<SPI, READY, PANEL, HOLD, DELAY> It8951Display<SPI, READY, PANEL, HOLD, DELAY>
+impl<SPI, READY, PANEL, DELAY> It8951Display<SPI, READY, PANEL, DELAY>
 where
     SPI: SpiDevice,
     READY: InputPin,
     PANEL: OutputPin,
-    HOLD: OutputPin,
     DELAY: DelayNs,
 {
     /// Returns the controller's image buffer address in use.
@@ -266,7 +244,7 @@ where
     }
 
     /// Cycles the panel supply and runs M5GFX's `Panel_IT8951::init`.
-    fn bring_up(&mut self) -> Result<(), ErrorOf<SPI, READY, PANEL, HOLD>> {
+    fn bring_up(&mut self) -> Result<(), ErrorOf<SPI, READY, PANEL>> {
         self.panel_power
             .set_low()
             .map_err(It8951DisplayError::PanelPower)?;
@@ -350,7 +328,7 @@ where
         })
     }
 
-    fn load_area(&mut self, area: Area) -> Result<(), ErrorOf<SPI, READY, PANEL, HOLD>> {
+    fn load_area(&mut self, area: Area) -> Result<(), ErrorOf<SPI, READY, PANEL>> {
         let row_bytes = self.row_bytes();
         let first = usize::from(area.x / 2);
         let length = usize::from(area.width).div_ceil(2);
@@ -387,20 +365,17 @@ pub fn dithered_level(pixel: Rgb565, x: i32, y: i32) -> u8 {
     u8::try_from(biased.min(15)).unwrap_or(15)
 }
 
-impl<SPI, READY, PANEL, HOLD, DELAY> OriginDimensions
-    for It8951Display<SPI, READY, PANEL, HOLD, DELAY>
-{
+impl<SPI, READY, PANEL, DELAY> OriginDimensions for It8951Display<SPI, READY, PANEL, DELAY> {
     fn size(&self) -> Size {
         self.config.size()
     }
 }
 
-impl<SPI, READY, PANEL, HOLD, DELAY> DrawTarget for It8951Display<SPI, READY, PANEL, HOLD, DELAY>
+impl<SPI, READY, PANEL, DELAY> DrawTarget for It8951Display<SPI, READY, PANEL, DELAY>
 where
     SPI: SpiDevice,
     READY: InputPin,
     PANEL: OutputPin,
-    HOLD: OutputPin,
     DELAY: DelayNs,
 {
     type Color = Gray4;
@@ -417,15 +392,14 @@ where
     }
 }
 
-impl<SPI, READY, PANEL, HOLD, DELAY> Display for It8951Display<SPI, READY, PANEL, HOLD, DELAY>
+impl<SPI, READY, PANEL, DELAY> Display for It8951Display<SPI, READY, PANEL, DELAY>
 where
     SPI: SpiDevice,
     READY: InputPin,
     PANEL: OutputPin,
-    HOLD: OutputPin,
     DELAY: DelayNs,
 {
-    type ControlError = ErrorOf<SPI, READY, PANEL, HOLD>;
+    type ControlError = ErrorOf<SPI, READY, PANEL>;
     type RenderError = Infallible;
 
     fn descriptor(&self) -> DisplayDescriptor {
@@ -465,9 +439,6 @@ where
     async fn set_power(&mut self, power: DisplayPower) -> Result<(), Self::ControlError> {
         match power {
             DisplayPower::On => {
-                self.power_hold
-                    .set_high()
-                    .map_err(It8951DisplayError::PowerHold)?;
                 if self.asleep {
                     // M5GFX wakes the IT8951 by running its initialization again.
                     self.bring_up()?;

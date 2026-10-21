@@ -7,6 +7,9 @@ hardware:
     technology: psram
     interface: quad-spi
     size-bytes: 8388608
+  # Battery power latch (M5Unified `TimerCam_POWER_HOLD_PIN`, driven high
+  # at start).
+  power-hold: GPIO33
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:

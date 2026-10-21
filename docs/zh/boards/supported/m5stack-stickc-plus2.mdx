@@ -30,4 +30,4 @@ cargo image deploy
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 
-显示屏还会在固件运行期间把电池电源锁存脚 `GPIO4` 保持为高电平，因此不接 USB 时开发板也会保持开机。
+平台入口在构建任何其他部分之前就把电池电源锁存脚 `GPIO4`（`hardware.power-hold`）驱动为高电平，因此不接 USB 时松开电源键后开发板也会保持开机。

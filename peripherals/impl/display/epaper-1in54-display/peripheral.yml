@@ -4,8 +4,8 @@ peripheral: display
 implementation:
   package: barracuda-epaper-1in54-display
   crate: barracuda_epaper_1in54_display
-  factory: "::{{crate}}::Epaper1in54DisplayImplementation<{{binding.spi.type}}, {{binding.busy.type}}, {{binding.dc.type}}, {{binding.reset.type}}, {{binding.power-hold.type}}, {{hal.delay.type}}>"
-  bindings-expression: "::{{crate}}::Epaper1in54Bindings::new({{binding.spi.value}}, {{binding.busy.value}}, {{binding.dc.value}}, {{binding.reset.value}}, {{binding.power-hold.value}}, {{hal.delay.value}})"
+  factory: "::{{crate}}::Epaper1in54DisplayImplementation<{{binding.spi.type}}, {{binding.busy.type}}, {{binding.dc.type}}, {{binding.reset.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Epaper1in54Bindings::new({{binding.spi.value}}, {{binding.busy.value}}, {{binding.dc.value}}, {{binding.reset.value}}, {{hal.delay.value}})"
   config-expression: "()"
 bindings:
   spi:
@@ -20,7 +20,4 @@ bindings:
   reset:
     kind: digital-output
     initial: high
-  power-hold:
-    kind: digital-output
-    initial: low
 parameters: {}

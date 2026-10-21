@@ -4,8 +4,8 @@ peripheral: display
 implementation:
   package: barracuda-mipi-dbi-display
   crate: barracuda_mipi_dbi_display
-  factory: "::{{crate}}::MipiDbiDisplayImplementation<{{binding.spi.type}}, {{binding.dc.type}}, {{parameter.controller}}, {{binding.reset.type}}, {{binding.backlight.type}}, {{binding.power-hold.type}}, {{hal.delay.type}}, 512>"
-  bindings-expression: "::{{crate}}::MipiDbiDisplayBindings::new({{binding.spi.value}}, {{binding.dc.value}}, {{binding.reset.value}}, Some({{binding.backlight.value}}), {{binding.power-hold.value}}, {{hal.delay.value}}, ::{{crate}}::take_transfer_buffer())"
+  factory: "::{{crate}}::MipiDbiDisplayImplementation<{{binding.spi.type}}, {{binding.dc.type}}, {{parameter.controller}}, {{binding.reset.type}}, {{binding.backlight.type}}, {{hal.delay.type}}, 512>"
+  bindings-expression: "::{{crate}}::MipiDbiDisplayBindings::new({{binding.spi.value}}, {{binding.dc.value}}, {{binding.reset.value}}, Some({{binding.backlight.value}}), {{hal.delay.value}}, ::{{crate}}::take_transfer_buffer())"
   config-expression: "::{{crate}}::MipiDbiDriverConfig::new({{parameter.controller}}, ::{{crate}}::MipiDbiDisplayConfig::new(::{{crate}}::Size::new({{parameter.width}}, {{parameter.height}}), ::barracuda_peripheral::display::PixelFormat::Rgb565, {{parameter.orientation}}).with_offset({{parameter.offset-x}}, {{parameter.offset-y}}).with_color_order({{parameter.color-order}}).with_inverted_colors({{parameter.invert-colors}}).with_digital_backlight({{parameter.backlight-active-high}}).with_reset_active_high({{parameter.reset-active-high}}))"
 bindings:
   spi:
@@ -25,13 +25,6 @@ bindings:
     initial-from:
       parameter: backlight-active-high
       values: { "true": low, "false": high }
-  # Battery power latch on products that switch themselves off unless a pin
-  # holds their regulator on (M5StickC Plus2: GPIO4). The display keeps it
-  # driven high for as long as the firmware runs.
-  power-hold:
-    kind: digital-output
-    required: false
-    initial: high
 parameters:
   controller:
     type: enum

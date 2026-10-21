@@ -32,6 +32,26 @@ extern "C" fn rust_eh_personality() {}
 // `build.rs` from the selected Board's network links.
 include!(concat!(env!("OUT_DIR"), "/esp32p4_network.rs"));
 
+// `__barracuda_power_hold!`, projected by `build.rs` from the selected
+// Board's `hardware.power-hold`.
+include!(concat!(env!("OUT_DIR"), "/power_hold.rs"));
+
+/// Drives a Board's battery power latch high for the life of the firmware.
+///
+/// The latch keeps a battery-powered Board on once its power button is
+/// released, so the entry drives it before anything else is built.
+#[doc(hidden)]
+pub fn hold_power(pin: impl esp_hal::gpio::OutputPin + 'static) {
+    // The driver lives as long as the firmware, so nothing reconfigures the
+    // pin until the chip resets or powers off.
+    static LATCH: StaticCell<esp_hal::gpio::Output<'static>> = StaticCell::new();
+    LATCH.init(esp_hal::gpio::Output::new(
+        pin,
+        esp_hal::gpio::Level::High,
+        esp_hal::gpio::OutputConfig::default(),
+    ));
+}
+
 /// Powers a Board's Wi-Fi co-processor through one output of a PI4IOE5V6408
 /// I2C expander, driving it high.
 ///
@@ -178,6 +198,9 @@ macro_rules! platform_entry {
             #[allow(unused_mut)]
             let mut peripherals =
                 $crate::application::__hal::init($crate::application::__hal::Config::default());
+            // A battery power latch goes high first, or the Board switches
+            // off when its power button is released.
+            $crate::__barracuda_power_hold!(peripherals);
             // The noise source starts before any task runs and keeps SAR
             // ADC1 from here on.
             let entropy = $crate::Esp32P4Entropy::start(peripherals.RNG, peripherals.ADC1);
