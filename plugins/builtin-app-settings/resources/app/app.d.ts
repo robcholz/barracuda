@@ -23,22 +23,20 @@ export declare const network: Accessor<string>;
 export declare const networks: Accessor<Network[]>;
 export declare const scanning: Accessor<boolean>;
 
-// Sound and display: fills are the bars' widths in pixels.
+// Sound and display, in percent.
 export declare const volume: Accessor<i32>;
-export declare const volumeFill: Accessor<i32>;
 export declare const brightness: Accessor<i32>;
-export declare const brightnessFill: Accessor<i32>;
 export declare const timeout: Accessor<string>;
 export declare const muted: Accessor<boolean>;
 
 export declare const apps: Accessor<App[]>;
 
-// Storage: the bar's parts in pixels.
+// Storage: each part's share of the bar, in thousandths.
 export declare const used: Accessor<string>;
 export declare const usedNote: Accessor<string>;
-export declare const mediaFill: Accessor<i32>;
-export declare const appsFill: Accessor<i32>;
-export declare const cacheFill: Accessor<i32>;
+export declare const mediaShare: Accessor<i32>;
+export declare const appsShare: Accessor<i32>;
+export declare const cacheShare: Accessor<i32>;
 
 // About.
 export declare const board: Accessor<string>;
