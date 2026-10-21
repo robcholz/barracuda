@@ -6,7 +6,7 @@ description: "Where the vendored PocketJS crates come from and how they differ f
 
 `pocketjs-core/` and `microts/` are copied from
 [PocketJS](https://github.com/pocket-nexus/pocketjs) at commit
-`e9e417308f094ead706754164acf91436e4d05a8`:
+`96e5f4084c2da45d72997c443fd478bcffb92dc7`:
 
 | Directory | Upstream path |
 | --- | --- |
@@ -17,10 +17,17 @@ Both are MIT licensed (`LICENSE` in each directory). The library sources are
 unmodified except that three test modules are dropped because they read
 fixtures from the PocketJS repository: the out-of-line `core/src/tests.rs` and
 `core/src/physics/tests.rs` with their `mod tests;` declarations, and the
-inline `mod tests` at the end of `core/src/package.rs`. The sources are also
-reformatted with this workspace's `rustfmt`. The manifests are rewritten to
+inline `mod tests` at the end of `core/src/package.rs`. One line differs:
+`microts/src/model.rs` takes `AtomicU32` and `Ordering` from
+`portable_atomic` on every target, where upstream takes them from
+`core::sync::atomic` on targets with 32-bit atomics, so one import serves
+the ESP32-C3 too. The sources are also reformatted with this workspace's
+`rustfmt`. The manifests are rewritten to
 stand alone in this workspace and silence Clippy's style lints.
 
-Update by copying the same paths from a newer commit and re-applying the three
-deletions. Keep Barracuda-specific code out of these directories; it belongs in
+Update by copying the same paths from a newer commit, re-applying the three
+deletions and the `portable_atomic` import, and running
+`cargo fmt --all`. The build scripts in
+`plugins/app-manager/resources` compile views with the PocketJS checkout at
+the same commit. Keep Barracuda-specific code out of these directories; it belongs in
 `barracuda-ui-runtime`.
