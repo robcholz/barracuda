@@ -29,3 +29,12 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `power-monitor` | Battery gauge (AXP192) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `buttons` | Buttons A and B (GPIO37, GPIO39) | — |
+
+The battery gauge shares the PMIC with the display: it reads only the PMIC's
+measurement registers, and the display keeps its regulators.
+
+The motion sensor is not declared: early units carry an SH200Q instead of the
+MPU6886, and no implementation drives it yet.

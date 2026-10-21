@@ -29,3 +29,7 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 电子墨水屏，3.97 英寸 480 x 800，4 级灰度，带前光（SSD1677） | [`display`](/zh/plugins/vm-display) |
+| `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `buttons` | 按键 A 和 B（GPIO2、GPIO3） | — |
+
+M5PM1 只测量电池电压。这块开发板没有把充电器的状态线接到 M5PM1，所以只要有 VIN 输入且电池低于 4.1 V，电池就显示为正在充电。

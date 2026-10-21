@@ -26,9 +26,8 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-timercam/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `real-time-clock` | Real-time clock (BM8563) | — |
 
 The Platform entry drives `GPIO33`, the battery power latch (`hardware.power-hold`), high before anything else is built, so the Board stays on without USB power.

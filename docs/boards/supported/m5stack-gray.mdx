@@ -29,3 +29,12 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `power-monitor` | Battery level (IP5306) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `inertial-measurement` | Motion sensor (MPU6886, or MPU9250 on early units) | [`motion`](/plugins/vm-imu) |
+| `buttons` | Buttons A, B, C (GPIO39, GPIO38, GPIO37) | — |
+
+The IP5306 reports the battery level in 25 % steps and whether it charges; it
+measures no voltage or current, so `measure` fails on this Board.
+
+The internal I2C bus of the battery chip and the motion sensor is also Port A
+(GPIO21, GPIO22), so Port A is not an exposed pin pair.

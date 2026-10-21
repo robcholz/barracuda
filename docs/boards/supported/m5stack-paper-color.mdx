@@ -29,6 +29,12 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Color e-paper display, 4-inch 400 x 600, six colors (E Ink Spectra 6, ED2208 controller) | [`display`](/plugins/vm-display) |
+| `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `buttons` | Buttons A, B, C (GPIO10, GPIO9, GPIO1) | — |
 
 Spectra 6 has no partial update: every refresh redraws the whole panel and
 takes 10 to 20 seconds.
+
+The M5PM1 measures the battery voltage only. This Board does not route the
+charger's status to it, so the battery reads as charging while VIN is present
+and the cell is below 4.1 V.

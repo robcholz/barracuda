@@ -29,7 +29,12 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | E-paper display, 4.7-inch 540 x 960 portrait, 16 gray levels (ED047TC1, driven directly over the ESP32-S3 parallel bus; supply from the M5PM1) | [`display`](/plugins/vm-display) |
+| `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `buttons` | Buttons A and B (GPIO4, GPIO3) | — |
 
 The panel has no controller: Barracuda runs M5GFX's waveforms on the CPU
 and clocks every frame out line by line, so a refresh holds the display until
 it finishes.
+
+The M5PM1 measures the battery voltage only; whether the battery charges comes
+from the charger's status line on an M5PM1 pin.

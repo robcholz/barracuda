@@ -29,3 +29,10 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `real-time-clock` | 实时时钟（BM8563） | — |
+| `power-monitor` | 电量计（AXP192） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `buttons` | 按键 A、B、C（GPIO37、GPIO38、GPIO39） | — |
+
+电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。
+
+`40h` 和 `41h` 的两个 INA3221 端口监测没有声明：一块开发板只有一个电源监测设备，这里用的是电池的。

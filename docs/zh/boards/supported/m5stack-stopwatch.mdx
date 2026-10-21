@@ -29,3 +29,7 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 圆形显示屏（CO5300，四线 SPI） | [`display`](/zh/plugins/vm-display) |
+| `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `buttons` | 按键 A 和 B（GPIO2、GPIO1） | — |
+
+M5PM1 只测量电池电压；是否在充电取自接在 M5PM1 引脚上的充电器状态线。

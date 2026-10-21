@@ -29,3 +29,9 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `real-time-clock` | 实时时钟（BM8563） | — |
+| `inertial-measurement` | 运动传感器（MPU6886） | [`motion`](/zh/plugins/vm-imu) |
+| `power-monitor` | 电量计（AXP192） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `buttons` | 按键 A 和 B（GPIO37、GPIO39） | — |
+
+电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。

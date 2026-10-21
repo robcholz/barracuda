@@ -29,3 +29,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI, backlight on the PI4IOE5V6408 expander) | [`display`](/plugins/vm-display) |
+| `buttons` | Buttons A, B, C (PI4IOE5V6408 P2, P1, P0) | — |
+
+The buttons share the PI4IOE5V6408 at `43h` with the display's backlight; each
+implementation configures only its own pins.
