@@ -29,3 +29,20 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Round display (CO5300, quad SPI) | [`display`](/plugins/vm-display) |
+| `inertial-measurement` | IMU (BMI270) | [`motion`](/plugins/vm-imu) |
+| `real-time-clock` | Real-time clock (RX8130CE) | — |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO11` |
+| `port-a-sda` | `GPIO10` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

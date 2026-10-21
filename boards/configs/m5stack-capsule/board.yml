@@ -7,3 +7,25 @@ toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # Internal bus SCL G10, SDA G8 (M5Unified; Espressif m5stack_capsule).
+        peripheral: I2C0
+        scl: GPIO10
+        sda: GPIO8
+        frequency-hz: 400000
+  devices:
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 69h: SDO pulled to VDDIO (Capsule schematic, sheet 2; Espressif
+        # m5stack_capsule).
+        address: 105
+exposed-io:
+  pins:
+    # Grove port G13/G15 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g13: { pin: GPIO13 }
+    grove-g15: { pin: GPIO15 }

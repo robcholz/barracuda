@@ -30,5 +30,6 @@ cargo image deploy
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 | `touch` | 触摸控制器（FT6336U） | — |
+| `inertial-measurement` | IMU（BMI270） | [`motion`](/zh/plugins/vm-imu) |
 
 触摸实现通过 `58h` 处 AW9523B 扩展芯片的 P0_0 释放控制器的复位，该扩展芯片本身不是设备。

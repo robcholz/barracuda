@@ -22,3 +22,8 @@ peripherals:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO38, dc: GPIO34, reset: GPIO33, spi: display-spi }
       parameters: { controller: st7789, width: 240, height: 240, invert-colors: true }
+exposed-io:
+  pins:
+    # Grove port G8/G9 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g8: { pin: GPIO8 }
+    grove-g9: { pin: GPIO9 }

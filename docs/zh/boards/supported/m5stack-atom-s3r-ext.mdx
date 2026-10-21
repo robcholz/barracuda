@@ -26,4 +26,36 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-atom-s3r-ext/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `inertial-measurement` | IMU（BMI270） | [`motion`](/zh/plugins/vm-imu) |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g1` | `GPIO1` |
+| `grove-g2` | `GPIO2` |
+| `header-g3` | `GPIO3` |
+| `header-g4` | `GPIO4` |
+| `header-g9` | `GPIO9` |
+| `header-g10` | `GPIO10` |
+| `header-g11` | `GPIO11` |
+| `header-g12` | `GPIO12` |
+| `header-g13` | `GPIO13` |
+| `header-g17` | `GPIO17` |
+| `header-g21` | `GPIO21` |
+| `header-g40` | `GPIO40` |
+| `header-g42` | `GPIO42` |
+| `header-g46` | `GPIO46` |
+| `header-g48` | `GPIO48` |
+
+`header-*` 引脚位于 2.54 mm 原型排针上。
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g1", "up")
+print(pin:read())
+```

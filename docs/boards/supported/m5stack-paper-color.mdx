@@ -29,6 +29,23 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Color e-paper display, 4-inch 400 x 600, six colors (E Ink Spectra 6, ED2208 controller) | [`display`](/plugins/vm-display) |
+| `audio-codec` | Audio codec (ES8311 and ES7210) | [`audio`](/plugins/vm-audio) |
+| `real-time-clock` | Real-time clock (RX8130CE) | — |
 
 Spectra 6 has no partial update: every refresh redraws the whole panel and
 takes 10 to 20 seconds.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO5` |
+| `port-a-sda` | `GPIO4` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

@@ -29,3 +29,16 @@ peripherals:
         offset-y: 40
         invert-colors: true
         orientation: deg90
+exposed-io:
+  pins:
+    # Grove (PORT.CUSTOM) G1/G2: M5Stack Cardputer-Adv pin map.
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }
+    # EXT 2.54-14P header pins that no on-board device uses (M5Stack Cardputer-Adv pin
+    # map). Its SPI pins are the microSD bus and its I2C pins the internal bus.
+    header-g3: { pin: GPIO3 }
+    header-g4: { pin: GPIO4 }
+    header-g5: { pin: GPIO5 }
+    header-g6: { pin: GPIO6 }
+    header-g13: { pin: GPIO13 }
+    header-g15: { pin: GPIO15 }

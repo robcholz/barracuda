@@ -30,5 +30,25 @@ cargo image deploy
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 | `touch` | 触摸控制器（FT6336U） | — |
+| `inertial-measurement` | IMU（BMI270） | [`motion`](/zh/plugins/vm-imu) |
 
 触摸实现通过 `58h` 处 AW9523B 扩展芯片的 P0_0 释放控制器的复位，该扩展芯片本身不是设备。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO1` |
+| `port-a-sda` | `GPIO2` |
+| `port-b-g8` | `GPIO8` |
+| `port-b-g9` | `GPIO9` |
+| `port-c-g17` | `GPIO17` |
+| `port-c-g18` | `GPIO18` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

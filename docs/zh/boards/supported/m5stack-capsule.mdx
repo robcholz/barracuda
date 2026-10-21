@@ -26,4 +26,21 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-capsule/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `inertial-measurement` | IMU（BMI270） | [`motion`](/zh/plugins/vm-imu) |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g13` | `GPIO13` |
+| `grove-g15` | `GPIO15` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g13", "up")
+print(pin:read())
+```

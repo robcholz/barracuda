@@ -27,3 +27,8 @@ peripherals:
         dc: GPIO3
         reset: GPIO2
         spi: display-spi
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA), M5Stack AirQ pin map.
+    port-a-scl: { pin: GPIO15 }
+    port-a-sda: { pin: GPIO13 }

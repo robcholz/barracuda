@@ -53,3 +53,10 @@ peripherals:
         width: 320
         height: 240
         reset: cores3
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 69h, with the BMM150 behind its auxiliary bus (M5Stack CoreS3 pin
+        # map; M5Unified IMU_Class).
+        address: 105

@@ -53,3 +53,20 @@ peripherals:
         width: 320
         height: 240
         reset: cores3
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 69h, with the BMM150 behind its auxiliary bus (M5Stack CoreS3 pin
+        # map; M5Unified IMU_Class).
+        address: 105
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:
+    # M5Unified `_pin_table_port_bc`.
+    port-a-scl: { pin: GPIO1 }
+    port-a-sda: { pin: GPIO2 }
+    port-b-g8: { pin: GPIO8 }
+    port-b-g9: { pin: GPIO9 }
+    port-c-g17: { pin: GPIO17 }
+    port-c-g18: { pin: GPIO18 }

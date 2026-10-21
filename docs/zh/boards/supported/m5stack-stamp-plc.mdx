@@ -29,3 +29,27 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI，背光接在 PI4IOE5V6408 扩展芯片上） | [`display`](/zh/plugins/vm-display) |
+| `power-monitor` | 电源监测（INA226） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `real-time-clock` | 实时时钟（RX8130CE） | — |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO1` |
+| `port-a-sda` | `GPIO2` |
+| `port-c-g4` | `GPIO4` |
+| `port-c-g5` | `GPIO5` |
+| `rs485-tx` | `GPIO0` |
+| `rs485-rx` | `GPIO39` |
+| `rs485-dir` | `GPIO46` |
+
+`rs485-tx`、`rs485-rx` 和 `rs485-dir` 是板载 RS485 收发器的 UART 和方向引脚。
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

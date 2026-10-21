@@ -42,3 +42,21 @@ peripherals:
         color-order: bgr
         orientation: deg180
         reset-active-high: true
+exposed-io:
+  pins:
+    # ESP32-S3-BOX-3-DOCK PMOD1 and PMOD2, labelled IO1-IO8 (esp-bsp esp-box-3.h
+    # `BSP_PMOD*`). PMOD1 IO2 and IO6 are the USB D+/D- lines and stay unexposed.
+    pmod1-io1: { pin: GPIO42 }
+    pmod1-io3: { pin: GPIO39 }
+    pmod1-io4: { pin: GPIO40 }
+    pmod1-io5: { pin: GPIO21 }
+    pmod1-io7: { pin: GPIO38 }
+    pmod1-io8: { pin: GPIO41 }
+    pmod2-io1: { pin: GPIO13 }
+    pmod2-io2: { pin: GPIO9 }
+    pmod2-io3: { pin: GPIO12 }
+    pmod2-io4: { pin: GPIO44 }
+    pmod2-io5: { pin: GPIO10 }
+    pmod2-io6: { pin: GPIO14 }
+    pmod2-io7: { pin: GPIO11 }
+    pmod2-io8: { pin: GPIO43 }
