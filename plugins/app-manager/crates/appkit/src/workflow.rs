@@ -219,7 +219,6 @@ mod tests {
 
     use super::*;
     use crate::bundle::{AppInfo, AppKind, AppLocation, InvalidApp};
-    use crate::device::ViewShape;
     use crate::port::AppState;
     use alloc::vec;
     use barracuda_vm_plugin::{VmExecutionError, VmRunOutcome};
@@ -241,7 +240,7 @@ mod tests {
                 permissions: vec!["gpio".into()],
                 boards: vec!["espressif-esp-vocat-v1-2".into()],
                 view_size: Some([360, 360]),
-                view_shape: Some(ViewShape::Round),
+                view_target: None,
                 icon: Some("lamp".into()),
                 incompatible: Some("This device has no light".into()),
             },

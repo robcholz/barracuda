@@ -1,0 +1,14 @@
+{
+  "pocket": 2,
+  "id": "dev.barracuda.baked",
+  "name": "barracuda-baked",
+  "title": "Baked",
+  "version": "0.1.0",
+  "engine": { "capabilities": { "requires": ["text.glyphs.baked", "input.buttons"] } },
+  "app": {
+    "entry": "app.tsx",
+    "framework": "solid",
+    "viewport": { "fixed": { "logical": [240, 240], "presentation": "integer-fit" } },
+    "aot": true
+  }
+}

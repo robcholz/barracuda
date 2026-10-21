@@ -2,10 +2,14 @@
 //!
 //! Only the first component is linked. Values and handlers keep their IR order;
 //! named struct types become [`StructType`]s shared by every use.
+//!
+//! An element may carry the rect a build solved for it, as the build scripts
+//! add it from PocketJS's layout plan: `"layout": {"mode": "static", "rect":
+//! [x, y, width, height]}` or `{"mode": "formula"}`.
 
 use crate::program::{
-    BinaryOp, Branch, Cast, Element, Expr, ForEach, Handler, MAX_NODES, Node, Program, Slot,
-    TextPart,
+    BinaryOp, Branch, Cast, Element, Expr, ForEach, Handler, Layout, MAX_NODES, Node, Program,
+    Slot, TextPart,
 };
 use crate::value::{StructType, Type, Value};
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
@@ -101,6 +105,8 @@ enum IrNode {
         focusable: bool,
         events: Vec<IrEvent>,
         children: Vec<IrNode>,
+        #[serde(default)]
+        layout: Option<IrLayout>,
     },
     If {
         branches: Vec<IrBranch>,
@@ -111,6 +117,13 @@ enum IrNode {
         key: IrExpr,
         children: Vec<IrNode>,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+enum IrLayout {
+    Static { rect: [f32; 4] },
+    Formula,
 }
 
 #[derive(Deserialize)]
@@ -447,6 +460,7 @@ impl<'a> Linker<'a> {
                 focusable,
                 events,
                 children,
+                layout,
             } => {
                 let kind = match tag.as_str() {
                     "View" => 0,
@@ -484,9 +498,21 @@ impl<'a> Linker<'a> {
                         .collect::<Result<_, _>>()?;
                     press = Some((handler, args));
                 }
+                let layout = match layout {
+                    None => Layout::Live,
+                    Some(IrLayout::Static { rect }) => {
+                        if !rect.iter().all(|value| value.is_finite()) {
+                            return Err(LinkError::Unsupported("element rect"));
+                        }
+                        let [x, y, w, h] = *rect;
+                        Layout::Static { x, y, w, h }
+                    }
+                    Some(IrLayout::Formula) => Layout::Formula,
+                };
                 Node::Element(Element {
                     kind,
                     style: *style,
+                    layout,
                     dynamic_style: dynamic_style
                         .as_ref()
                         .map(|memo| self.expr(&memo.expression))

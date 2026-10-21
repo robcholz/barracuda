@@ -19,13 +19,14 @@ A running app is reported as:
 ```json
 {"app":{"id":"counter","name":"Counter","version":"0.1.0","location":"workspace",
         "kind":"installable","has_view":true,"api":1,"requires":[],"uses":[],
-        "permissions":[],"boards":[],"view_size":[360,360],"view_shape":"round"},
+        "permissions":[],"boards":[],"view_size":[360,360]},
  "run_id":1,"state":"active"}
 ```
 
 `kind` is `system` for an app in the image and `installable` for one in the
 Workspace. `api`, `requires`, `uses`, `permissions`, `boards`,
-`view_size`, and `view_shape` are from its manifest, as
+`view_size`, and `view_target` (only for a view built for one display) are
+from its manifest, as
 [App API](/plugins/app-manager/app-api) explains; `incompatible`, present only for an
 installable app this device cannot run, says why.
 
@@ -40,7 +41,7 @@ author can fix it. `location` is `builtin` or `workspace`:
 {"apps":[{"id":"lamp","name":"Light strip","version":"1","location":"workspace",
           "kind":"installable","has_view":true,"api":1,"requires":["light"],
           "uses":[],"permissions":[],"boards":[],"view_size":[360,360],
-          "view_shape":"round","incompatible":"This device has no light"},
+          "incompatible":"This device has no light"},
          {"id":"settings","name":"Settings","version":"0.1.0","location":"builtin",
           "kind":"system","has_view":true,"api":1,"requires":[],"uses":[],
           "permissions":[],"boards":[]}],

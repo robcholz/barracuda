@@ -3,6 +3,5 @@
   "id": "counter",
   "name": "Counter",
   "version": "0.1.0",
-  "api": 1,
-  "view": { "shape": "round" }
+  "api": 1
 }

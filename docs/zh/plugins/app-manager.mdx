@@ -9,7 +9,7 @@ tag: "NEW"
 
 - 插件 ID：`app-manager`
 - 依赖：`vm`、`workflow`、`time`、`power`、`sound`
-- 设置：无
+- 设置：`display-density`（`u8`，默认 `1`）
 - 上下文资源：外设槽位 `display.main`（`primary`，可选）
   和 `touch.main`（`primary`，可选）
 - 提供的能力：`AppManager`、`Notifications`、`AgentStatus`、
@@ -60,7 +60,7 @@ tag: "NEW"
 
 ## 应用 API
 
-[应用 API](/zh/plugins/app-manager/app-api) 是可安装应用与设备之间的契约。本插件把用来检查应用的 `Device` 交给 `AppManager::register`：开发板的稳定名称、来自 UI 工具包的显示屏尺寸和形状（`DisplayFeatures::ROUND` 标记圆形屏幕），以及它是否读取触摸。每次列出应用时都会从 `LuaPackageRegistry::packages` 读取各 Lua 包的接口类型，所以在本插件之后注册的 Lua 包插件也会被计入，并填写每个可安装应用的 `incompatible`；`open` 会以 `Incompatible` 拒绝带有该字段的应用。
+[应用 API](/zh/plugins/app-manager/app-api) 是可安装应用与设备之间的契约。本插件把用来检查应用的 `Device` 交给 `AppManager::register`：开发板的稳定名称、来自 UI 工具包的显示屏尺寸（以视图像素计）和密度，以及它是否读取触摸。应用只按尺寸判断；显示屏的形状（`DisplayFeatures::ROUND` 标记圆形屏幕）只用于系统 UI 自己的布局，以及视图的设计。每次列出应用时都会从 `LuaPackageRegistry::packages` 读取各 Lua 包的接口类型，所以在本插件之后注册的 Lua 包插件也会被计入，并填写每个可安装应用的 `incompatible`；`open` 会以 `Incompatible` 拒绝带有该字段的应用。
 `AppManager::purpose` 是应用信息界面上某个 Lua 包的那一行说明，由该 Lua 包所属插件在 `LuaPackage::interface` 中声明；本插件不指名任何其他插件的 Lua 包，而是从注册表中了解所有 Lua 包。
 
 `notify` Lua 包属于本插件：`AppManager::add_package` 用内置应用 Lua 包所用的同一座桥注册它，它的后端把通知发到 `Notifications`。
@@ -112,7 +112,7 @@ view:close()
 
 ## 视图
 
-UI 工具包运行编译后的 MicroTS 视图。视图由 BVIR 程序（`view.bvir`）、编译后的样式表（`styles.bin`）和烘焙好的字体图集（`font-<slot>.bin`）组成，由 MicroTS 编译器从 MicroTS 源码生成。crate `barracuda-ui-runtime` 读取 BVIR，把它挂载到一个内置的 PocketJS 核心树中，并在值变化时重新求值这棵树。
+UI 工具包运行编译后的 MicroTS 视图。视图由 BVIR 程序（`view.bvir`）、编译后的样式表（`styles.bin`）和烘焙好的字体图集（`font-<slot>.bin`）组成，由 MicroTS 编译器从 MicroTS 源码生成。crate `barracuda-ui-runtime` 读取 BVIR，把它挂载到一个内置的 PocketJS 核心树中，并在值变化时重新求值这棵树。为某块显示屏构建的视图带有构建时解出的矩形：标为 static 的元素在挂载时直接取得自己的矩形，从不进入布局求解器；标为 formula 的元素按自己的 inset 和尺寸计算矩形，与 PocketJS 生成的视图相同。
 
 `UiService::open` 把应用的视图挂载到应用层，
 `UiService::open_on` 把视图挂载到指定的 `Layer`；两者都返回一个 `UiSession`，由呈现该视图的一方持有。它的 `ViewChannel` 是 `Send + Sync` 的那一半，供驱动视图的代码在任意任务上使用：`ViewChannel::set` 写入一个 `ViewValue`，
@@ -129,16 +129,22 @@ UI 工具包运行编译后的 MicroTS 视图。视图由 BVIR 程序（`view.bv
 
 ## 显示屏
 
-插件通过可选的 `display.main` 槽位获取开发板的主显示屏，并按显示屏尺寸布局每个视图，一个视图像素对应一个显示屏像素。
+插件通过可选的 `display.main` 槽位获取开发板的主显示屏，并按显示屏以视图像素计的尺寸布局每个视图。`display-density` 设置表示每个视图像素在每个方向上覆盖多少个显示屏像素，取值 1 到 4：一块 720 × 720 屏幕的开发板设置 `display-density: 2` 后，按 360 × 360 布局视图，并把每个视图像素画成 2 × 2 个显示屏像素，所以它显示的视图与 360 × 360 屏幕相同，只是清晰一倍。不能整除显示屏宽和高的密度会按 1 绘制，并给出警告。
+
+```yaml
+plugins:
+  app-manager:
+    display-density: 2
+```
 
 视图位于两个图层之一。`Layer::App` 承载应用的视图，`Layer::System` 承载系统 UI 的视图；每个图层最多显示一个视图，系统层有视图时显示屏显示系统层的视图，否则显示应用层的视图（参见[设备 UI](/zh/architecture/device-ui)）。持有者用 `UiSession::show` 把视图放到自己的图层上，这会替换该图层之前的视图；用 `UiSession::hide` 把它撤下；挂起或丢弃会话也会隐藏视图。因此，系统 UI 可以覆盖和露出某个应用，而不需要该应用的持有者撤下自己的视图。两个图层都没有视图时，显示屏为空白。`UiService::showing` 报告显示屏上的内容，
 `UiService::set_brightness` 设置屏幕亮度。
 
 在带触摸的开发板上，`UiService::set_screen_timeout` 会在一段时间没有触摸后关闭屏幕；重新点亮屏幕的那次触摸不会到达任何视图，也不会形成手势。`UiService::wake` 用代码点亮屏幕。
 
-只绘制发生变化的部分。每次变化后，任务会询问 PocketJS 的损伤跟踪器，视图 DrawList 中哪些区域与上一帧不同，把这些区域按 16 行一条光栅化为 RGB565（显示 API 的像素格式），逐条绘制，并刷新变化的范围。不保留帧缓冲区。当一帧仍在变化时（例如动画期间），任务以每秒 60 帧推进；静止的视图不产生任何开销。
+只绘制发生变化的部分。每次变化后，任务会询问 PocketJS 的损伤跟踪器，视图 DrawList 中哪些区域与上一帧不同，把这些区域按 16 行视图像素一条、以该密度光栅化为 RGB565（显示 API 的像素格式），逐条绘制，并刷新变化的范围。不保留帧缓冲区。当一帧仍在变化时（例如动画期间），任务以每秒 60 帧推进；静止的视图不产生任何开销。
 
-可选的 `touch.main` 槽位获取开发板的触摸控制器。当显示屏上有视图时，以及在一次已开始的接触结束之前，任务每帧轮询它，把控制器的坐标范围缩放到显示屏，并对每次接触进行分类：
+可选的 `touch.main` 槽位获取开发板的触摸控制器。当显示屏上有视图时，以及在一次已开始的接触结束之前，任务每帧轮询它，把控制器的坐标范围缩放到以视图像素计的显示屏（不报告范围的控制器被视为覆盖显示屏的全部像素），并对每次接触进行分类：
 
 | 接触 | 识别为 |
 | --- | --- |
@@ -240,8 +246,9 @@ UI 工具包运行编译后的 MicroTS 视图。视图由 BVIR 程序（`view.bv
 | `icons` | 从 `resources/icons/svg` 构建图标字体和码位表 |
 | `view` | 从 `resources/view/app.tsx` 及其 `app.d.ts` 契约构建系统视图；它不带图集 |
 | `examples` | 把 `resources/examples/` 中的示例可安装应用构建到 `crates/appkit/tests/fixtures/<id>.bapp/` |
+| `baked-360`、`baked-320` | 把 `crates/runtime/tests/fixtures/baked/` 中的视图分别为 360 × 360 和 320 × 240 的显示屏构建到 `crates/runtime/tests/fixtures/baked-<size>.bapp/`；UI 运行时的测试检查它们携带的矩形就是设备会解出的矩形 |
 
-`resources/build-app.ts` 从源码构建应用容器；内置应用插件对自己的 `resources/app` 运行它。内置应用不带字体，使用系统字体绘制。示例则像来自其他地方的应用那样烘焙自己的字体：用 Noto Sans SC 覆盖 ASCII 以外的字符，用图标字体中的 `\uE0xx` 转义来指定系统图标，并且只烘焙 24 px 及以上字号的数字和图标。视图中的图标是 `"\uE008"` 这样的转义，其码位固定在 `resources/icons/codepoints.json` 中。
+`resources/build-app.ts` 从源码构建应用容器；内置应用插件对自己的 `resources/app` 运行它。内置应用不带字体，使用系统字体绘制。示例则像来自其他地方的应用那样烘焙自己的字体：用 Noto Sans SC 覆盖 ASCII 以外的字符，用图标字体中的 `\uE0xx` 转义来指定系统图标，并且只烘焙 24 px 及以上字号的数字和图标。使用 `--target <width>x<height>[@<density>]` 时，它为某一块显示屏构建应用，详见[应用格式](/zh/plugins/app-manager/app-format)中的“为某块显示屏构建”。视图中的图标是 `"\uE008"` 这样的转义，其码位固定在 `resources/icons/codepoints.json` 中。
 
 ```sh
 POCKETJS_ROOT=~/src/pocketjs CJK_FONT_DIR=~/fonts cargo plugin run fonts --plugin app-manager

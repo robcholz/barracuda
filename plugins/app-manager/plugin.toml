@@ -2,6 +2,15 @@ id = "app-manager"
 depends-on = ["vm", "workflow", "time", "power", "sound"]
 description = "Runs Lua apps, and on Boards with a display shows them and the system UI."
 
+[config.display-density]
+type = "u8"
+default = 1
+description = """
+Display pixels each view pixel covers along each axis, 1 through 4. Views are
+laid out at the display's size divided by it, so a 720 × 720 panel at 2 shows
+the same 360 × 360 views as a 360 × 360 panel at 1, drawn twice as sharp. It
+must divide the display's width and height; otherwise views draw at 1."""
+
 [peripherals.display]
 main = { fill = "primary", optional = true }
 
@@ -27,3 +36,19 @@ command = ["bun", "resources/build-app.ts", "--own-fonts", "--each", "resources/
 inputs = ["resources/examples", "resources/build-app.ts", "resources/icons/barracuda-icons.otf"]
 outputs = ["crates/appkit/tests/fixtures"]
 env = ["POCKETJS_ROOT", "CJK_FONT_DIR"]
+
+# A view solved at build time, for two displays: the UI runtime's layout tests
+# check that the rects it carries are the ones the device would solve.
+[tasks.baked-360]
+cwd = "."
+command = ["bun", "resources/build-app.ts", "--target", "360x360", "crates/runtime/tests/fixtures/baked", "crates/runtime/tests/fixtures/baked-360x360.bapp"]
+inputs = ["crates/runtime/tests/fixtures/baked", "resources/build-app.ts"]
+outputs = ["crates/runtime/tests/fixtures/baked-360x360.bapp"]
+env = ["POCKETJS_ROOT"]
+
+[tasks.baked-320]
+cwd = "."
+command = ["bun", "resources/build-app.ts", "--target", "320x240", "crates/runtime/tests/fixtures/baked", "crates/runtime/tests/fixtures/baked-320x240.bapp"]
+inputs = ["crates/runtime/tests/fixtures/baked", "resources/build-app.ts"]
+outputs = ["crates/runtime/tests/fixtures/baked-320x240.bapp"]
+env = ["POCKETJS_ROOT"]

@@ -434,22 +434,15 @@ export class App extends EventTarget {
   }
 
   /** Changes manifest fields from the settings page. */
-  setManifest(fields: {
-    name: string;
-    version: string;
-    shape: "round" | "rect";
-  }) {
+  setManifest(fields: { name: string; version: string }) {
     const project = this.project();
     if (!project) return;
     const manifest = JSON.parse(project.files["app.json"]) as Record<
       string,
       unknown
-    > & { view?: Record<string, unknown> };
+    >;
     manifest.name = fields.name;
     manifest.version = fields.version;
-    if (manifest.view) manifest.view.shape = fields.shape;
-    else if ("app.tsx" in project.files)
-      manifest.view = { shape: fields.shape };
     this.update(
       withFiles(project, {
         ...project.files,

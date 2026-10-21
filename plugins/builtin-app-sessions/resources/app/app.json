@@ -4,6 +4,5 @@
   "name": "Sessions",
   "version": "0.1.0",
   "api": 1,
-  "icon": "chat",
-  "view": { "shape": "round" }
+  "icon": "chat"
 }

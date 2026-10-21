@@ -15,12 +15,12 @@ description: "App Manager 提供的 Workflow Action：列出、打开和控制�
 ```json
 {"app":{"id":"counter","name":"Counter","version":"0.1.0","location":"workspace",
         "kind":"installable","has_view":true,"api":1,"requires":[],"uses":[],
-        "permissions":[],"boards":[],"view_size":[360,360],"view_shape":"round"},
+        "permissions":[],"boards":[],"view_size":[360,360]},
  "run_id":1,"state":"active"}
 ```
 
 镜像中的应用 `kind` 为 `system`，Workspace 中的应用为 `installable`。`api`、`requires`、`uses`、`permissions`、`boards`、
-`view_size` 和 `view_shape` 来自应用的清单，详见
+`view_size` 和 `view_target`（只有为某块显示屏构建的视图才有）来自应用的清单，详见
 [应用 API](/zh/plugins/app-manager/app-api)；`incompatible` 只出现在本设备无法运行的可安装应用上，说明原因。
 
 `state` 为 `active`、`inactive`、`background`、`suspended`、`running`（无头应用）或 `terminating`。
@@ -31,7 +31,7 @@ description: "App Manager 提供的 Workflow Action：列出、打开和控制�
 {"apps":[{"id":"lamp","name":"Light strip","version":"1","location":"workspace",
           "kind":"installable","has_view":true,"api":1,"requires":["light"],
           "uses":[],"permissions":[],"boards":[],"view_size":[360,360],
-          "view_shape":"round","incompatible":"This device has no light"},
+          "incompatible":"This device has no light"},
          {"id":"settings","name":"Settings","version":"0.1.0","location":"builtin",
           "kind":"system","has_view":true,"api":1,"requires":[],"uses":[],
           "permissions":[],"boards":[]}],

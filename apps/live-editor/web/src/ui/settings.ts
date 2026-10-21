@@ -21,7 +21,6 @@ const providers = (): { id: Provider; title: string; hint: string }[] => [
 interface Draft extends SettingsData {
   name: string;
   version: string;
-  shape: "round" | "rect";
 }
 
 export class SettingsPage implements Page {
@@ -79,7 +78,6 @@ export class SettingsPage implements Page {
       ...this.app.settings,
       name: manifest.name ?? "",
       version: manifest.version ?? "",
-      shape: manifest.view?.shape === "rect" ? "rect" : "round",
     };
   }
 
@@ -117,20 +115,15 @@ export class SettingsPage implements Page {
 
   private async save() {
     if (!this.validate()) return this.renderForm();
-    const { name, version, shape, ...settings } = this.draft;
+    const { name, version, ...settings } = this.draft;
     await this.app.saveSettings(settings);
     const project = this.app.project();
     if (project) {
       const before = manifestOf(project.files);
-      if (
-        before.name !== name ||
-        before.version !== version ||
-        (before.view?.shape ?? "round") !== shape
-      )
+      if (before.name !== name || before.version !== version)
         this.app.setManifest({
           name: name.trim(),
           version: version.trim(),
-          shape,
         });
     }
     this.saved = { ...this.draft };
@@ -405,44 +398,6 @@ export class SettingsPage implements Page {
               this.errors.version,
             ),
           ),
-          "app.tsx" in project.files &&
-            h(
-              "div",
-              { class: "bc-field" },
-              h("span", { class: "bc-label", id: "le-shape" }, t.shape),
-              h(
-                "div",
-                {
-                  class: "bc-segmented bc-segmented--text",
-                  role: "group",
-                  "aria-labelledby": "le-shape",
-                  style: { alignSelf: "flex-start" },
-                },
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    "aria-pressed": String(d.shape === "round"),
-                    onClick: () => this.set("shape", "round", true),
-                  },
-                  t.round,
-                ),
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    "aria-pressed": String(d.shape === "rect"),
-                    onClick: () => this.set("shape", "rect", true),
-                  },
-                  t.rectangle,
-                ),
-              ),
-              h(
-                "span",
-                { class: "bc-hint" },
-                d.shape === "round" ? t.roundText : t.rectText,
-              ),
-            ),
         ),
       this.footer,
     );

@@ -38,12 +38,10 @@ test("an app with a view builds into the container build-app.ts makes", async ()
   const toolchain = fixedToolchain();
   const { manifest, files } = await buildContainer(sources(COUNTER), toolchain);
   const pocket = JSON.parse(readFileSync(join(COUNTER, "pocket.json"), "utf8"));
-  const source = JSON.parse(readFileSync(join(COUNTER, "app.json"), "utf8"));
   expect(manifest.view).toEqual({
     program: "view.bvir",
     styles: "styles.bin",
     size: pocket.app.viewport.fixed.logical,
-    ...(source.view?.shape ? { shape: source.view.shape } : {}),
   });
   expect(toolchain.linked).toEqual(['{"version":1}']);
   expect([...files.keys()].sort()).toEqual([
@@ -62,10 +60,7 @@ test("an app with a view builds into the container build-app.ts makes", async ()
 
 test("an app without a view builds headless", async () => {
   const app = new Map([
-    [
-      "app.json",
-      '{"format":1,"id":"clock","name":"Clock","version":"1","view":{"shape":"round"}}',
-    ],
+    ["app.json", '{"format":1,"id":"clock","name":"Clock","version":"1"}'],
     ["main.lua", "print(1)"],
   ]);
   const { manifest, files } = await buildContainer(app, fixedToolchain());

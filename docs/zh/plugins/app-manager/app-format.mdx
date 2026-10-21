@@ -45,8 +45,7 @@ description: "打包一个应用：容器位置、清单、Lua 程序和视图�
     "program": "view.bvir",
     "styles": "styles.bin",
     "fonts": ["font-1.bin", "font-2.bin", "font-12.bin"],
-    "size": [360, 360],
-    "shape": "round"
+    "size": [360, 360]
   }
 }
 ```
@@ -63,8 +62,8 @@ description: "打包一个应用：容器位置、清单、Lua 程序和视图�
 | `view.program` | 有视图时 | BVIR 视图程序                                      |
 | `view.styles`  | 有视图时 | 编译后的样式表                                    |
 | `view.fonts`   | 否       | 最多 16 个烘焙好的字体图集；默认为无               |
-| `view.size`    | 否       | `[width, height]`，视图能适配的最小显示屏尺寸；由构建根据 `pocket.json` 写入。视图按显示屏的实际尺寸布局 |
-| `view.shape`   | 否       | `round`：视图限制在内切圆内，适配任何显示屏；`rect`：视图需要矩形显示屏 |
+| `view.size`    | 否       | `[width, height]`，视图能适配的最小显示屏尺寸，以视图像素计；由构建根据 `pocket.json` 写入。视图按显示屏的实际尺寸布局 |
+| `view.target`  | 否       | `{"size": [width, height], "density": 1}`，视图为之构建的显示屏；只有以视图像素计尺寸相同、密度（1 到 4）也相同的显示屏才能运行它。为某块显示屏构建时写入 |
 | `api`          | 否       | 应用所针对的 `app` Lua 包版本；默认为 `1` |
 | `requires`     | 否       | 最多 16 个应用离不开的稳定 Lua 包，每项写作 `name` 或 `name@version`，后者表示所需的最低版本 |
 | `uses`         | 否       | 最多 16 个设备具备时才使用的稳定 Lua 包，写法同 `requires` |
@@ -138,7 +137,24 @@ end
 
 ## 视图
 
-`view.program`、`view.styles`、`view.fonts` 和 `view.size` 都是构建产物：MicroTS 编译器把 `app.tsx` 及其 `app.d.ts` 契约转换为 View IR，`ui-link` 把它链接为 BVIR，字体烘焙器生成字体图集。源清单中的 `view` 只包含 `shape`。无法运行这套工具链的 Agent 可以编写无头应用，或者把现有构建的视图文件复制到自己的入口程序旁边。
+`view.program`、`view.styles`、`view.fonts`、`view.size` 和 `view.target` 都是构建产物：MicroTS 编译器把 `app.tsx` 及其 `app.d.ts` 契约转换为 View IR，`ui-link` 把它链接为 BVIR，字体烘焙器生成字体图集。源清单中没有 `view`。显示屏的形状不属于清单：视图在设计时就要同时适用于圆形和矩形显示屏。无法运行这套工具链的 Agent 可以编写无头应用，或者把现有构建的视图文件复制到自己的入口程序旁边。
+
+### 为某块显示屏构建
+
+视图只写一次，适用于任何显示屏：它填满父元素，并用 flexbox 排布内容，详见[应用 API](/zh/plugins/app-manager/app-api)中的“视图与显示屏”。普通构建为所有不小于 `view.size` 的显示屏生成同一个容器，由设备在运行时布局视图。
+
+为某块显示屏构建会提前完成其中一部分工作。按照 PocketJS 的平台契约，构建把应用的 `pocket.json` 与这块显示屏（以视图像素计的尺寸和密度，与 `app.device().display` 报告的一致）合起来解析成一份计划，再带着它编译：
+
+- 视图中每个 `layout-baked` 子树都按这个尺寸，在 PocketJS 自己的核心中求解；这个核心从设备所用的同一个 PocketJS 提交构建为 WebAssembly，所以解出的矩形就是设备会算出的矩形。BVIR 携带这些矩形，设备直接使用它们，不再求解；
+- 应用自己的字体图集按显示屏的密度烘焙；
+- 清单把这块显示屏记为 `view.target`，其他显示屏会把该应用列为无法运行。
+
+```sh
+POCKETJS_ROOT=~/src/pocketjs bun plugins/app-manager/resources/build-app.ts \
+  --target 360x360@1 my-app my-app.bapp
+```
+
+不带 `--target` 的构建会拒绝含有 `layout-baked` 子树的视图，因为它的矩形取决于显示屏。内置应用和系统视图的构建都不带 `--target`，所以同一个镜像适用于每块开发板的显示屏。
 
 ## 示例：Agent 可以安装的无头应用
 

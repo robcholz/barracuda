@@ -317,13 +317,41 @@ mod screen {
         }
     }
 
+    /// A touch controller that does not report its span.
+    struct Spanless(Option<(u16, u16)>);
+
+    impl Touch for Spanless {
+        type Error = Infallible;
+
+        fn descriptor(&self) -> TouchDescriptor {
+            TouchDescriptor {
+                width: 0,
+                height: 0,
+                max_points: 1,
+            }
+        }
+
+        fn read_frame(&mut self) -> Result<TouchFrame, Infallible> {
+            let mut frame = TouchFrame::new();
+            if let Some((x, y)) = self.0.take() {
+                frame.push(TouchPoint {
+                    id: 0,
+                    x,
+                    y,
+                    strength: 1,
+                });
+            }
+            Ok(frame)
+        }
+    }
+
     fn refresh(screen: &mut Screen<Panel>, service: &UiService) -> bool {
         future::block_on(screen.refresh(service))
     }
 
     #[test]
     fn the_shown_view_is_drawn_and_then_only_what_changes() {
-        let mut screen = Screen::new(Panel::new(DEFAULT_VIEWPORT));
+        let mut screen = Screen::new(Panel::new(DEFAULT_VIEWPORT), 1);
         let service = UiService::new(screen.viewport());
         let session = service.open(&assets()).expect("view opens");
         let full = (DEFAULT_VIEWPORT.0 * DEFAULT_VIEWPORT.1) as u32;
@@ -359,7 +387,7 @@ mod screen {
 
     #[test]
     fn labels_without_a_size_class_are_drawn() {
-        let mut screen = Screen::new(Panel::new(DEFAULT_VIEWPORT));
+        let mut screen = Screen::new(Panel::new(DEFAULT_VIEWPORT), 1);
         let service = UiService::new(screen.viewport());
         let session = service.open(&assets()).expect("view opens");
         session.show(true);
@@ -389,6 +417,78 @@ mod screen {
         assert!(label > 20, "the label drew {label} pixels");
     }
 
+    /// The lime "+1" button's bounds in display pixels: x0, y0, x1, y1.
+    fn button(screen: &Screen<Panel>) -> (usize, usize, usize, usize) {
+        let width = screen_panel(screen).width as usize;
+        let lime = |pixel: &Rgb565| pixel.r() > 22 && pixel.g() > 57 && pixel.b() < 5;
+        let mut bounds = (usize::MAX, usize::MAX, 0, 0);
+        for (index, _) in screen_pixels(screen)
+            .iter()
+            .enumerate()
+            .filter(|(_, pixel)| lime(pixel))
+        {
+            let (x, y) = (index % width, index / width);
+            bounds = (
+                bounds.0.min(x),
+                bounds.1.min(y),
+                bounds.2.max(x),
+                bounds.3.max(y),
+            );
+        }
+        bounds
+    }
+
+    #[test]
+    fn each_view_pixel_covers_density_display_pixels() {
+        let shown = |density: u8| {
+            let panel = Panel::new((DEFAULT_VIEWPORT.0 * 2.0, DEFAULT_VIEWPORT.1 * 2.0));
+            let mut screen = Screen::new(panel, density);
+            let service = UiService::new(screen.viewport());
+            let session = service.open(&assets()).expect("view opens");
+            session.show(true);
+            refresh(&mut screen, &service);
+            drop(session);
+            screen
+        };
+        let single = {
+            let mut screen = Screen::new(Panel::new(DEFAULT_VIEWPORT), 1);
+            let service = UiService::new(screen.viewport());
+            let session = service.open(&assets()).expect("view opens");
+            session.show(true);
+            refresh(&mut screen, &service);
+            drop(session);
+            button(&screen)
+        };
+
+        // A 720 × 720 display at density 2 lays views out at 360 × 360 and
+        // draws them at twice the size.
+        let double = shown(2);
+        assert_eq!(double.viewport(), DEFAULT_VIEWPORT);
+        assert_eq!(double.info().density, 2);
+        let (x0, y0, x1, y1) = button(&double);
+        let near = |at: usize, of: usize| at.abs_diff(of * 2) <= 2;
+        assert!(
+            near(x0, single.0) && near(y0, single.1) && near(x1, single.2) && near(y1, single.3),
+            "{:?} is not twice {single:?}",
+            (x0, y0, x1, y1)
+        );
+        assert!(screen_panel(&double).flushed.iter().all(|request| {
+            request
+                .region()
+                .is_none_or(|area| area.top_left.x % 2 == 0 && area.size.width % 2 == 0)
+        }));
+
+        // At density 1 the same display is a 720 × 720 viewport; a density
+        // the rasterizer cannot draw, or that does not divide the display,
+        // draws at 1.
+        for density in [1, 5, 7] {
+            let screen = Screen::new(Panel::new((720.0, 720.0)), density);
+            assert_eq!(screen.viewport(), (720.0, 720.0), "density {density}");
+            assert_eq!(screen.info().density, 1);
+        }
+        assert_eq!(shown(3).viewport(), (240.0, 240.0));
+    }
+
     #[test]
     fn dropping_or_suspending_the_shown_view_takes_it_off_the_display() {
         let service = UiService::new(DEFAULT_VIEWPORT);
@@ -406,13 +506,19 @@ mod screen {
 
     #[test]
     fn the_pointer_reads_fingers_in_view_coordinates() {
+        let display = |density| crate::DisplayInfo {
+            width: 360,
+            height: 360,
+            density,
+            round: false,
+        };
         // The controller spans half the display, so its points double.
-        let mut pointer = Pointer::new(
-            Finger(VecDeque::from([Some((10, 20)), None])),
-            DEFAULT_VIEWPORT,
-        );
+        let mut pointer = Pointer::new(Finger(VecDeque::from([Some((10, 20)), None])), display(1));
         assert_eq!(pointer.poll(), Some((20.0, 40.0)));
         assert_eq!(pointer.poll(), None);
+        // One that reports no span reads display pixels.
+        let mut pointer = Pointer::new(Spanless(Some((40, 60))), display(2));
+        assert_eq!(pointer.poll(), Some((20.0, 30.0)));
     }
 
     #[test]

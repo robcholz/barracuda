@@ -233,11 +233,6 @@ const en = {
   fixed: "Fixed",
   fixedText: "Devices know the app by its ID",
   version: "Version",
-  shape: "Display shape",
-  round: "Round",
-  rectangle: "Rectangle",
-  roundText: "Keeps to the inscribed circle, so it fits every display",
-  rectText: "Uses the corners, so it needs a rectangular display",
 
   // Install
   blocked: {
@@ -561,11 +556,6 @@ const zh: Strings = {
   fixed: "固定",
   fixedText: "设备靠 ID 识别应用",
   version: "版本",
-  shape: "屏幕形状",
-  round: "圆形",
-  rectangle: "矩形",
-  roundText: "只用内切圆，所以适合每一种屏幕",
-  rectText: "用到四角，所以需要矩形屏幕",
 
   blocked: {
     title: "门户窗口没有打开",

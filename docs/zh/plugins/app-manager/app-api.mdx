@@ -44,8 +44,8 @@ System 会按以下顺序根据设备检查每个可安装应用，并在遇到�
 | `api` 高于设备的级别 | `Needs system update (API 2, device has 1)` |
 | `boards` 未列出本开发板 | `Only for espressif-esp-vocat-v1-2`（列出的开发板） |
 | 应用带视图，而设备没有显示屏 | `This device has no display` |
+| 视图是为 `view.target` 以外的显示屏构建的 | `Built for 320×240 display (device has 360×360)` |
 | 显示屏小于 `view.size` | `Display too small (needs 480×480)` |
-| `view.shape` 为 `rect`，而显示屏是圆形 | `App needs a square display` |
 | `requires` 中的某个 Lua 包在本设备上不是稳定 Lua 包 | `This device has no notify` |
 | 它在本设备上的版本低于 `requires` 中写明的版本 | `Needs system update (notify v2, device has v1)` |
 | `permissions` 中的某个 Lua 包缺失 | `This device doesn't support serial` |
@@ -54,7 +54,7 @@ System 会按以下顺序根据设备检查每个可安装应用，并在遇到�
 
 ### 视图与显示屏
 
-视图按显示屏的实际尺寸布局，而不是缩放：它的根节点填满显示屏，布局采用 flexbox，所以填满父元素（`w-full`、`h-full`）、用两侧内边距隔开列（`left-[40px] right-[40px]`）、并用 `justify-center` 居中的视图，可以适配其他尺寸的显示屏。固定尺寸会保持原样。`view.size` 是视图仍能适配的最小显示屏；圆形视图（限制在内切圆内的视图）也能适配矩形显示屏；`rect` 视图则不能适配圆形显示屏，因为它会丢失四个角。文字保持原有大小：字体字号是按固定像素尺寸烘焙的。需要知道显示屏尺寸的视图可以从 `app.device().display` 读取。
+视图按显示屏以视图像素计的尺寸布局：它的根节点填满显示屏，布局采用 flexbox，所以填满父元素（`w-full`、`h-full`）、用两侧内边距隔开列（`left-[40px] right-[40px]`）、并用 `justify-center` 居中的视图，可以适配其他尺寸的显示屏。固定尺寸会保持原样。`view.size` 是视图仍能适配的最小显示屏。设备只按尺寸判断视图：显示屏是圆形还是矩形，由视图的设计来处理，所以面向所有设备的视图要把内容放在圆形显示屏也能显示的区域里。文字保持原有大小：字体字号是按固定的视图像素尺寸烘焙的。开发板可以把每个视图像素画成多个显示屏像素，即它的密度：密度为 2 的 720 × 720 屏幕按 360 × 360 显示视图，画得更清晰，所以视图在它上面看到的尺寸与在 360 × 360 屏幕上相同。需要知道显示屏尺寸的视图可以从 `app.device().display` 读取。为某块显示屏构建的视图（见[应用格式](/zh/plugins/app-manager/app-format)）只在那块显示屏上运行。
 
 ## 运行
 
@@ -66,7 +66,7 @@ System 会按以下顺序根据设备检查每个可安装应用，并在遇到�
 {
   api = 1,
   board = "espressif-esp-vocat-v1-2",
-  display = { width = 360, height = 360, round = true },  -- nil without one
+  display = { width = 360, height = 360, density = 1 },  -- nil without one
   touch = true,
   capabilities = { notify = 2, ... },
 }
