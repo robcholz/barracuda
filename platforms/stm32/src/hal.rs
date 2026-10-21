@@ -795,6 +795,19 @@ pub fn digital_input(
     Input::new(pin, Pull::None)
 }
 
+/// A pin a peripheral implementation switches between input and output.
+pub type ConfigurablePin = DynamicPin;
+
+/// Hands a selected raw pin token to the implementation that configures it.
+#[must_use]
+pub fn configurable_pin(
+    pin: embassy_stm32::Peri<'static, impl embassy_stm32::gpio::Pin>,
+) -> ConfigurablePin {
+    DynamicPin {
+        pin: Flex::new(pin),
+    }
+}
+
 /// Runtime-configurable STM32 GPIO exposed through `embedded-hal`.
 pub struct DynamicPin {
     pin: Flex<'static>,

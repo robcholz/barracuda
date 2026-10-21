@@ -993,6 +993,19 @@ pub fn digital_input(pin: impl InputPin + 'static) -> DigitalInput {
     Input::new(pin, HalInputConfig::default())
 }
 
+/// A pin a peripheral implementation switches between input and output.
+pub type ConfigurablePin = DynamicPin;
+
+/// Converts a selected raw pin token into a pin its implementation
+/// configures. Its output stays disabled until the implementation configures
+/// one.
+#[must_use]
+pub fn configurable_pin(pin: impl Pin + 'static) -> ConfigurablePin {
+    DynamicPin {
+        pin: Flex::new(pin),
+    }
+}
+
 /// Runtime-configurable ESP32 GPIO exposed through `embedded-hal`.
 pub struct DynamicPin {
     pin: Flex<'static>,

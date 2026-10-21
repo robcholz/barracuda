@@ -34,8 +34,11 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `inertial-measurement` | Motion sensor (BMI270) | [`motion`](/plugins/vm-imu) |
 | `power-monitor` | Power monitor (INA226) | [`power_monitor`](/plugins/vm-power-monitor) |
 
-The display and touch implementations reset their controllers through the
-PI4IOE5V6408 expander at `43h`; the expander is not a device of its own.
+The display implementation resets the panel and the touch controller through
+the PI4IOE5V6408 expander at `43h`, which is not a device of its own. As M5GFX
+does, it holds the touch interrupt line (GPIO23) high meanwhile, so a GT911
+answers at `14h`, and then identifies the panel by the touch controller that
+answers.
 The ES8388/ES7210 audio path, the microSD slot, and the SC202CS camera are not
 declared yet: the ESP32-P4 Platform has no I2S, SDMMC, or MIPI CSI binding.
 

@@ -61,10 +61,13 @@ peripherals:
         frequency-hz: 400000
   devices:
     # 720x1280 MIPI DSI panel: ILI9881C, ST7123, or ST7121 depending on the
-    # unit, detected at start. Its reset is the PI4IOE5V6408 at 43h.
+    # unit, detected at start by its touch controller. Its reset and the
+    # touch reset are P4 and P5 of the PI4IOE5V6408 at 43h.
     display:
       implementation: tab5-dsi-display
-      bindings: { host: panel, i2c: internal }
+      # TP_INT on GPIO23: M5GFX drives it high while the touch controller
+      # leaves reset to strap the GT911 to 14h, then makes it an input.
+      bindings: { host: panel, i2c: internal, touch-interrupt: GPIO23 }
       parameters:
         # GT911 at 14h (ILI9881C units) or the ST712x touch at 55h.
         gt911-address: 20

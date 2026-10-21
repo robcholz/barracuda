@@ -2804,6 +2804,7 @@ dependencies = [
 name = "barracuda-tab5-dsi-display"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board-hal",
  "barracuda-driver-gt911",
  "barracuda-driver-ili9881c",
  "barracuda-driver-pi4ioe5v6408",
@@ -2827,7 +2828,6 @@ name = "barracuda-tab5-touch"
 version = "0.1.0"
 dependencies = [
  "barracuda-driver-gt911",
- "barracuda-driver-pi4ioe5v6408",
  "barracuda-driver-st712x",
  "barracuda-peripheral",
  "embedded-hal 1.0.0",
