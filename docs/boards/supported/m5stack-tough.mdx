@@ -29,6 +29,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (CHSC6540) | — |
 
-The CHSC6540 capacitive touch panel is not declared yet: no touch
-implementation drives its controller.
+The display implementation's AXP192 reset pulse resets the touch controller
+with the panel.

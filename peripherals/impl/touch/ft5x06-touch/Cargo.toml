@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-ft5x06-touch"
+version = "0.1.0"
+edition = "2024"
+description = "FocalTech FT5x06-family (FT6336U) multi-touch peripheral implementation"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-aw9523.workspace = true
+barracuda-driver-ft5x06.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

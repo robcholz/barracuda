@@ -42,3 +42,14 @@ peripherals:
         width: 320
         height: 240
         invert-colors: true
+    touch:
+      # FT6336U at 38h on the internal bus (M5GFX `Touch_M5StackCoreS3`); its
+      # interrupt reaches GPIO21 through the AW9523B, unused: the
+      # implementation polls. Its reset is AW9523B P0_0 (Espressif's
+      # m5stack_cores3 power manager).
+      implementation: ft5x06-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        width: 320
+        height: 240
+        reset: cores3

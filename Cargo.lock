@@ -873,7 +873,9 @@ dependencies = [
  "barracuda-bq27220-power-monitor",
  "barracuda-capacitive-touch-buttons",
  "barracuda-chain-captain-display",
+ "barracuda-chsc6540-touch",
  "barracuda-corep4x-dsi-display",
+ "barracuda-cst3530-touch",
  "barracuda-cst816t-touch",
  "barracuda-ed047tc1-display",
  "barracuda-epaper-1in54-display",
@@ -881,6 +883,7 @@ dependencies = [
  "barracuda-es8311-es7210-audio-codec",
  "barracuda-es8388-es7210-audio-codec",
  "barracuda-es8389-audio-codec",
+ "barracuda-ft5x06-touch",
  "barracuda-ina226-power-monitor",
  "barracuda-indicator-led",
  "barracuda-it8951-display",
@@ -1051,6 +1054,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-chsc6540-touch"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-chsc6540",
+ "barracuda-peripheral",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-cli"
 version = "0.1.0"
 dependencies = [
@@ -1090,6 +1102,15 @@ dependencies = [
  "barracuda-driver-st712x",
  "barracuda-peripheral",
  "embedded-graphics-core",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-cst3530-touch"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-cst3530",
+ "barracuda-peripheral",
  "embedded-hal 1.0.0",
 ]
 
@@ -1155,8 +1176,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-chsc6540"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-co5300"
 version = "0.1.0"
+
+[[package]]
+name = "barracuda-driver-cst3530"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
 
 [[package]]
 name = "barracuda-driver-cst816t"
@@ -1236,6 +1271,13 @@ dependencies = [
  "embedded-hal-async",
  "log",
  "sdio",
+]
+
+[[package]]
+name = "barracuda-driver-ft5x06"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -1439,6 +1481,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "barracuda-ft5x06-touch"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-aw9523",
+ "barracuda-driver-ft5x06",
+ "barracuda-peripheral",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

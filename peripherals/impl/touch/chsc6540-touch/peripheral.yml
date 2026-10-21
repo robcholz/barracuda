@@ -1,0 +1,23 @@
+id: chsc6540-touch
+api-version: 1
+peripheral: touch
+implementation:
+  package: barracuda-chsc6540-touch
+  crate: barracuda_chsc6540_touch
+  factory: "::{{crate}}::Chsc6540TouchImplementation<{{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Chsc6540Bindings::new({{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Chsc6540Config::new({{parameter.address}}, {{parameter.width}}, {{parameter.height}})"
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    default: 46
+  # The span the controller reports.
+  width:
+    type: integer
+    required: true
+  height:
+    type: integer
+    required: true

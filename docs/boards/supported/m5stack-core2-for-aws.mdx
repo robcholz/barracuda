@@ -29,6 +29,8 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (FT6336U) | — |
 
-The FT6336U capacitive touch panel is not declared yet: no touch
-implementation drives its controller.
+The touch panel reports a 320x280 span: the strip below the screen holds the
+three touch keys. The display implementation's PMIC power-up resets the touch
+controller with the panel.
