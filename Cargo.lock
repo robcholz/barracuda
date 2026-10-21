@@ -884,6 +884,7 @@ dependencies = [
  "barracuda-es8388-es7210-audio-codec",
  "barracuda-es8389-audio-codec",
  "barracuda-ft5x06-touch",
+ "barracuda-gpio-buttons",
  "barracuda-ina226-power-monitor",
  "barracuda-indicator-led",
  "barracuda-it8951-display",
@@ -896,6 +897,7 @@ dependencies = [
  "barracuda-paper-color-display",
  "barracuda-paper-diy-display",
  "barracuda-paper-mono-display",
+ "barracuda-pi4ioe5v6408-buttons",
  "barracuda-rx8130ce-rtc",
  "barracuda-sdmmc-fat-removable-storage",
  "barracuda-ssd1306-spi-display",
@@ -1494,6 +1496,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-gpio-buttons"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-gpio-plugin"
 version = "0.1.0"
 dependencies = [
@@ -2048,6 +2061,17 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "yaml-peg",
+]
+
+[[package]]
+name = "barracuda-pi4ioe5v6408-buttons"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

@@ -73,6 +73,7 @@ barracuda-es8311-es7210-audio-codec = { path = "peripherals/impl/audio-codec/es8
 barracuda-es8388-es7210-audio-codec = { path = "peripherals/impl/audio-codec/es8388-es7210-audio-codec" }
 barracuda-es8389-audio-codec = { path = "peripherals/impl/audio-codec/es8389-audio-codec" }
 barracuda-ft5x06-touch = { path = "peripherals/impl/touch/ft5x06-touch" }
+barracuda-gpio-buttons = { path = "peripherals/impl/buttons/gpio-buttons" }
 barracuda-ina226-power-monitor = { path = "peripherals/impl/power-monitor/ina226-power-monitor" }
 barracuda-indicator-led = { path = "peripherals/impl/indicator/indicator-led" }
 barracuda-it8951-display = { path = "peripherals/impl/display/it8951-display" }
@@ -85,6 +86,7 @@ barracuda-ov3660-camera = { path = "peripherals/impl/camera/ov3660-camera" }
 barracuda-paper-color-display = { path = "peripherals/impl/display/paper-color-display" }
 barracuda-paper-diy-display = { path = "peripherals/impl/display/paper-diy-display" }
 barracuda-paper-mono-display = { path = "peripherals/impl/display/paper-mono-display" }
+barracuda-pi4ioe5v6408-buttons = { path = "peripherals/impl/buttons/pi4ioe5v6408-buttons" }
 barracuda-rx8130ce-rtc = { path = "peripherals/impl/real-time-clock/rx8130ce-rtc" }
 barracuda-sdmmc-fat-removable-storage = { path = "peripherals/impl/removable-storage/sdmmc-fat-removable-storage" }
 barracuda-ssd1306-spi-display = { path = "peripherals/impl/display/ssd1306-spi-display" }

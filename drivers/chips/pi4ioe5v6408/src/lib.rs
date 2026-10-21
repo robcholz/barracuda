@@ -115,6 +115,15 @@ where
         Ok(self.read(INPUT)? & mask != 0)
     }
 
+    /// Reads all eight input levels in one transfer, P0 in bit 0.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn read_inputs(&mut self) -> Result<u8, Error<I2C::Error>> {
+        self.read(INPUT)
+    }
+
     /// Pulses an active-low reset output and leaves it released high.
     ///
     /// # Errors
@@ -198,7 +207,7 @@ mod tests {
         i2c::{ErrorType, I2c, Operation},
     };
 
-    use super::{DIRECTION, OUTPUT, OUTPUT_HIGH_IMPEDANCE, PULL_ENABLE, PULL_SELECTION};
+    use super::{DIRECTION, INPUT, OUTPUT, OUTPUT_HIGH_IMPEDANCE, PULL_ENABLE, PULL_SELECTION};
     use super::{Error, Pi4ioe5v6408, Pull};
 
     #[derive(Default)]
@@ -303,5 +312,15 @@ mod tests {
             expander.configure_output(8, false),
             Err(Error::InvalidPin)
         ));
+    }
+
+    #[test]
+    fn reads_every_input_level_in_one_transfer() {
+        let mut bus = Bus::default();
+        bus.registers[usize::from(INPUT)] = 0b1010_0110;
+        let mut expander = Pi4ioe5v6408::new(&mut bus, 0x43).expect("valid expander");
+        assert_eq!(expander.read_inputs().expect("inputs"), 0b1010_0110);
+        assert!(expander.input_is_high(1).expect("P1"));
+        assert!(!expander.input_is_high(0).expect("P0"));
     }
 }
