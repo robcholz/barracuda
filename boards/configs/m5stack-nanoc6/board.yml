@@ -7,3 +7,18 @@ toolchain:
   target: riscv32imac-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  devices:
+    status-led:
+      implementation: indicator-led
+      bindings:
+        # Blue LED on GPIO7, active high (Espressif m5stack_nanoc6; M5Unified
+        # `M5NanoC6_LED_PIN`).
+        pin: GPIO7
+      parameters:
+        active-level: high
+exposed-io:
+  pins:
+    # Grove port G1/G2 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }

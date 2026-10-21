@@ -7,3 +7,8 @@ toolchain:
   target: riscv32imc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+exposed-io:
+  pins:
+    # Grove port G0/G1 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g0: { pin: GPIO0 }
+    grove-g1: { pin: GPIO1 }

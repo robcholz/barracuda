@@ -29,3 +29,18 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | OLED 显示屏（SSD1306） | [`display`](/zh/plugins/vm-display) |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g4` | `GPIO4` |
+| `grove-g5` | `GPIO5` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g4", "up")
+print(pin:read())
+```
