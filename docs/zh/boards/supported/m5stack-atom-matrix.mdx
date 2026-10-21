@@ -29,3 +29,18 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `led-strip` | LED 灯带（WS2812） | [`light`](/zh/plugins/vm-led-strip) |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g26` | `GPIO26` |
+| `grove-g32` | `GPIO32` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g26", "up")
+print(pin:read())
+```

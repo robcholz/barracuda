@@ -1415,7 +1415,6 @@ fn render_generic_hal(
         runtime_i2c_controllers
             .iter()
             .filter(|controller| !board.peripheral_io().uses_controller(controller))
-            .filter(|controller| !state.reserved_spi_controllers.contains(*controller))
             .collect::<Vec<_>>()
     };
     let runtime_spi_controllers = if pin_count == 0 {
@@ -1424,6 +1423,7 @@ fn render_generic_hal(
         runtime_spi_controllers
             .iter()
             .filter(|controller| !board.peripheral_io().uses_controller(controller))
+            .filter(|controller| !state.reserved_spi_controllers.contains(*controller))
             .collect::<Vec<_>>()
     };
     let runtime_uart_controllers = if pin_count == 0 {

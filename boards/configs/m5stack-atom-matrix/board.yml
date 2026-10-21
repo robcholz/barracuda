@@ -22,3 +22,8 @@ peripherals:
       parameters:
         led-count: 25
         color-order: grb
+exposed-io:
+  pins:
+    # M5Stack Atom Matrix Grove port (EBM m5stack_atom_matrix, M5Unified ex-I2C).
+    grove-g26: { pin: GPIO26 }
+    grove-g32: { pin: GPIO32 }

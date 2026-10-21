@@ -1265,6 +1265,9 @@ fn atom_matrix_reserves_a_platform_spi_controller_without_a_fake_clock_pin() {
     assert!(rust.contains("pin_binding_type!(GPIO27)"));
     assert!(rust.contains("hal::spi_output("));
     assert!(!rust.contains("led_strip_spi_sck"));
+    // The LED's controller leaves the runtime SPI pool for the Grove pins.
+    assert!(rust.contains("runtime_controller_spi3"));
+    assert!(!rust.contains("runtime_controller_spi2"));
 }
 
 #[test]
