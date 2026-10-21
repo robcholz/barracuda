@@ -166,7 +166,9 @@ active-low reset, and, when the Board switches the co-processor's power
 through an I/O expander, that expander's part, I2C bus, address and output.
 Like `ethernet`, it is a fact from the schematic. A Platform without the
 `wifi-coprocessor-sdio` binding rejects the Board at `cargo board select`, and
-its pins are never also peripheral bindings or exposed pins.
+its pins are never also peripheral bindings or exposed pins. The co-processor
+holds its SD host slot: a microSD card (`peripherals.io.sdmmc-device`) names
+another `slot`, and `cargo board select` refuses one on the same slot.
 
 ```yaml
 hardware:
@@ -288,8 +290,8 @@ revision-aware DSI display and touch, the BMI270 inertial measurement, the
 INA226 power monitor, and the RX8130CE real-time clock, with pure `esp-hal`
 bindings. The display and touch implementations privately compose the
 PI4IOE5V6408 chip driver for their reset lines; the expander is not a
-System-visible peripheral. The ES8388/ES7210 audio path and the microSD slot
-wait for I2S and SD/MMC bindings on the ESP32-P4 Platform. The
+System-visible peripheral. Its microSD card sits on slot 0 of the SD host,
+beside the Wi-Fi co-processor on slot 1. The
 `m5stack-tab5x` identity remains separate and must not be substituted based only
 on an ESP32-P4 silicon revision reported by the flashing tool.
 

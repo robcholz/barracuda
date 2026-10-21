@@ -34,6 +34,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `real-time-clock` | Real-time clock (RX8130CE) | — |
 | `inertial-measurement` | Motion sensor (BMI270) | [`motion`](/plugins/vm-imu) |
 | `power-monitor` | Power monitor (INA226) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `micro-sd` | microSD card slot (FAT) | — |
 
 The display implementation resets the panel and the touch controller through
 the PI4IOE5V6408 expander at `43h`, which is not a device of its own. As M5GFX
@@ -41,10 +42,31 @@ does, it holds the touch interrupt line (GPIO23) high meanwhile, so a GT911
 answers at `14h`, and then identifies the panel by the touch controller that
 answers.
 The audio codec implementation switches the speaker amplifier on through the
-same expander. The microSD slot is not declared yet: it is on slot 0 of the
-SD host, whose slot 1 the Platform drives for the Wi-Fi co-processor, and the
-Platform cannot yet hand slot 0 to a Board device. The SC202CS camera is not
-declared either: the ESP32-P4 Platform has no MIPI CSI binding.
+same expander. The SC202CS camera is not declared: the ESP32-P4 Platform has
+no MIPI CSI binding.
+
+## microSD card
+
+The microSD slot is on slot 0 of the ESP32-P4's SD host, on that slot's fixed
+pads. The Wi-Fi co-processor uses slot 1 of the same host. The
+[ESP32-P4 Platform](/platforms/esp32) owns the SD host and hands slot 0 to the
+`micro-sd` device. It runs the card on four lines at 40 MHz and powers its I/O
+from the chip's LDO VO4 at 3.3 V. A FAT card appears at `/removable/micro-sd`.
+The slot has no card-detect line, so a removed or swapped card is noticed the
+next time the slot is read, within about a second.
+
+| Signal | Pin |
+| --- | --- |
+| SD CLK / CMD | `GPIO43` / `GPIO44` |
+| SD D0 / D1 / D2 / D3 | `GPIO39` / `GPIO40` / `GPIO41` / `GPIO42` |
+| Card detect | none |
+| I/O supply | on-chip LDO VO4, 3.3 V |
+
+The card and Wi-Fi take turns on the SD host's one transfer engine, in the
+order they ask for it. One card transfer moves at most 4 KiB, so Wi-Fi waits
+at most about 0.2 ms for the card, however large the file.
+
+The card has not been tried on a device yet.
 
 ## Wi-Fi
 

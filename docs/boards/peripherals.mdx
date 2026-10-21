@@ -119,6 +119,36 @@ A directly driven e-paper panel's source driver uses the same binding without
 is `chip-select`. Its display implementation drives the gate and latch lines
 as ordinary digital outputs and keeps each line within one burst.
 
+A microSD card is an `sdmmc-device`: the SD host, the `slot` of it the card
+is wired to (0 when left out), the clock, command and data pins in order, the
+`bus-width` (1 or 4), the clock the card runs at once identified
+(`frequency-hz`, 25 MHz when left out), and, when the chip powers the slot's
+pads from an on-chip regulator, that regulator's `power-channel` and
+`power-millivolts`. Each Platform lists the SD host slots it hands to a Board
+and the supply each needs (`hal.sdmmc-slots` in `platform.yml`), and
+`cargo board select` refuses a card on another slot, with another supply, or
+on the slot a Wi-Fi co-processor uses. The ESP32-P4's card:
+
+~~~yaml
+sdmmc-device:
+  micro-sd:
+    peripheral: SDHOST
+    slot: 0
+    clk: GPIO43
+    cmd: GPIO44
+    data: [GPIO39, GPIO40, GPIO41, GPIO42]
+    bus-width: 4
+    power-channel: 4
+    power-millivolts: 3300
+    frequency-hz: 40000000
+~~~
+
+The binding is the Platform's to build. On the ESP32-S3 the Board composition
+takes the SD host and builds the card's slot. On the ESP32-P4 the Platform owns
+the SD host, because the Wi-Fi co-processor's link uses its other slot: the
+Platform entry builds the host once and hands slot 0 to the Board composition
+beside the chip peripherals, and the card implementation receives that slot.
+
 Every generated semantic slot is optional. A Board with no real-time clock has
 no `RealTimeClock` value; a Board with one has `Some(concrete_clock)`. Absence
 does not require fake hardware, and presence does not expose helper chips.

@@ -87,6 +87,24 @@ parallel-output:
 
 直接驱动的电子墨水屏源极驱动器使用同一种绑定，但不带 `dc`：每个字节都是数据，源极时钟接 `wr`，源极起始脉冲接 `chip-select`。它的显示实现把栅极和锁存线作为普通数字输出驱动，并让每一行都在一次突发之内发出。
 
+microSD 卡是一个 `sdmmc-device`：SD 主机、卡所接的主机 `slot`（省略时为 0）、按顺序排列的时钟、命令和数据引脚、`bus-width`（1 或 4）、卡识别后运行的时钟（`frequency-hz`，省略时为 25 MHz），以及芯片用片上稳压器为该槽位引脚供电时，该稳压器的 `power-channel` 和 `power-millivolts`。每个平台列出它交给开发板的 SD 主机槽位及各自需要的供电（`platform.yml` 中的 `hal.sdmmc-slots`），`cargo board select` 会拒绝位于其他槽位、声明其他供电，或位于 Wi-Fi 协处理器所用槽位上的存储卡。ESP32-P4 的存储卡：
+
+~~~yaml
+sdmmc-device:
+  micro-sd:
+    peripheral: SDHOST
+    slot: 0
+    clk: GPIO43
+    cmd: GPIO44
+    data: [GPIO39, GPIO40, GPIO41, GPIO42]
+    bus-width: 4
+    power-channel: 4
+    power-millivolts: 3300
+    frequency-hz: 40000000
+~~~
+
+这个绑定由平台构建。在 ESP32-S3 上，开发板组合取得 SD 主机并构建卡的槽位。在 ESP32-P4 上，由于 Wi-Fi 协处理器的链路使用另一个槽位，SD 主机归平台所有：平台入口只构建一次主机，把槽位 0 与芯片外设一起交给开发板组合，存储卡实现收到的就是这个槽位。
+
 每个生成的语义槽位都是可选的。没有实时时钟的开发板就没有 `RealTimeClock` 值；有实时时钟的开发板则有 `Some(concrete_clock)`。缺席不需要伪造硬件，存在也不会暴露辅助芯片。
 
 ## 实现清单
