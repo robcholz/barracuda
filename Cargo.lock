@@ -827,6 +827,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-aw88298-es7210-audio-codec"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-aw88298",
+ "barracuda-driver-aw9523",
+ "barracuda-driver-axp2101",
+ "barracuda-driver-es7210",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-bmi270-imu"
 version = "0.1.0"
 dependencies = [
@@ -890,6 +903,7 @@ dependencies = [
  "barracuda-apa102-led-strip",
  "barracuda-atom-s3-display",
  "barracuda-atom-s3r-display",
+ "barracuda-aw88298-es7210-audio-codec",
  "barracuda-bmi270-imu",
  "barracuda-bq27220-power-monitor",
  "barracuda-capacitive-touch-buttons",
@@ -1171,6 +1185,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-aw88298"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-aw9523"
 version = "0.1.0"
 dependencies = [
@@ -1446,6 +1467,8 @@ name = "barracuda-es8311-audio-codec"
 version = "0.1.0"
 dependencies = [
  "barracuda-driver-es8311",
+ "barracuda-driver-m5ioe1",
+ "barracuda-driver-m5pm1",
  "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
@@ -1458,6 +1481,8 @@ version = "0.1.0"
 dependencies = [
  "barracuda-driver-es7210",
  "barracuda-driver-es8311",
+ "barracuda-driver-m5ioe1",
+ "barracuda-driver-m5pm1",
  "barracuda-peripheral",
  "embedded-hal 1.0.0",
 ]
