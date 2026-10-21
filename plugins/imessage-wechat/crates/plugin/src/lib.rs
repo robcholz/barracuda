@@ -39,7 +39,7 @@ use barracuda_webserver_plugin::{
 use embassy_futures::select::select;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use login::{LoginEndpoint, LoginRuntime, LoginTiming, LoginWatch};
-use receive::{InboundState, PollTiming, SESSION_EXPIRED_MESSAGE};
+use receive::{InboundState, PollTiming, SESSION_EXPIRED_CODE};
 use serde::{Deserialize, Serialize};
 use wechat::{Wechat, WechatConfig};
 
@@ -251,7 +251,7 @@ fn entry_status<Storage: PluginStorage>(
         );
     }
     let session_expired = configuration.mode().receives()
-        && configuration.receive.state().message() == Some(SESSION_EXPIRED_MESSAGE);
+        && configuration.receive.state().code() == Some(SESSION_EXPIRED_CODE);
     if configuration.configured() && session_expired {
         return EntryStatus::new(
             EntryState::Attention,

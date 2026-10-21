@@ -43,8 +43,9 @@ pub use barracuda_imessage_gateway_runtime::{
 };
 pub use channel::{
     ChannelControl, ChannelLevel, ChannelMode, ChannelStatus, ModeError, ModeFuture, NoSlot,
-    OnDemand, ReceiveChannel, ReceiveControl, ReceiveError, ReceiveFuture, ReceiveRuntime,
-    ReceiveSession, ReceiveSlotSource, ReceiveState, ReceiveTiming, SlotWait, UnlimitedSlots,
+    OnDemand, ReceiveChannel, ReceiveControl, ReceiveError, ReceiveFailure, ReceiveFuture,
+    ReceiveRuntime, ReceiveSession, ReceiveSlotSource, ReceiveState, ReceiveTiming, SlotWait,
+    UnlimitedSlots,
 };
 pub use gateway::*;
 pub use http::{

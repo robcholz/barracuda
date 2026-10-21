@@ -36,7 +36,8 @@ export type ReceiveState =
   "idle" | "starting" | "receiving" | "no_slot" | "error";
 
 /**
- * `GET <channel endpoint>/status`: `receive` only in `send_receive`, `message` only with `error`, `capacity`
+ * `GET <channel endpoint>/status`: `receive` only in `send_receive`, `message` only with `error`,
+ * `code` with an `error` the channel gave a stable code (match it, never the message), `capacity`
  * only with `no_slot`, `slots` (the device's receive slots held now, across every channel) whenever
  * the channel draws from that bounded pool (a webhook channel holds none).
  */
@@ -45,6 +46,7 @@ export interface ChannelStatus extends ChannelState {
   receive?: {
     state: ReceiveState;
     message?: string;
+    code?: string;
     capacity?: number;
     slots?: { in_use: number; capacity: number };
   };

@@ -113,8 +113,9 @@ neither part fails the poll.
 A connection the server closes after a healthy poll is reopened at once.
 Other failures go through the scaffold's backoff (1 s doubling to 30 s; 30 s
 after HTTP 429). `ret` or `errcode` -14 means the bot session expired: the
-loop halts with receive state `error` and message
+loop halts with receive state `error`, message
 `SESSION_EXPIRED_MESSAGE` ("Scan again to relink", after its Chinese half)
+and code `session_expired`, which the page and the portal status match,
 until a new QR login is confirmed or the configuration or mode changes.
 
 **Files.** Every iLink file lives on the CDN (`cdn_base`, default

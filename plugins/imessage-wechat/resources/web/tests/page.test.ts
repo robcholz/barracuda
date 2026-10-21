@@ -377,6 +377,7 @@ test("an expired bot session offers 重新绑定, which starts a QR login", asyn
   let receive: Record<string, unknown> = {
     state: "error",
     message: "需要重新扫码 / Scan again to relink",
+    code: "session_expired",
   };
   const reply = harness.reply;
   harness.reply = async (call: FetchCall) =>
@@ -407,7 +408,11 @@ test("an expired bot session offers 重新绑定, which starts a QR login", asyn
   expect(page.text()).toContain("微信已绑定");
   expect(button(page, "重新绑定")!.className).toContain("bc-button--outline");
 
-  receive = { state: "error", message: "需要重新扫码 / Scan again to relink" };
+  receive = {
+    state: "error",
+    message: "需要重新扫码 / Scan again to relink",
+    code: "session_expired",
+  };
   await advance(5_000);
   await press(page, "重新绑定");
   expect(requests().at(-1)).toBe(`POST ${LOGIN}`);
@@ -444,6 +449,7 @@ test("renders the expired session in English", async () => {
           receive: {
             state: "error",
             message: "需要重新扫码 / Scan again to relink",
+            code: "session_expired",
           },
           owners: { count: 1 },
         })

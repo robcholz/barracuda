@@ -18,10 +18,11 @@ answer `405`:
 - `configured`: a WeChat bot is linked (a configuration is stored).
 - `mode`: `disabled` or `send_receive`.
 - `receive` (only in `send_receive`): `state` is `idle`, `starting`,
-  `receiving`, `no_slot` (with `capacity`), or `error` (with `message`).
+  `receiving`, `no_slot` (with `capacity`), or `error` (with `message`, and
+  `code` for a failure the page recognises).
   After iLink reports the bot session expired (code -14) it is
-  `{"state":"error","message":"… / Scan again to relink"}` (the Chinese half
-  elided) until a new QR login is confirmed.
+  `{"state":"error","message":"… / Scan again to relink","code":"session_expired"}`
+  (the Chinese half elided) until a new QR login is confirmed.
 - `owners.count`: allowed accounts.
 
 It never returns settings or the token; `POST /api/gateway/wechat` takes

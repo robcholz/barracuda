@@ -305,8 +305,10 @@ impl ReceiveError {
     pub fn new(message: impl Into<String>) -> Self;   // retried after backoff
     pub fn halt(message: impl Into<String>) -> Self;  // waits for restart()
     pub fn retry_after(self, delay: Duration) -> Self; // ≥ delay, ≤ 10 min
+    pub const fn code(self, code: &'static str) -> Self; // status `code`
 }
-pub enum ReceiveState { Idle, Starting, Receiving, NoSlot, Error(String) }
+pub enum ReceiveState { Idle, Starting, Receiving, NoSlot, Error(ReceiveFailure) }
+pub struct ReceiveFailure { pub message: String, pub code: Option<&'static str> }
 pub struct ReceiveControl<Slots: ReceiveSlotSource>;
 impl<Slots: ReceiveSlotSource> ReceiveControl<Slots> {
     pub fn new(slots: Slots) -> Self;
@@ -397,7 +399,7 @@ allocation.
 
 | Request | Response |
 | --- | --- |
-| `GET /api/gateway/<channel>/status` | 200 `{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1}}`, then the channel's `status_details` |
+| `GET /api/gateway/<channel>/status` | 200 `{"configured":true,"mode":"send_receive","receive":{"state":"receiving"},"owners":{"count":1}}`, then the channel's `status_details`; an `error` state carries `message`, and `code` when the channel set one |
 | `POST /api/gateway/<channel>/mode` `{"mode":"send"}` | 204 |
 | the same with `send_receive` and no free slot | 409 `{"error":"no_slot","capacity":2}` |
 | `GET /api/gateway/<channel>/owners` | 200 `{"owners":[{"id":"42","label":"Ann"}],"pairing":{"code":"012345","expires_in":600},"ignored":3}` |
@@ -490,7 +492,9 @@ portal. Its tests are in `resources/web/tests/`.
 
    Return `ReceiveError::new` for failures that a retry can fix, `halt` for
    ones it cannot (WeChat `-14`: "Scan again to relink"), and `.retry_after(..)` for
-   429s.
+   429s. Add `.code("…")` to a failure a page must recognise: the status
+   reports it as `receive.code`, and the page matches the code, never the
+   message.
 6. **Runtime.** Build
    `gateway.receive_runtime(control, Rc::new(receiver), ReceiveTiming::DEVICE)`,
    then call `gateway.sync_receive(&*state)`; a `NoSlot` there is already

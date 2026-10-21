@@ -52,7 +52,7 @@ The kit imports the portal UI kit only through its public index. List
 ## Channel mode and allowed accounts (`inbound.ts`)
 
 Every channel serves the same JSON under its config path: `GET <endpoint>/status` answers
-`ChannelStatus` (`{configured, mode, receive?: {state, message?, capacity?}, owners: {count}}`),
+`ChannelStatus` (`{configured, mode, receive?: {state, message?, code?, capacity?}, owners: {count}}`),
 `POST <endpoint>/mode` takes `{mode}`, and `GET`/`POST <endpoint>/owners` answer `OwnersReply`
 (`{owners: [{id, label}], pairing: {code, expires_in} | null, ignored}`) and take
 `{"remove": id}` or `{"rotate": true}`.
@@ -60,7 +60,7 @@ Every channel serves the same JSON under its config path: `GET <endpoint>/status
 - `channelInbound(context, { endpoint, channel, how, command?, modes?, pollMs? = 5000, onStatus? })`
   returns `{ rows, alert, attach(form), apply(status), refresh() }`: the two rows below, wired to the
   device. `onStatus(status)` runs with each state the rows show (WeChat offers "Link again" when
-  its receive state is the "Scan again to relink" error).
+  its receive state is the `session_expired` error).
   - `attach(form)` puts them before the form's "Advanced" fold (or its footer).
   - `alert` is the no-slot caution alert: put it in the page under the header frame, before the form
     (`page(header(…), inbound.alert, form.element)`).
