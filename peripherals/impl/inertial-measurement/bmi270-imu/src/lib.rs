@@ -169,6 +169,8 @@ impl<I2C, DELAY> Bmi270Bindings<I2C, DELAY> {
 pub enum Bmi270InitError<BusError> {
     /// Only the hardware addresses `0x68` and `0x69` are valid.
     InvalidAddress(u8),
+    /// The mounting transform does not use each sensor axis exactly once.
+    InvalidAxes,
     /// The underlying BMI2 register operation failed.
     Driver(Bmi2Error<BusError>),
 }
@@ -206,6 +208,9 @@ where
         bindings: Self::Bindings,
         config: Self::Config,
     ) -> Result<Self::Peripheral, Self::Error> {
+        if !config.axes.is_permutation() {
+            return Err(Bmi270InitError::InvalidAxes);
+        }
         let address = match config.address {
             0x68 => I2cAddr::Default,
             0x69 => I2cAddr::Alternative,
@@ -328,7 +333,7 @@ mod tests {
 
     use barracuda_peripheral::{
         PeripheralImplementation,
-        imu::{AxisTransform, Imu},
+        imu::{AxisTransform, Imu, SignedAxis},
     };
     use embassy_futures::block_on;
     use embedded_hal::{
@@ -337,8 +342,8 @@ mod tests {
     };
 
     use super::{
-        AccelerometerRange, Bmi270Bindings, Bmi270Config, Bmi270ImuImplementation, GyroscopeRange,
-        SampleRate,
+        AccelerometerRange, Bmi270Bindings, Bmi270Config, Bmi270ImuImplementation, Bmi270InitError,
+        GyroscopeRange, SampleRate,
     };
 
     struct TestBus;
@@ -411,5 +416,46 @@ mod tests {
         assert_eq!(sample.angular_velocity_mdps().x, 15_625);
         assert_eq!(sample.angular_velocity_mdps().y, -15_625);
         assert_eq!(sample.temperature_mc(), Some(24_000));
+    }
+
+    #[test]
+    fn applies_the_board_mounting_and_rejects_a_degenerate_one() {
+        // M5Unified AtomMatrix: X and Z inverted.
+        let mounting = AxisTransform::new(
+            SignedAxis::NegativeX,
+            SignedAxis::PositiveY,
+            SignedAxis::NegativeZ,
+        );
+        let config = |axes| {
+            Bmi270Config::new(
+                0x68,
+                AccelerometerRange::G4,
+                GyroscopeRange::Dps500,
+                SampleRate::Hz100,
+                axes,
+            )
+        };
+        let mut imu = block_on(Bmi270ImuImplementation::initialize(
+            Bmi270Bindings::new(TestBus, TestDelay),
+            config(mounting),
+        ))
+        .expect("initialize BMI270");
+        let sample = block_on(imu.read_sample()).expect("read sample");
+        assert_eq!(sample.acceleration_mg().x, -1_000);
+        assert_eq!(sample.acceleration_mg().y, -1_000);
+        assert_eq!(sample.angular_velocity_mdps().x, -15_625);
+
+        let degenerate = AxisTransform::new(
+            SignedAxis::PositiveX,
+            SignedAxis::PositiveX,
+            SignedAxis::PositiveZ,
+        );
+        assert!(matches!(
+            block_on(Bmi270ImuImplementation::initialize(
+                Bmi270Bindings::new(TestBus, TestDelay),
+                config(degenerate),
+            )),
+            Err(Bmi270InitError::InvalidAxes)
+        ));
     }
 }

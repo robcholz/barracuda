@@ -896,6 +896,7 @@ dependencies = [
  "barracuda-es8389-audio-codec",
  "barracuda-ft5x06-touch",
  "barracuda-gpio-buttons",
+ "barracuda-icm42607-imu",
  "barracuda-ina226-power-monitor",
  "barracuda-indicator-led",
  "barracuda-it8951-display",
@@ -903,6 +904,8 @@ dependencies = [
  "barracuda-mipi-dbi-display",
  "barracuda-mipi-dbi-parallel-display",
  "barracuda-mipi-dbi-pi4ioe5v6408-display",
+ "barracuda-mpu6886-bmi270-imu",
+ "barracuda-mpu6886-imu",
  "barracuda-ov2640-camera",
  "barracuda-ov3660-camera",
  "barracuda-paper-color-display",
@@ -1308,6 +1311,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-icm42607"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-ili9881c"
 version = "0.1.0"
 
@@ -1352,6 +1362,13 @@ dependencies = [
 
 [[package]]
 name = "barracuda-driver-m5pm1"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-mpu6886"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
@@ -1585,6 +1602,16 @@ dependencies = [
  "futures-lite",
  "portable-atomic",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-icm42607-imu"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-icm42607",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -2005,6 +2032,28 @@ dependencies = [
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-mpu6886-bmi270-imu"
+version = "0.1.0"
+dependencies = [
+ "barracuda-bmi270-imu",
+ "barracuda-driver-mpu6886",
+ "barracuda-mpu6886-imu",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-mpu6886-imu"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-mpu6886",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

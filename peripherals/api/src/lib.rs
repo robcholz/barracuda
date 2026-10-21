@@ -1384,6 +1384,14 @@ pub mod imu {
     }
 
     impl SignedAxis {
+        const fn source_mask(self) -> u8 {
+            match self {
+                Self::PositiveX | Self::NegativeX => 0b001,
+                Self::PositiveY | Self::NegativeY => 0b010,
+                Self::PositiveZ | Self::NegativeZ => 0b100,
+            }
+        }
+
         const fn select(self, value: Vector3) -> i32 {
             match self {
                 Self::PositiveX => value.x,
@@ -1416,6 +1424,14 @@ pub mod imu {
         #[must_use]
         pub const fn new(x: SignedAxis, y: SignedAxis, z: SignedAxis) -> Self {
             Self { x, y, z }
+        }
+
+        /// Returns whether every sensor axis is selected exactly once, so the
+        /// transform is a rotation or a reflection of the sensor's axes.
+        #[must_use]
+        pub const fn is_permutation(self) -> bool {
+            let mask = self.x.source_mask() | self.y.source_mask() | self.z.source_mask();
+            mask == 0b111
         }
 
         /// Applies this mounting transform to one sensor-native vector.

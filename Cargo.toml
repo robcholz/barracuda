@@ -75,6 +75,7 @@ barracuda-es8388-es7210-audio-codec = { path = "peripherals/impl/audio-codec/es8
 barracuda-es8389-audio-codec = { path = "peripherals/impl/audio-codec/es8389-audio-codec" }
 barracuda-ft5x06-touch = { path = "peripherals/impl/touch/ft5x06-touch" }
 barracuda-gpio-buttons = { path = "peripherals/impl/buttons/gpio-buttons" }
+barracuda-icm42607-imu = { path = "peripherals/impl/inertial-measurement/icm42607-imu" }
 barracuda-ina226-power-monitor = { path = "peripherals/impl/power-monitor/ina226-power-monitor" }
 barracuda-indicator-led = { path = "peripherals/impl/indicator/indicator-led" }
 barracuda-it8951-display = { path = "peripherals/impl/display/it8951-display" }
@@ -82,6 +83,8 @@ barracuda-m5stack-pmic-display = { path = "peripherals/impl/display/m5stack-pmic
 barracuda-mipi-dbi-display = { path = "peripherals/impl/display/mipi-dbi-display" }
 barracuda-mipi-dbi-parallel-display = { path = "peripherals/impl/display/mipi-dbi-parallel-display" }
 barracuda-mipi-dbi-pi4ioe5v6408-display = { path = "peripherals/impl/display/mipi-dbi-pi4ioe5v6408-display" }
+barracuda-mpu6886-bmi270-imu = { path = "peripherals/impl/inertial-measurement/mpu6886-bmi270-imu" }
+barracuda-mpu6886-imu = { path = "peripherals/impl/inertial-measurement/mpu6886-imu" }
 barracuda-ov2640-camera = { path = "peripherals/impl/camera/ov2640-camera" }
 barracuda-ov3660-camera = { path = "peripherals/impl/camera/ov3660-camera" }
 barracuda-paper-color-display = { path = "peripherals/impl/display/paper-color-display" }
@@ -184,6 +187,7 @@ barracuda-driver-ed047tc1 = { path = "drivers/chips/ed047tc1" }
 barracuda-driver-ed2208 = { path = "drivers/chips/ed2208" }
 barracuda-driver-ft5x06 = { path = "drivers/chips/ft5x06" }
 barracuda-driver-gt911 = { path = "drivers/chips/gt911" }
+barracuda-driver-icm42607 = { path = "drivers/chips/icm42607" }
 barracuda-driver-ili9881c = { path = "drivers/chips/ili9881c" }
 barracuda-driver-ina226 = { path = "drivers/chips/ina226" }
 barracuda-driver-jd9853 = { path = "drivers/chips/jd9853" }
@@ -192,6 +196,7 @@ barracuda-driver-it8951 = { path = "drivers/chips/it8951" }
 barracuda-driver-jd79653a = { path = "drivers/chips/jd79653a" }
 barracuda-driver-m5ioe1 = { path = "drivers/chips/m5ioe1" }
 barracuda-driver-m5pm1 = { path = "drivers/chips/m5pm1" }
+barracuda-driver-mpu6886 = { path = "drivers/chips/mpu6886" }
 barracuda-driver-ov2640 = { path = "drivers/chips/ov2640" }
 barracuda-driver-ov3660 = { path = "drivers/chips/ov3660" }
 barracuda-driver-pi4ioe5v6408 = { path = "drivers/chips/pi4ioe5v6408" }

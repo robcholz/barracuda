@@ -6,7 +6,7 @@ implementation:
   crate: barracuda_bmi270_imu
   factory: "::{{crate}}::Bmi270ImuImplementation<{{binding.i2c.type}}, {{hal.delay.type}}>"
   bindings-expression: "::{{crate}}::Bmi270Bindings::new({{binding.i2c.value}}, {{hal.delay.value}})"
-  config-expression: "::{{crate}}::Bmi270Config::new({{parameter.address}}, {{parameter.accelerometer-range}}, {{parameter.gyroscope-range}}, {{parameter.sample-rate}}, ::barracuda_board_hal::imu::AxisTransform::IDENTITY)"
+  config-expression: "::{{crate}}::Bmi270Config::new({{parameter.address}}, {{parameter.accelerometer-range}}, {{parameter.gyroscope-range}}, {{parameter.sample-rate}}, ::barracuda_board_hal::imu::AxisTransform::new({{parameter.axis-x}}, {{parameter.axis-y}}, {{parameter.axis-z}}))"
 bindings:
   i2c:
     kind: i2c-device
@@ -41,3 +41,39 @@ parameters:
       100hz: "::barracuda_bmi270_imu::SampleRate::Hz100"
       200hz: "::barracuda_bmi270_imu::SampleRate::Hz200"
       400hz: "::barracuda_bmi270_imu::SampleRate::Hz400"
+  # Mounting: the sensor axis, with its sign, that each Board axis reads.
+  # The defaults leave the sensor's axes as they are; each sensor axis must
+  # be used once.
+  axis-x:
+    type: enum
+    values: ["+x", "-x", "+y", "-y", "+z", "-z"]
+    rust-values:
+      "+x": "::barracuda_board_hal::imu::SignedAxis::PositiveX"
+      "-x": "::barracuda_board_hal::imu::SignedAxis::NegativeX"
+      "+y": "::barracuda_board_hal::imu::SignedAxis::PositiveY"
+      "-y": "::barracuda_board_hal::imu::SignedAxis::NegativeY"
+      "+z": "::barracuda_board_hal::imu::SignedAxis::PositiveZ"
+      "-z": "::barracuda_board_hal::imu::SignedAxis::NegativeZ"
+    default: "+x"
+  axis-y:
+    type: enum
+    values: ["+x", "-x", "+y", "-y", "+z", "-z"]
+    rust-values:
+      "+x": "::barracuda_board_hal::imu::SignedAxis::PositiveX"
+      "-x": "::barracuda_board_hal::imu::SignedAxis::NegativeX"
+      "+y": "::barracuda_board_hal::imu::SignedAxis::PositiveY"
+      "-y": "::barracuda_board_hal::imu::SignedAxis::NegativeY"
+      "+z": "::barracuda_board_hal::imu::SignedAxis::PositiveZ"
+      "-z": "::barracuda_board_hal::imu::SignedAxis::NegativeZ"
+    default: "+y"
+  axis-z:
+    type: enum
+    values: ["+x", "-x", "+y", "-y", "+z", "-z"]
+    rust-values:
+      "+x": "::barracuda_board_hal::imu::SignedAxis::PositiveX"
+      "-x": "::barracuda_board_hal::imu::SignedAxis::NegativeX"
+      "+y": "::barracuda_board_hal::imu::SignedAxis::PositiveY"
+      "-y": "::barracuda_board_hal::imu::SignedAxis::NegativeY"
+      "+z": "::barracuda_board_hal::imu::SignedAxis::PositiveZ"
+      "-z": "::barracuda_board_hal::imu::SignedAxis::NegativeZ"
+    default: "+z"
