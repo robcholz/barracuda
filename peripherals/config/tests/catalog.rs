@@ -1768,3 +1768,63 @@ parameters: {}
     // Devices on one controller must agree on its lines.
     assert!(parse(&yaml("GPIO19")).is_err());
 }
+
+#[test]
+fn renders_a_quadrature_pulse_counter_and_the_new_kinds() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-encoder",
+        r#"
+id: test-encoder
+api-version: 1
+peripheral: rotary-encoder
+implementation:
+  package: test-encoder
+  crate: test_encoder
+  factory: "::{{crate}}::Implementation<{{binding.counter.type}}>"
+  bindings-expression: "{{binding.counter.value}}"
+  config-expression: "()"
+bindings:
+  counter:
+    kind: pulse-counter
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: encoder-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    pulse-counter:
+      knob:
+        peripheral: PCNT
+        a: GPIO41
+        b: GPIO40
+  devices:
+    rotary-encoder:
+      implementation: test-encoder
+      bindings: { counter: knob }
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved encoder Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated encoder HAL");
+
+    assert_valid_rust(&rust);
+    assert!(rust.contains(
+        "hal::quadrature_counter(bindings.rotary_encoder_counter_controller, bindings.rotary_encoder_counter_a, bindings.rotary_encoder_counter_b)"
+    ));
+    assert!(rust.contains("controller_binding_type!(PCNT)"));
+    assert!(rust.contains(
+        "impl ::barracuda_board_hal::rotary_encoder::RotaryEncoderPeripheral for GeneratedPeripherals"
+    ));
+    // A Board without a keyboard still answers for one.
+    assert!(rust.contains("type Keyboard = ::barracuda_board_hal::UnavailableKeyboard;"));
+    assert!(board.peripheral_io().uses_controller("PCNT"));
+}

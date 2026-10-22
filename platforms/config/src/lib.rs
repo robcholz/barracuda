@@ -47,6 +47,9 @@ pub enum HalBinding {
     /// Time-shared PDM-microphone receive and I2S-amplifier transmit stream
     /// construction.
     PdmI2sStream,
+    /// Quadrature pulse-counter construction: one counter unit decoding two
+    /// encoder signals.
+    PulseCounter,
     /// Platform IP link over a Board-declared RMII Ethernet PHY
     /// (`hardware.ethernet` in `board.yml`).
     EthernetRmii,

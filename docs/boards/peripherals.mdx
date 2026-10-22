@@ -203,6 +203,21 @@ analog-input:
     pin: GPIO6
 ~~~
 
+A `pulse-counter` is one pulse-counter unit that decodes a quadrature
+encoder: the controller and the pins of its A and B signals, which the
+Platform biases with their internal pull-ups. The unit counts every edge of
+both signals, up while B leads A, and the Platform widens its sixteen-bit
+count in software; the implementation receives a `QuadratureDecoder`. The
+M5Stack Dial's knob:
+
+~~~yaml
+pulse-counter:
+  knob:
+    peripheral: PCNT
+    a: GPIO41
+    b: GPIO40
+~~~
+
 A `pdm-i2s-stream` is a PDM microphone and an I2S amplifier on one I2S
 controller, one direction at a time: `clk` is the microphone's clock and the
 amplifier's word select, `din` the microphone's data, and `bclk` with `dout`

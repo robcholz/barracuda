@@ -4,6 +4,7 @@ mod capacitive_touch;
 mod i2s_stream;
 mod parallel_output;
 mod pdm_stream;
+mod pulse_counter;
 mod sdmmc;
 
 pub use capacitive_touch::{capacitive_touch_buttons, CapacitiveTouchButtons};
@@ -11,6 +12,7 @@ pub use i2s_stream::{
     i2s_stream, i2s_stream_with_mclk, I2sConfigError, I2sDevice, I2sTransferError,
 };
 pub use pdm_stream::{pdm_i2s_stream, PdmDmaChannel, PdmI2sStream};
+pub use pulse_counter::{quadrature_counter, QuadratureCounter};
 
 /// The SD host slot a Board's microSD card uses; both slots reach any pin
 /// through the GPIO matrix.

@@ -22,10 +22,12 @@ use barracuda_board_hal::{
     camera::CameraPeripheral,
     display::DisplayPeripheral,
     imu::ImuPeripheral,
+    keyboard::KeyboardPeripheral,
     led_strip::LedStripPeripheral,
     power::PowerMonitorPeripheral,
     real_time_clock::RealTimeClockPeripheral,
     removable_storage::{RemovableStorage, RemovableStorageEvent, RemovableStoragePeripheral},
+    rotary_encoder::RotaryEncoderPeripheral,
     touch::TouchPeripheral,
     AnalogProvider, BoardResources, DigitalProvider, ExposedIo, I2cProvider, I2sProvider,
     PwmProvider, SpiProvider, UartProvider,
@@ -214,10 +216,12 @@ where
         + CameraPeripheral
         + DisplayPeripheral
         + ImuPeripheral
+        + KeyboardPeripheral
         + LedStripPeripheral
         + PowerMonitorPeripheral
         + RealTimeClockPeripheral
         + RemovableStoragePeripheral
+        + RotaryEncoderPeripheral
         + TouchPeripheral
         + Unpin,
     Peripherals::AudioCodec: Send + 'static,
@@ -231,6 +235,11 @@ where
     <Peripherals::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
     Peripherals::Imu: Send + 'static,
     <Peripherals::Imu as barracuda_board_hal::imu::Imu>::Error: core::fmt::Debug,
+    Peripherals::Keyboard: Send + 'static,
+    <Peripherals::Keyboard as barracuda_board_hal::keyboard::Keyboard>::Error: core::fmt::Debug,
+    Peripherals::RotaryEncoder: Send + 'static,
+    <Peripherals::RotaryEncoder as barracuda_board_hal::rotary_encoder::RotaryEncoder>::Error:
+        core::fmt::Debug,
     Peripherals::PowerMonitor: Send + 'static,
     Peripherals::RealTimeClock: 'static,
     Peripherals::RemovableStorage: Send + 'static,
