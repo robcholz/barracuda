@@ -852,6 +852,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-axp192-axp2101-vibration"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-axp192",
+ "barracuda-driver-axp2101",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-bm8563-rtc"
 version = "0.1.0"
 dependencies = [
@@ -928,6 +940,7 @@ dependencies = [
  "barracuda-atom-s3r-display",
  "barracuda-aw88298-es7210-audio-codec",
  "barracuda-axp192-axp2101-power-monitor",
+ "barracuda-axp192-axp2101-vibration",
  "barracuda-bm8563-rtc",
  "barracuda-bmi270-imu",
  "barracuda-bq27220-power-monitor",
@@ -956,6 +969,7 @@ dependencies = [
  "barracuda-it8951-display",
  "barracuda-lm75b-environment-sensor",
  "barracuda-ltr553-environment-sensor",
+ "barracuda-m5ioe1-vibration",
  "barracuda-m5pm1-power-monitor",
  "barracuda-m5stack-pmic-display",
  "barracuda-mipi-dbi-display",
@@ -970,7 +984,10 @@ dependencies = [
  "barracuda-paper-mono-display",
  "barracuda-pdm-i2s-audio-codec",
  "barracuda-pi4ioe5v6408-buttons",
+ "barracuda-pwm-buzzer",
  "barracuda-quadrature-rotary-encoder",
+ "barracuda-rmt-infrared",
+ "barracuda-rmt-led-strip",
  "barracuda-rx8130ce-rtc",
  "barracuda-scd4x-sen5x-environment-sensor",
  "barracuda-sdmmc-fat-removable-storage",
@@ -1069,6 +1086,21 @@ dependencies = [
  "allocator-api2",
  "bytemuck",
  "portable-atomic",
+]
+
+[[package]]
+name = "barracuda-buzzer-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1439,6 +1471,10 @@ version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
 ]
+
+[[package]]
+name = "barracuda-driver-ir-nec"
+version = "0.1.0"
 
 [[package]]
 name = "barracuda-driver-it8951"
@@ -2084,6 +2120,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-infrared-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "embassy-time",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
 name = "barracuda-ip5306-power-monitor"
 version = "0.1.0"
 dependencies = [
@@ -2189,6 +2241,17 @@ dependencies = [
  "getset",
  "libm",
  "portable-atomic",
+]
+
+[[package]]
+name = "barracuda-m5ioe1-vibration"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-m5ioe1",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -2906,9 +2969,11 @@ dependencies = [
  "barracuda-builtin-app-sessions-plugin",
  "barracuda-builtin-app-settings-plugin",
  "barracuda-builtin-app-workflow-plugin",
+ "barracuda-buzzer-plugin",
  "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",
  "barracuda-display-plugin",
+ "barracuda-environment-sensor-plugin",
  "barracuda-files-plugin",
  "barracuda-gpio-plugin",
  "barracuda-http-plugin",
@@ -2922,6 +2987,7 @@ dependencies = [
  "barracuda-imessage-web-plugin",
  "barracuda-imessage-wechat-plugin",
  "barracuda-imu-plugin",
+ "barracuda-infrared-plugin",
  "barracuda-keyboard-plugin",
  "barracuda-led-strip-plugin",
  "barracuda-message-queue-plugin",
@@ -2936,6 +3002,7 @@ dependencies = [
  "barracuda-system-wifi-plugin",
  "barracuda-time-plugin",
  "barracuda-uart-plugin",
+ "barracuda-vibration-plugin",
  "barracuda-vm-agent-plugin",
  "barracuda-vm-filesystem-plugin",
  "barracuda-vm-http-plugin",
@@ -2999,6 +3066,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-pwm-buzzer"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-pwm-plugin"
 version = "0.1.0"
 dependencies = [
@@ -3019,6 +3097,25 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-peripheral",
  "embassy-futures",
+]
+
+[[package]]
+name = "barracuda-rmt-infrared"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-driver-ir-nec",
+ "barracuda-peripheral",
+ "embassy-futures",
+]
+
+[[package]]
+name = "barracuda-rmt-led-strip"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-peripheral",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -3489,6 +3586,21 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "portable-atomic-util",
  "spin 0.10.1",
+]
+
+[[package]]
+name = "barracuda-vibration-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]

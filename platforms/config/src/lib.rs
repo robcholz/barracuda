@@ -59,6 +59,15 @@ pub enum HalBinding {
     /// A battery power latch pin the Platform entry drives high at start
     /// (`hardware.power-hold` in `board.yml`).
     PowerHold,
+    /// Pulse-train output channel construction on a shared remote-control
+    /// transceiver, such as an LED chain's or an infrared emitter's.
+    RmtOutput,
+    /// Pulse-train input channel construction on a shared remote-control
+    /// transceiver, such as an infrared receiver's.
+    RmtInput,
+    /// Retunable PWM output construction, one timer and channel of a PWM
+    /// controller the runtime PWM pool may share.
+    PwmOutput,
 }
 
 /// One ADC channel route owned by a Platform ADC controller pool.
@@ -214,6 +223,31 @@ impl SdmmcSlot {
     }
 }
 
+/// The channels of a Platform's remote-control transceiver a Board's
+/// `rmt-output` and `rmt-input` bindings may name.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RmtChannels {
+    #[serde(default)]
+    transmit: Vec<u8>,
+    #[serde(default)]
+    receive: Vec<u8>,
+}
+
+impl RmtChannels {
+    /// Returns the channels that can transmit.
+    #[must_use]
+    pub fn transmit(&self) -> &[u8] {
+        &self.transmit
+    }
+
+    /// Returns the channels that can receive.
+    #[must_use]
+    pub fn receive(&self) -> &[u8] {
+        &self.receive
+    }
+}
+
 /// Hardware construction capabilities implemented alongside one Platform.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -234,6 +268,8 @@ pub struct HalConfig {
     runtime_i2s_controllers: Vec<RuntimeI2sController>,
     #[serde(default, rename = "sdmmc-slots")]
     sdmmc_slots: Vec<SdmmcSlot>,
+    #[serde(default, rename = "rmt-channels")]
+    rmt_channels: RmtChannels,
     #[serde(default, rename = "peripheral-models")]
     peripheral_models: bool,
 }
@@ -299,6 +335,12 @@ impl HalConfig {
         self.sdmmc_slots
             .iter()
             .find(|candidate| candidate.slot == slot)
+    }
+
+    /// Returns the remote-control transceiver channels Boards may name.
+    #[must_use]
+    pub const fn rmt_channels(&self) -> &RmtChannels {
+        &self.rmt_channels
     }
 
     /// Returns whether the HAL places a device model behind each declared
@@ -431,6 +473,29 @@ impl HalConfig {
                 path,
                 "a Platform with the sdmmc-device binding lists the SD host slots it hands out, and only then",
             ));
+        }
+        if self.rmt_channels.transmit.is_empty() == self.supports(HalBinding::RmtOutput)
+            || self.rmt_channels.receive.is_empty() == self.supports(HalBinding::RmtInput)
+        {
+            return Err(invalid_hal(
+                path,
+                "a Platform with the rmt-output or rmt-input binding lists the channels that transmit or receive, and only then",
+            ));
+        }
+        let mut rmt_transmit = BTreeSet::new();
+        let mut rmt_receive = BTreeSet::new();
+        if !self
+            .rmt_channels
+            .transmit
+            .iter()
+            .all(|channel| rmt_transmit.insert(*channel))
+            || !self
+                .rmt_channels
+                .receive
+                .iter()
+                .all(|channel| rmt_receive.insert(*channel))
+        {
+            return Err(invalid_hal(path, "an RMT channel is listed more than once"));
         }
         Ok(())
     }

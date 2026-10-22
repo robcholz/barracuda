@@ -4,6 +4,7 @@ extends: minimal
 enable:
   - analog
   - audio
+  - buzzer
   - camera
   - display
   - environment-sensor
@@ -11,6 +12,7 @@ enable:
   - i2c
   - i2s
   - imu
+  - infrared
   - keyboard
   - led-strip
   - message-queue
@@ -19,6 +21,7 @@ enable:
   - rotary-encoder
   - spi
   - uart
+  - vibration
   - vm
   - vm-filesystem
   - vm-systeminfo

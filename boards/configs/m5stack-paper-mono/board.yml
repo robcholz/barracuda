@@ -31,6 +31,14 @@ peripherals:
         mosi: GPIO14
         chip-select: GPIO16
         frequency-hz: 40000000
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO42 (M5Unified `_begin_audio` board_M5PaperMono:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO42
   devices:
     display:
       implementation: paper-mono-display
@@ -63,3 +71,8 @@ peripherals:
       parameters:
         # RX8130CE at 32h (M5GFX probe list; M5Unified RTC_Class).
         address: 50
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }

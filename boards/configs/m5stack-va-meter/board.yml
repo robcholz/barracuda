@@ -17,6 +17,14 @@ peripherals:
         mosi: GPIO35
         chip-select: GPIO37
         frequency-hz: 40000000
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO14 (M5Unified `_begin_audio` board_M5VAMeter:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO14
   devices:
     display:
       implementation: mipi-dbi-display
@@ -29,6 +37,11 @@ peripherals:
       bindings:
         button-1: GPIO2
         button-2: GPIO0
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
 exposed-io:
   pins:
     # Grove port G8/G9 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).

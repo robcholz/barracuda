@@ -1,0 +1,54 @@
+---
+title: "Infrared Plugin"
+sidebarTitle: "Infrared"
+description: "Send and receive infrared remote-control codes from Lua with the `infrared` package."
+---
+
+Installs the `infrared` Lua package over the Board's primary infrared
+transmitter and, where the Board has one, its receiver.
+
+- Plugin ID: `infrared`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `infrared.device` (`primary`, optional)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `infrared`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes the Board's primary `Infrared` capability exactly once and
+installs the `infrared` Lua package. It consumes the semantic peripheral and
+never reaches the pulse-train channels behind it.
+
+Lua API:
+
+- `infrared.available() -> boolean`
+- `infrared.can_receive() -> boolean`
+- `infrared.send_nec(address, command) -> true` sends one NEC command on the
+  38 kHz carrier; an address above 255 is sent as extended NEC
+- `infrared.send_raw(timings[, carrier_hz[, duty_percent]]) -> true` sends
+  `\{mark_us, space_us, mark_us, ...\}`, at most 512 timings, on a carrier of
+  38000 Hz and 33 % unless given
+- `infrared.receive([timeout_ms]) -> kind, ...` waits for one frame:
+  `"nec", address, command`, `"repeat"` for a held button's repeat code, or
+  `"raw", timings` for any other protocol, with the timings as a table of
+  microseconds, mark first; after `timeout_ms` it returns `nil, "timeout"`
+
+A value out of range, a `receive` on a Board without a receiver, or a call
+while another is running returns `nil, error`. Cancelling a `receive` stops
+listening.
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 1. Boards without an infrared device
+still install the package; `available` returns false and every other call
+returns `nil, error`. Plugin revocation prevents every further call.
+
+```lua
+local infrared = require("infrared")
+infrared.send_nec(0x04, 0x08)
+local kind, address, command = infrared.receive(5000)
+```

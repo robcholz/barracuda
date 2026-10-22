@@ -30,6 +30,10 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | --- | --- | --- |
 | `status-led` | Indicator LED | — |
 | `buttons` | Button (GPIO9) | — |
+| `led-strip` | RGB LED (WS2812, GPIO20) | [`light`](/plugins/vm-led-strip) |
+| `infrared` | Infrared transmitter (GPIO3) | [`infrared`](/plugins/vm-infrared) |
+
+GPIO19 switches the RGB LED's supply; the LED turns it on at start.
 
 ## Exposed pins
 

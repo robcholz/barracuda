@@ -24,6 +24,12 @@ peripherals:
         din: GPIO19
         sample-rate-hz: 16000
         dma-buffer-bytes: 4096
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO12, active high (Espressif `m5stack_atomu` ir_tx).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO12
   devices:
     microphone:
       implementation: pdm-i2s-audio-codec
@@ -41,3 +47,7 @@ peripherals:
       parameters:
         led-count: 1
         color-order: grb
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }

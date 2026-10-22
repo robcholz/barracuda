@@ -102,6 +102,12 @@ peripherals:
       implementation: axp192-axp2101-power-monitor
       bindings: { i2c: internal-i2c }
       parameters: { ina3221-battery-current: true }
+    # The vibration motor on AXP192 LDO3 (Core2) or AXP2101 DLDO1 (Core2
+    # v1.1), the PMIC the display also uses (M5Unified
+    # `Power_Class::setVibration`).
+    vibration:
+      implementation: axp192-axp2101-vibration
+      bindings: { i2c: internal-i2c }
 exposed-io:
   pins:
     # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:

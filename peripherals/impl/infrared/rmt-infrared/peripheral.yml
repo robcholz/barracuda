@@ -1,0 +1,37 @@
+id: rmt-infrared
+api-version: 1
+peripheral: infrared
+implementation:
+  package: barracuda-rmt-infrared
+  crate: barracuda_rmt_infrared
+  factory: "::{{crate}}::RmtInfraredImplementation<{{binding.transmit.type}}, {{binding.receive.type}}>"
+  bindings-expression: "::{{crate}}::RmtInfraredBindings::new({{binding.transmit.value}}, {{binding.receive.value}})"
+  config-expression: "::{{crate}}::RmtInfraredConfig::new({{parameter.transmit-active-level}}, {{parameter.receive-active-level}})"
+# An infrared LED on one transmit channel of the remote-control transceiver,
+# which modulates the carrier itself, and optionally a demodulating receiver
+# module on one receive channel.
+bindings:
+  transmit:
+    kind: rmt-output
+  receive:
+    kind: rmt-input
+    required: false
+parameters:
+  # The level that lights the LED; most boards drive it through a
+  # transistor, lit while high.
+  transmit-active-level:
+    type: enum
+    values: [low, high]
+    default: high
+    rust-values:
+      low: "::barracuda_rmt_infrared::ActiveLevel::Low"
+      high: "::barracuda_rmt_infrared::ActiveLevel::High"
+  # The level a receiver module's output takes while it sees the carrier;
+  # demodulating receivers such as the VS1838 and VSOP38338 pull low.
+  receive-active-level:
+    type: enum
+    values: [low, high]
+    default: low
+    rust-values:
+      low: "::barracuda_rmt_infrared::ActiveLevel::Low"
+      high: "::barracuda_rmt_infrared::ActiveLevel::High"

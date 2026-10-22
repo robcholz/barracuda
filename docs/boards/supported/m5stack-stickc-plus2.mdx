@@ -29,12 +29,16 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
-| `status-led` | Indicator LED | — |
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `inertial-measurement` | Motion sensor (MPU6886) | [`motion`](/plugins/vm-imu) |
 | `buttons` | Buttons A, B, and power (GPIO37, GPIO39, GPIO35) | — |
 | `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `microphone` | Microphone (SPM1423 PDM) | [`audio`](/plugins/vm-audio) |
+| `infrared` | Infrared transmitter (GPIO19) | [`infrared`](/plugins/vm-infrared) |
+| `buzzer` | Passive buzzer (GPIO2) | [`buzzer`](/plugins/vm-buzzer) |
+
+The red LED shares GPIO19 with the infrared LED, so it lights with each
+infrared burst; it is not declared as an indicator.
 
 The Platform entry drives `GPIO4`, the battery power latch
 (`hardware.power-hold`), high before anything else is built, so the Board

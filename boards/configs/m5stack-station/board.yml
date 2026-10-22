@@ -25,18 +25,21 @@ peripherals:
         mosi: GPIO23
         chip-select: GPIO5
         frequency-hz: 40000000
-    spi-output:
+    rmt-output:
       led-chain-data:
         # Seven SK6812 LEDs, one beside each port, in one chain on GPIO4 (EBM
         # `m5stack_station_485`, GRB; M5Unified `_pin_table_other0` (RGBLED)).
-        data: GPIO4
-        frequency-hz: 2400000
+        # Clocked out of RMT channel 0, so the LED takes no SPI controller
+        # from the runtime SPI pool the exposed pins use.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO4
   devices:
     # The seven port LEDs, one chain, GRB order.
     led-strip:
-      implementation: ws2812-spi-led-strip
+      implementation: rmt-led-strip
       bindings:
-        spi: led-chain-data
+        data: led-chain-data
       parameters:
         led-count: 7
         color-order: grb

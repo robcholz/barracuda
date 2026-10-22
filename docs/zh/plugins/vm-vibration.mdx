@@ -1,0 +1,40 @@
+---
+title: "Vibration 插件"
+sidebarTitle: "Vibration"
+description: "用 `vibration` Lua 包在 Lua 中驱动开发板的振动马达。"
+---
+
+基于开发板的主振动马达安装 `vibration` Lua 包。
+
+- 插件 ID：`vibration`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `vibration.device`（`primary`，可选）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`vibration`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件只获取一次开发板的主 `Vibration` 能力，并安装 `vibration` Lua 包。它使用的是语义层面的外设能力，从不直接操作驱动马达的 PMIC 或扩展芯片。
+
+Lua API：
+
+- `vibration.available() -> boolean`
+- `vibration.variable() -> boolean` 报告强度是否可调
+- `vibration.set(strength) -> true` 让马达持续运行直到改变；0 表示停止
+- `vibration.stop() -> true`
+- `vibration.pulse(duration_ms[, strength]) -> true` 运行一次，停止后返回
+- `vibration.pattern(steps[, strength]) -> true` 运行 `\{ \{on_ms, off_ms\}, ... \}`，最多 64 步，结束后返回
+
+`strength` 取 0 到 100 的百分比，默认 100；不能调节强度的马达在任何非零强度下都全力运行。强度大于 100，或在另一次调用运行期间调用，都会返回 `nil, error`。取消 `pulse` 或 `pattern` 会让马达停止。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 1。没有振动马达的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
+
+```lua
+local vibration = require("vibration")
+vibration.pattern({ { 80, 60 }, { 80, 0 } }, 70)
+```

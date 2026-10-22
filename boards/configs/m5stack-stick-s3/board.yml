@@ -44,6 +44,21 @@ peripherals:
         channels: 2
         bits-per-sample: 16
         dma-buffer-bytes: 4096
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO46, active high (Espressif `m5stack_sticks3`:
+        # schematic sheet 4, NMOS Q1 gate on net G46_IR_TX).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO46
+    rmt-input:
+      ir-receive:
+        # VSOP38338 receiver on GPIO42, idle high and low while it sees the
+        # carrier (Espressif `m5stack_sticks3`: schematic sheet 4, net
+        # G42_IR_RX).
+        peripheral: RMT
+        channel: 4
+        pin: GPIO42
   devices:
     audio-codec:
       # ES8311 (18h) on the internal bus; the M5PM1's G3 enables the AW8737
@@ -82,6 +97,10 @@ peripherals:
         # BMI270 at 68h (M5Stack StickS3 pin map). M5Unified rotates its axes (X=+Y,
         # Y=-X).
         address: 104
+    # The infrared LED and the demodulating receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit, receive: ir-receive }
 exposed-io:
   pins:
     # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA).

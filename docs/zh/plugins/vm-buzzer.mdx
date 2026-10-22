@@ -1,0 +1,40 @@
+---
+title: "Buzzer 插件"
+sidebarTitle: "Buzzer"
+description: "用 `buzzer` Lua 包在 Lua 中让开发板的蜂鸣器播放音调和旋律。"
+---
+
+基于开发板的主蜂鸣器安装 `buzzer` Lua 包。
+
+- 插件 ID：`buzzer`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `buzzer.device`（`primary`，可选）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`buzzer`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件只获取一次开发板的主 `Buzzer` 能力，并安装 `buzzer` Lua 包。它使用的是语义层面的外设能力，从不直接操作它的 PWM 输出。
+
+Lua API：
+
+- `buzzer.available() -> boolean`
+- `buzzer.range() -> lowest_hz, highest_hz`
+- `buzzer.tone(frequency_hz, duration_ms[, volume]) -> true` 发出一个音调，结束后返回；频率为零表示休止
+- `buzzer.play(notes[, volume]) -> true` 播放 `\{ \{frequency_hz, duration_ms\}, ... \}`，最多 256 个音符，旋律结束后返回
+- `buzzer.start(frequency_hz[, volume]) -> true` 持续发声，直到 `stop`
+- `buzzer.stop() -> true`
+
+`volume` 取 0 到 100 的百分比，默认 50。频率超出 `range`、音量大于 100，或在另一次调用播放期间调用，都会返回 `nil, error`。取消 `tone` 或 `play`（例如停止脚本）会让蜂鸣器静音。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 1。没有蜂鸣器的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
+
+```lua
+local buzzer = require("buzzer")
+buzzer.play({ { 523, 150 }, { 659, 150 }, { 784, 300 } }, 40)
+```

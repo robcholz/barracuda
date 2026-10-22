@@ -26,6 +26,22 @@ peripherals:
         mosi: GPIO21
         chip-select: GPIO6
         frequency-hz: 40000000
+    rmt-output:
+      rgb-led-data:
+        # WS2812 on GPIO2 (M5Unified `_pin_table_other0` (RGBLED),
+        # board_M5UnitC6L; Zephyr `m5stack_unitc6l`), on RMT channel 0: the
+        # one SPI controller drives the OLED.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO2
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO11 (M5Unified `_begin_audio` board_M5UnitC6L:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO11
   devices:
     display:
       # 0.66-inch 64 x 48 SSD1306 OLED at GDDRAM column 32 (M5GFX
@@ -46,6 +62,19 @@ peripherals:
       implementation: pi4ioe5v6408-buttons
       bindings: { i2c: internal-i2c }
       parameters: { button-1: p0 }
+    # The RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
 exposed-io:
   pins:
     # Grove port G4/G5 (M5Unified `_pin_table_port_bc`).

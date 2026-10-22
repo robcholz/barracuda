@@ -34,6 +34,7 @@ cargo image deploy
 | `power-monitor` | 电量计（AXP192） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `buttons` | 按键 A 和 B（GPIO37、GPIO39） | — |
 | `microphone` | 麦克风（SPM1423 PDM） | [`audio`](/zh/plugins/vm-audio) |
+| `infrared` | 红外发射器（GPIO9） | [`infrared`](/zh/plugins/vm-infrared) |
 
 电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。
 

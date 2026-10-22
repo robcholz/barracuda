@@ -33,6 +33,7 @@ cargo image deploy
 | `environment-sensor` | 空气质量传感器：SEN55（颗粒物、VOC 和 NOx 指数、温度、湿度）和 SCD40（CO2），作为一个设备 | [`environment`](/zh/plugins/vm-environment-sensor) |
 | `real-time-clock` | 实时时钟（BM8563） | — |
 | `buttons` | 按键 A 和 B（GPIO0、GPIO8） | — |
+| `buzzer` | 无源蜂鸣器（GPIO9） | [`buzzer`](/zh/plugins/vm-buzzer) |
 
 平台入口在构建任何其他部分之前就把电池电源锁存脚 `GPIO46`（`hardware.power-hold`）驱动为高电平，因此不接 USB 时松开电源键后开发板也会保持开机。
 

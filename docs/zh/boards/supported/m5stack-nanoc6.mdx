@@ -30,6 +30,10 @@ cargo image deploy
 | --- | --- | --- |
 | `status-led` | 指示 LED | — |
 | `buttons` | 按键（GPIO9） | — |
+| `led-strip` | RGB LED（WS2812，GPIO20） | [`light`](/zh/plugins/vm-led-strip) |
+| `infrared` | 红外发射器（GPIO3） | [`infrared`](/zh/plugins/vm-infrared) |
+
+GPIO19 控制 RGB LED 的供电；LED 在启动时将其打开。
 
 ## 可用引脚
 
