@@ -127,6 +127,13 @@ pulse counter (`pulse-counter`), counting every edge of both signals. The
 ESP32-C3 has no pulse counter, and esp-hal has no PCNT driver for the
 ESP32-P4 yet.
 
+ESP32-S3 drives a classic CAN bus on its TWAI controller (`twai`) through
+esp-hal's interrupt-driven driver. The controller joins the bus only when an
+application chooses the bit rate; each start rebuilds the driver at the new
+rate from the 80 MHz APB clock, with 20 time quanta a bit (25 for
+800 kbit/s, otherwise 16 or 10) and the sample point near 80 %, so any rate
+the clock divides to exactly works, from 5 kbit/s to 1 Mbit/s.
+
 ESP32 and ESP32-S3 drive a PDM microphone and an I2S amplifier on one I2S0
 controller (`pdm-i2s-stream`). M5Stack wires the microphone's clock and the
 amplifier's word select to one pin, so the controller switches to PDM receive,

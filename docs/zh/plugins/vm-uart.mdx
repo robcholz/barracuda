@@ -24,7 +24,7 @@ description: "用 `uart` Lua 包在 Lua 中通过开发板的可用引脚使用 
 Lua API：
 
 - `uart.available(tx, rx) -> boolean`
-- `uart.open(tx, rx, baud, data_bits, parity, stop_bits) -> handle`
+- `uart.open(tx, rx, baud, data_bits, parity, stop_bits[, de]) -> handle`
 - `handle:read(max_length) -> bytes`
 - `handle:write(bytes)`
 - `handle:flush()`
@@ -32,3 +32,12 @@ Lua API：
 - `handle:close()`
 
 `tx` 或 `rx` 可以为 `nil`，但不能两者都是。数据位为 `7`、`8` 或 `9`；校验为 `"none"`、`"even"` 或 `"odd"`；停止位为 `1` 或 `2`。打开操作会从其他可用协议所用的同一个所有者那里原子地取走每一个所选的物理引脚。
+
+对于 RS485 收发器，`de` 指定使能其驱动器的引脚（通常标为 DIR 或 DE/RE）。此时端口在每次写入时拉高该引脚，等到最后一个停止位从 UART 发出后再拉低，因此收发器在其他时间都处于接收状态；`de` 需要同时有 `tx` 引脚。带 RS485 接口的开发板会暴露它的三个引脚，例如 `rs485-tx`、`rs485-rx` 和 `rs485-dir`：
+
+```lua
+local uart = require("uart")
+local bus <close> = uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")
+bus:write("\x01\x03\x00\x00\x00\x01\x84\x0a")
+local reply = bus:read(7)
+```

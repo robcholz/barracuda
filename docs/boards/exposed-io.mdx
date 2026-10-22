@@ -126,7 +126,15 @@ The public shape is checked against several materially different consumers:
 | SPI pixel stream | controller, SCK, data pins | exclusive async SPI bus |
 | SPI register device | shared bus plus CS | async SPI device transactions |
 | UART console | controller, TX/RX and optional flow-control pins | async byte stream |
+| RS485 port | UART controller, TX/RX, and the transceiver's driver-enable pin | async byte stream that drives the bus only while writing |
 | I2S audio | controller, clocks, data pins, DMA | PCM stream |
+
+An RS485 port is a UART with one more role: the Board exposes its
+transceiver's direction pin beside TX and RX, and the UART request names it
+as the driver-enable pin. The provider claims it with the data pins and wraps
+the stream so each write raises it and lowers it once the last stop bit has
+left, as ESP-IDF's half-duplex RS485 mode does; no RS485 provider or Board
+field exists apart from the UART one.
 
 Single-pin, multi-wire, optional-role, shared-bus, and DMA-backed cases all use
 the same atomic move-only claim primitive. Their different configuration and

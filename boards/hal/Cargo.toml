@@ -17,6 +17,7 @@ embedded-graphics-core.workspace = true
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
+embassy-futures.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

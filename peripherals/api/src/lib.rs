@@ -2520,3 +2520,606 @@ pub mod environment {
         ) -> Option<Self::EnvironmentSensor>;
     }
 }
+
+/// Stable NFC card-reader peripheral API.
+pub mod nfc_reader {
+    use core::future::Future;
+
+    /// Longest ISO/IEC 14443-A UID: a triple-size UID of ten bytes.
+    pub const MAX_UID_BYTES: usize = 10;
+
+    /// Bytes one [`NfcReader::read_block`] returns: four four-byte pages.
+    pub const BLOCK_BYTES: usize = 16;
+
+    /// The unique identifier of a card: four, seven, or ten bytes.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct Uid {
+        bytes: [u8; MAX_UID_BYTES],
+        len: u8,
+    }
+
+    impl Uid {
+        /// Creates a UID from its bytes in transmission order; `None` unless
+        /// there are four, seven, or ten.
+        #[must_use]
+        pub fn new(bytes: &[u8]) -> Option<Self> {
+            let len = match bytes.len() {
+                4 => 4,
+                7 => 7,
+                10 => 10,
+                _ => return None,
+            };
+            let mut uid = [0; MAX_UID_BYTES];
+            uid.get_mut(..bytes.len())?.copy_from_slice(bytes);
+            Some(Self { bytes: uid, len })
+        }
+
+        /// Returns the UID bytes in transmission order.
+        #[must_use]
+        pub fn as_bytes(&self) -> &[u8] {
+            self.bytes.get(..usize::from(self.len)).unwrap_or(&[])
+        }
+
+        /// Returns how many bytes the UID has: four, seven, or ten.
+        #[must_use]
+        pub const fn len(&self) -> usize {
+            self.len as usize
+        }
+
+        /// Returns `false`: a UID always has bytes.
+        #[must_use]
+        pub const fn is_empty(&self) -> bool {
+            self.len == 0
+        }
+    }
+
+    /// One ISO/IEC 14443-A card that answered a poll and was selected.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct Card {
+        uid: Uid,
+        atqa: u16,
+        sak: u8,
+    }
+
+    impl Card {
+        /// Describes a selected card by its UID, its answer to request
+        /// (ATQA, the first byte received in the low half), and its final
+        /// select acknowledge (SAK).
+        #[must_use]
+        pub const fn new(uid: Uid, atqa: u16, sak: u8) -> Self {
+            Self { uid, atqa, sak }
+        }
+
+        /// Returns the card's UID.
+        #[must_use]
+        pub const fn uid(&self) -> &Uid {
+            &self.uid
+        }
+
+        /// Returns the card's answer to request (ATQA).
+        #[must_use]
+        pub const fn atqa(&self) -> u16 {
+            self.atqa
+        }
+
+        /// Returns the card's select acknowledge (SAK), which tells card
+        /// families apart: `0x00` for NFC Forum Type 2 tags such as NTAG and
+        /// MIFARE Ultralight, `0x08` for MIFARE Classic 1K, `0x20` for
+        /// ISO/IEC 14443-4 cards.
+        #[must_use]
+        pub const fn sak(&self) -> u8 {
+            self.sak
+        }
+    }
+
+    /// Semantic 13.56 MHz card reader for ISO/IEC 14443-A cards.
+    ///
+    /// A poll wakes the cards in the field and selects one; the selected card
+    /// stays active for [`NfcReader::read_block`] until the next poll.
+    pub trait NfcReader {
+        /// Concrete transport or protocol failure.
+        type Error: core::fmt::Debug;
+
+        /// Looks for a card once and selects it; `None` when no card answers.
+        fn poll(&mut self) -> impl Future<Output = Result<Option<Card>, Self::Error>>;
+
+        /// Reads [`BLOCK_BYTES`] bytes of the card the last poll selected with
+        /// the `READ` command NFC Forum Type 2 tags answer: the four pages
+        /// starting at page `block`. MIFARE Classic cards answer it only
+        /// after authentication, which this API does not perform.
+        fn read_block(
+            &mut self,
+            block: u8,
+        ) -> impl Future<Output = Result<[u8; BLOCK_BYTES], Self::Error>>;
+    }
+
+    /// Move-only access to the Board's attached NFC card reader.
+    pub trait NfcReaderPeripheral {
+        /// Concrete, statically dispatched card reader.
+        type NfcReader: NfcReader;
+
+        /// Transfers the claimed card reader `instance` to its Plugin once;
+        /// `None` when the Board has no such device or it was already taken.
+        fn take_nfc_reader(&mut self, instance: crate::Instance) -> Option<Self::NfcReader>;
+    }
+}
+
+/// Stable LoRa radio peripheral API.
+pub mod lora {
+    use core::future::Future;
+
+    /// Longest payload one LoRa packet carries.
+    pub const MAX_PAYLOAD_BYTES: usize = 255;
+
+    /// LoRa signal bandwidth.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum Bandwidth {
+        /// 7.8 kHz.
+        Khz7_8,
+        /// 10.4 kHz.
+        Khz10_4,
+        /// 15.6 kHz.
+        Khz15_6,
+        /// 20.8 kHz.
+        Khz20_8,
+        /// 31.25 kHz.
+        Khz31_25,
+        /// 41.7 kHz.
+        Khz41_7,
+        /// 62.5 kHz.
+        Khz62_5,
+        /// 125 kHz.
+        Khz125,
+        /// 250 kHz.
+        Khz250,
+        /// 500 kHz.
+        Khz500,
+    }
+
+    impl Bandwidth {
+        const ALL: [Self; 10] = [
+            Self::Khz7_8,
+            Self::Khz10_4,
+            Self::Khz15_6,
+            Self::Khz20_8,
+            Self::Khz31_25,
+            Self::Khz41_7,
+            Self::Khz62_5,
+            Self::Khz125,
+            Self::Khz250,
+            Self::Khz500,
+        ];
+
+        /// Returns the bandwidth in hertz, rounded to the nearest 10 Hz.
+        #[must_use]
+        pub const fn hz(self) -> u32 {
+            match self {
+                Self::Khz7_8 => 7_810,
+                Self::Khz10_4 => 10_420,
+                Self::Khz15_6 => 15_630,
+                Self::Khz20_8 => 20_830,
+                Self::Khz31_25 => 31_250,
+                Self::Khz41_7 => 41_670,
+                Self::Khz62_5 => 62_500,
+                Self::Khz125 => 125_000,
+                Self::Khz250 => 250_000,
+                Self::Khz500 => 500_000,
+            }
+        }
+
+        /// Finds the bandwidth within 100 Hz of `hz`, so `7800` and `10400`
+        /// name the narrow ones; `None` for any other value.
+        #[must_use]
+        pub fn from_hz(hz: u32) -> Option<Self> {
+            Self::ALL
+                .into_iter()
+                .find(|bandwidth| bandwidth.hz().abs_diff(hz) < 100)
+        }
+    }
+
+    /// LoRa forward-error-correction coding rate.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum CodingRate {
+        /// 4/5.
+        Cr4_5,
+        /// 4/6.
+        Cr4_6,
+        /// 4/7.
+        Cr4_7,
+        /// 4/8.
+        Cr4_8,
+    }
+
+    impl CodingRate {
+        /// Finds the coding rate 4/`denominator`; `None` outside 5 through 8.
+        #[must_use]
+        pub const fn from_denominator(denominator: u8) -> Option<Self> {
+            match denominator {
+                5 => Some(Self::Cr4_5),
+                6 => Some(Self::Cr4_6),
+                7 => Some(Self::Cr4_7),
+                8 => Some(Self::Cr4_8),
+                _ => None,
+            }
+        }
+
+        /// Returns the denominator of the rate, 5 through 8.
+        #[must_use]
+        pub const fn denominator(self) -> u8 {
+            match self {
+                Self::Cr4_5 => 5,
+                Self::Cr4_6 => 6,
+                Self::Cr4_7 => 7,
+                Self::Cr4_8 => 8,
+            }
+        }
+    }
+
+    /// Modulation and packet settings, the same at every node of a network.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct LoraConfig {
+        /// Carrier frequency in hertz.
+        pub frequency_hz: u32,
+        /// Spreading factor, 5 through 12.
+        pub spreading_factor: u8,
+        /// Signal bandwidth.
+        pub bandwidth: Bandwidth,
+        /// Coding rate.
+        pub coding_rate: CodingRate,
+        /// Transmit power in dBm.
+        pub tx_power_dbm: i8,
+        /// Preamble length in symbols.
+        pub preamble_symbols: u16,
+        /// Sync word that separates networks: `0x12` for private networks,
+        /// `0x34` for LoRaWAN.
+        pub sync_word: u8,
+        /// Whether packets carry a payload CRC.
+        pub crc: bool,
+    }
+
+    impl LoraConfig {
+        /// Creates the settings M5Stack's UIFlow `LoRa` class starts with, at
+        /// `frequency_hz`: 250 kHz, SF8, 4/8, 12 preamble symbols, sync word
+        /// `0x12`, and 10 dBm, with a CRC.
+        #[must_use]
+        pub const fn new(frequency_hz: u32) -> Self {
+            Self {
+                frequency_hz,
+                spreading_factor: 8,
+                bandwidth: Bandwidth::Khz250,
+                coding_rate: CodingRate::Cr4_8,
+                tx_power_dbm: 10,
+                preamble_symbols: 12,
+                sync_word: 0x12,
+                crc: true,
+            }
+        }
+    }
+
+    /// What a radio can be configured to.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct RadioLimits {
+        /// Lowest carrier frequency in hertz.
+        pub min_frequency_hz: u32,
+        /// Highest carrier frequency in hertz.
+        pub max_frequency_hz: u32,
+        /// Lowest transmit power in dBm.
+        pub min_tx_power_dbm: i8,
+        /// Highest transmit power in dBm.
+        pub max_tx_power_dbm: i8,
+    }
+
+    /// One received packet; its payload is in the caller's buffer.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct Received {
+        /// Payload bytes written to the buffer; a longer payload is truncated
+        /// to the buffer.
+        pub len: usize,
+        /// Received signal strength of the packet in dBm.
+        pub rssi_dbm: i16,
+        /// Signal-to-noise ratio of the packet in hundredths of a dB.
+        pub snr_centi_db: i16,
+    }
+
+    /// Semantic LoRa packet radio.
+    ///
+    /// The radio waits in standby between calls. A receive listens until a
+    /// packet arrives; dropping its future leaves the radio listening until
+    /// the next call, which returns it to standby first.
+    pub trait Lora {
+        /// Concrete transport, configuration, or packet failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns the frequencies and powers the radio accepts.
+        fn limits(&self) -> RadioLimits;
+
+        /// Applies `config` to the following transmissions and receptions.
+        fn configure(
+            &mut self,
+            config: LoraConfig,
+        ) -> impl Future<Output = Result<(), Self::Error>>;
+
+        /// Sends one packet of at most [`MAX_PAYLOAD_BYTES`] bytes and returns
+        /// once it has been sent.
+        fn transmit(&mut self, payload: &[u8]) -> impl Future<Output = Result<(), Self::Error>>;
+
+        /// Waits for one packet with a valid header and CRC and copies its
+        /// payload into `buffer`.
+        fn receive(
+            &mut self,
+            buffer: &mut [u8],
+        ) -> impl Future<Output = Result<Received, Self::Error>>;
+    }
+
+    /// Move-only access to the Board's attached LoRa radio.
+    pub trait LoraPeripheral {
+        /// Concrete, statically dispatched LoRa radio.
+        type Lora: Lora;
+
+        /// Transfers the claimed radio `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_lora(&mut self, instance: crate::Instance) -> Option<Self::Lora>;
+    }
+}
+
+/// Stable CAN bus peripheral API.
+pub mod can {
+    use core::future::Future;
+
+    /// Highest standard (11-bit) identifier.
+    pub const MAX_STANDARD_ID: u16 = 0x7ff;
+    /// Highest extended (29-bit) identifier.
+    pub const MAX_EXTENDED_ID: u32 = 0x1fff_ffff;
+    /// Most data bytes one classic CAN frame carries.
+    pub const MAX_DATA_BYTES: usize = 8;
+
+    /// A frame identifier: standard 11-bit or extended 29-bit.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum Id {
+        /// An 11-bit identifier.
+        Standard(u16),
+        /// A 29-bit identifier.
+        Extended(u32),
+    }
+
+    impl Id {
+        /// Creates a standard identifier; `None` above [`MAX_STANDARD_ID`].
+        #[must_use]
+        pub const fn standard(raw: u16) -> Option<Self> {
+            if raw > MAX_STANDARD_ID {
+                None
+            } else {
+                Some(Self::Standard(raw))
+            }
+        }
+
+        /// Creates an extended identifier; `None` above [`MAX_EXTENDED_ID`].
+        #[must_use]
+        pub const fn extended(raw: u32) -> Option<Self> {
+            if raw > MAX_EXTENDED_ID {
+                None
+            } else {
+                Some(Self::Extended(raw))
+            }
+        }
+
+        /// Returns the identifier's value.
+        #[must_use]
+        pub const fn raw(self) -> u32 {
+            match self {
+                Self::Standard(raw) => raw as u32,
+                Self::Extended(raw) => raw,
+            }
+        }
+
+        /// Returns whether the identifier is extended.
+        #[must_use]
+        pub const fn is_extended(self) -> bool {
+            matches!(self, Self::Extended(_))
+        }
+    }
+
+    /// One classic CAN data or remote frame.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct Frame {
+        id: Id,
+        data: [u8; MAX_DATA_BYTES],
+        len: u8,
+        remote: bool,
+    }
+
+    impl Frame {
+        /// Creates a data frame; `None` above [`MAX_DATA_BYTES`] bytes.
+        #[must_use]
+        pub fn new(id: Id, data: &[u8]) -> Option<Self> {
+            let len = u8::try_from(data.len())
+                .ok()
+                .filter(|len| usize::from(*len) <= MAX_DATA_BYTES)?;
+            let mut bytes = [0; MAX_DATA_BYTES];
+            bytes.get_mut(..data.len())?.copy_from_slice(data);
+            Some(Self {
+                id,
+                data: bytes,
+                len,
+                remote: false,
+            })
+        }
+
+        /// Creates a remote frame requesting `len` bytes; `None` above
+        /// [`MAX_DATA_BYTES`].
+        #[must_use]
+        pub const fn remote(id: Id, len: u8) -> Option<Self> {
+            if len as usize > MAX_DATA_BYTES {
+                None
+            } else {
+                Some(Self {
+                    id,
+                    data: [0; MAX_DATA_BYTES],
+                    len,
+                    remote: true,
+                })
+            }
+        }
+
+        /// Returns the identifier.
+        #[must_use]
+        pub const fn id(&self) -> Id {
+            self.id
+        }
+
+        /// Returns the data bytes; empty for a remote frame.
+        #[must_use]
+        pub fn data(&self) -> &[u8] {
+            if self.remote {
+                &[]
+            } else {
+                self.data.get(..usize::from(self.len)).unwrap_or(&[])
+            }
+        }
+
+        /// Returns the data length code: the data length, or the length a
+        /// remote frame requests.
+        #[must_use]
+        pub const fn dlc(&self) -> u8 {
+            self.len
+        }
+
+        /// Returns whether this is a remote frame.
+        #[must_use]
+        pub const fn is_remote(&self) -> bool {
+            self.remote
+        }
+    }
+
+    /// The controller's part in the bus.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum BusState {
+        /// Not started: the controller neither sends nor acknowledges.
+        Stopped,
+        /// On the bus with few errors.
+        ErrorActive,
+        /// On the bus after many errors; it no longer signals errors actively.
+        ErrorPassive,
+        /// Off the bus after too many transmit errors, until started again.
+        BusOff,
+    }
+
+    /// Semantic classic CAN controller and its transceiver.
+    ///
+    /// The controller stays off the bus until [`Can::start`], so a Board never
+    /// disturbs a bus whose bit rate it does not know.
+    pub trait Can {
+        /// Concrete controller or bus failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns whether the controller can run at `bitrate` bits per second.
+        fn supports_bitrate(&self, bitrate: u32) -> bool;
+
+        /// Joins the bus at `bitrate` bits per second, leaving it first when
+        /// already started.
+        fn start(&mut self, bitrate: u32) -> Result<(), Self::Error>;
+
+        /// Leaves the bus.
+        fn stop(&mut self) -> Result<(), Self::Error>;
+
+        /// Returns the bit rate while started.
+        fn bitrate(&self) -> Option<u32>;
+
+        /// Returns the controller's part in the bus.
+        fn state(&self) -> BusState;
+
+        /// Sends one frame and returns once the bus carried it.
+        fn transmit(&mut self, frame: &Frame) -> impl Future<Output = Result<(), Self::Error>>;
+
+        /// Waits for the next frame.
+        fn receive(&mut self) -> impl Future<Output = Result<Frame, Self::Error>>;
+    }
+
+    /// Move-only access to the Board's attached CAN controller.
+    pub trait CanPeripheral {
+        /// Concrete, statically dispatched CAN controller.
+        type Can: Can;
+
+        /// Transfers the claimed controller `instance` to its Plugin once;
+        /// `None` when the Board has no such device or it was already taken.
+        fn take_can(&mut self, instance: crate::Instance) -> Option<Self::Can>;
+    }
+}
+
+/// Stable fixed-function digital I/O peripheral API: the relay or transistor
+/// outputs and isolated inputs of an industrial controller.
+pub mod digital_io {
+    /// Most outputs, and most inputs, one device has.
+    pub const MAX_CHANNELS: usize = 16;
+
+    /// Channel states, one bit per channel: bit `n` is channel `n`.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+    pub struct Levels(u16);
+
+    impl Levels {
+        /// Creates states from a bit mask.
+        #[must_use]
+        pub const fn from_bits(bits: u16) -> Self {
+            Self(bits)
+        }
+
+        /// Returns the bit mask.
+        #[must_use]
+        pub const fn bits(self) -> u16 {
+            self.0
+        }
+
+        /// Returns whether channel `index` is on; `false` past the last.
+        #[must_use]
+        pub const fn is_on(self, index: usize) -> bool {
+            index < MAX_CHANNELS && (self.0 >> index) & 1 != 0
+        }
+
+        /// Returns the states with channel `index` set to `on`; unchanged past
+        /// the last channel.
+        #[must_use]
+        pub const fn with(self, index: usize, on: bool) -> Self {
+            if index >= MAX_CHANNELS {
+                return self;
+            }
+            let mask = 1 << index;
+            Self(if on { self.0 | mask } else { self.0 & !mask })
+        }
+    }
+
+    /// Semantic bank of fixed-direction digital channels.
+    ///
+    /// Outputs and inputs are numbered separately from zero in the order the
+    /// product labels them (relay 1 is output 0, input 1 is input 0). An
+    /// output is on while its relay or transistor conducts; an input is on
+    /// while its terminals are energized.
+    pub trait DigitalIo {
+        /// Concrete transport failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns how many outputs the device has.
+        fn output_count(&self) -> usize;
+
+        /// Returns how many inputs the device has.
+        fn input_count(&self) -> usize;
+
+        /// Switches output `index` on or off.
+        fn set_output(&mut self, index: usize, on: bool) -> Result<(), Self::Error>;
+
+        /// Returns the states the outputs were last switched to.
+        fn outputs(&self) -> Levels;
+
+        /// Reads every input.
+        fn read_inputs(&mut self) -> Result<Levels, Self::Error>;
+    }
+
+    /// Move-only access to the Board's attached digital I/O bank.
+    pub trait DigitalIoPeripheral {
+        /// Concrete, statically dispatched digital I/O bank.
+        type DigitalIo: DigitalIo;
+
+        /// Transfers the claimed bank `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_digital_io(&mut self, instance: crate::Instance) -> Option<Self::DigitalIo>;
+    }
+}

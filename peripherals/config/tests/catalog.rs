@@ -1912,3 +1912,65 @@ fn rmt_channels_and_pwm_timers_stay_within_what_the_platform_offers() {
     });
     assert!(parse(&shared_channel).is_err());
 }
+
+#[test]
+fn renders_a_twai_controller_and_the_bus_kinds() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-can",
+        r#"
+id: test-can
+api-version: 1
+peripheral: can
+implementation:
+  package: test-can
+  crate: test_can
+  factory: "::{{crate}}::Implementation<{{binding.controller.type}}>"
+  bindings-expression: "{{binding.controller.value}}"
+  config-expression: "()"
+bindings:
+  controller:
+    kind: twai
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: plc-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    twai:
+      can-bus:
+        peripheral: TWAI0
+        tx: GPIO42
+        rx: GPIO43
+  devices:
+    can:
+      implementation: test-can
+      bindings: { controller: can-bus }
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved CAN Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated CAN HAL");
+
+    assert_valid_rust(&rust);
+    assert!(rust.contains(
+        "hal::twai_controller(bindings.can_controller_controller, bindings.can_controller_tx, bindings.can_controller_rx)"
+    ));
+    assert!(rust.contains("controller_binding_type!(TWAI0)"));
+    assert!(
+        rust.contains("impl ::barracuda_board_hal::can::CanPeripheral for GeneratedPeripherals")
+    );
+    // A Board without the other new kinds still answers for them.
+    assert!(rust.contains("type NfcReader = ::barracuda_board_hal::UnavailableNfcReader;"));
+    assert!(rust.contains("type Lora = ::barracuda_board_hal::UnavailableLora;"));
+    assert!(rust.contains("type DigitalIo = ::barracuda_board_hal::UnavailableDigitalIo;"));
+    assert!(board.peripheral_io().uses_controller("TWAI0"));
+}

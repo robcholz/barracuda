@@ -2,14 +2,19 @@
 
 #![allow(clippy::expect_used)]
 
-use core::convert::Infallible;
+use core::{
+    cell::{Cell, RefCell},
+    convert::Infallible,
+};
+use std::rc::Rc;
 
 use barracuda_board_hal::{
     audio, AnalogErrorType, AnalogInput, AnalogProvider, ConfigurableDigitalPin, DigitalLevel,
-    DigitalProvider, I2cProvider, I2cRequest, I2sProvider, I2sRequest, InputConfig, LeaseError,
-    OutputConfig, PwmProvider, PwmRequest, RuntimeAnalogPlatform, RuntimeI2sPlatform, RuntimeIo,
-    RuntimeOpenError, RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SpiProvider,
-    SpiRequest, UartConfig, UartDataBits, UartParity, UartProvider, UartRequest, UartStopBits,
+    DigitalProvider, DirectedUart, I2cProvider, I2cRequest, I2sProvider, I2sRequest, InputConfig,
+    LeaseError, OutputConfig, PwmProvider, PwmRequest, RuntimeAnalogPlatform, RuntimeI2sPlatform,
+    RuntimeIo, RuntimeOpenError, RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform,
+    SpiProvider, SpiRequest, UartConfig, UartDataBits, UartParity, UartProvider, UartRequest,
+    UartStopBits,
 };
 use embedded_hal::{
     digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin},
@@ -655,6 +660,7 @@ fn invalid_parameters_do_not_consume_composite_resources() {
         io.open_uart(UartRequest {
             tx: Some("D3"),
             rx: Some("D4"),
+            driver_enable: None,
             config: UartConfig {
                 baud: 0,
                 data_bits: UartDataBits::Eight,
@@ -737,6 +743,7 @@ fn uart_claims_multiple_roles_atomically_from_the_shared_owner() {
         io.open_uart(UartRequest {
             tx: Some("D1"),
             rx: Some("D2"),
+            driver_enable: None,
             config: UartConfig {
                 baud: 115_200,
                 data_bits: UartDataBits::Eight,
@@ -752,6 +759,7 @@ fn uart_claims_multiple_roles_atomically_from_the_shared_owner() {
         io.open_uart(UartRequest {
             tx: Some("D3"),
             rx: Some("D3"),
+            driver_enable: None,
             config: UartConfig {
                 baud: 115_200,
                 data_bits: UartDataBits::Eight,
@@ -765,6 +773,7 @@ fn uart_claims_multiple_roles_atomically_from_the_shared_owner() {
         .open_uart(UartRequest {
             tx: Some("D3"),
             rx: Some("D4"),
+            driver_enable: None,
             config: UartConfig {
                 baud: 115_200,
                 data_bits: UartDataBits::Eight,
@@ -773,11 +782,135 @@ fn uart_claims_multiple_roles_atomically_from_the_shared_owner() {
             },
         })
         .expect("UART port");
-    assert_eq!(port.tx, Some(3));
-    assert_eq!(port.rx, Some(4));
-    assert_eq!(port.controller, 30);
+    assert!(!port.is_directed());
+    assert_eq!(port.port().tx, Some(3));
+    assert_eq!(port.port().rx, Some(4));
+    assert_eq!(port.port().controller, 30);
     assert!(!io.digital_available("D3"));
     assert!(!io.digital_available("D4"));
+}
+
+fn rs485_request<'a>(tx: Option<&'a str>, driver_enable: &'a str) -> UartRequest<'a> {
+    UartRequest {
+        tx,
+        rx: Some("D4"),
+        driver_enable: Some(driver_enable),
+        config: UartConfig {
+            baud: 9_600,
+            data_bits: UartDataBits::Eight,
+            parity: UartParity::None,
+            stop_bits: UartStopBits::One,
+        },
+    }
+}
+
+#[test]
+fn uart_claims_an_rs485_driver_enable_pin_with_its_data_pins() {
+    let io = runtime_io();
+    assert!(matches!(
+        io.open_uart(rs485_request(None, "D1")),
+        Err(RuntimeOpenError::DriverEnableWithoutTx)
+    ));
+    assert!(matches!(
+        io.open_uart(rs485_request(Some("D3"), "D3")),
+        Err(RuntimeOpenError::Resource(LeaseError::Duplicate { .. }))
+    ));
+    {
+        let _taken = io.acquire_digital("D2").expect("digital D2");
+    }
+    assert!(matches!(
+        io.open_uart(rs485_request(Some("D3"), "D2")),
+        Err(RuntimeOpenError::Resource(LeaseError::Busy { .. }))
+    ));
+    assert!(io.digital_available("D3"), "a refused claim moves no token");
+    let port = io
+        .open_uart(rs485_request(Some("D3"), "D1"))
+        .expect("RS485 port");
+    assert!(port.is_directed());
+    assert!(!io.digital_available("D1"));
+}
+
+/// A UART that records the driver-enable level it sees at each step.
+struct WatchedUart {
+    driver_enable: Rc<Cell<bool>>,
+    seen: Rc<RefCell<Vec<&'static str>>>,
+}
+
+impl embedded_io::ErrorType for WatchedUart {
+    type Error = Infallible;
+}
+
+impl embedded_io_async::Read for WatchedUart {
+    async fn read(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        self.seen.borrow_mut().push(if self.driver_enable.get() {
+            "read while driving"
+        } else {
+            "read"
+        });
+        Ok(buffer.len())
+    }
+}
+
+impl embedded_io_async::Write for WatchedUart {
+    async fn write(&mut self, buffer: &[u8]) -> Result<usize, Self::Error> {
+        self.seen.borrow_mut().push(if self.driver_enable.get() {
+            "write while driving"
+        } else {
+            "write"
+        });
+        Ok(buffer.len())
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.seen.borrow_mut().push(if self.driver_enable.get() {
+            "flush while driving"
+        } else {
+            "flush"
+        });
+        Ok(())
+    }
+}
+
+struct SharedPin(Rc<Cell<bool>>);
+
+impl ErrorType for SharedPin {
+    type Error = Infallible;
+}
+
+impl OutputPin for SharedPin {
+    fn set_low(&mut self) -> Result<(), Self::Error> {
+        self.0.set(false);
+        Ok(())
+    }
+
+    fn set_high(&mut self) -> Result<(), Self::Error> {
+        self.0.set(true);
+        Ok(())
+    }
+}
+
+#[test]
+fn rs485_driver_is_on_only_until_the_written_bytes_have_left() {
+    let driver_enable = Rc::new(Cell::new(false));
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let mut port = DirectedUart::new(
+        WatchedUart {
+            driver_enable: Rc::clone(&driver_enable),
+            seen: Rc::clone(&seen),
+        },
+        Some(SharedPin(Rc::clone(&driver_enable))),
+    );
+    let written =
+        embassy_futures::block_on(embedded_io_async::Write::write(&mut port, b"\x01\x03"))
+            .expect("write");
+    assert_eq!(written, 2);
+    assert!(!driver_enable.get());
+    let mut reply = [0; 4];
+    embassy_futures::block_on(embedded_io_async::Read::read(&mut port, &mut reply)).expect("read");
+    assert_eq!(
+        *seen.borrow(),
+        ["write while driving", "flush while driving", "read"]
+    );
 }
 
 #[test]

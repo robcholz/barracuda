@@ -93,6 +93,8 @@ ESP32 还支持 I2S 音频流（`i2s-stream`，不带 MCLK 引脚：该芯片只
 
 ESP32、ESP32-S3 和 ESP32-C6 用脉冲计数器的单元 0 解码正交编码器（`pulse-counter`），计数两路信号的每个边沿。ESP32-C3 没有脉冲计数器，esp-hal 目前也没有 ESP32-P4 的 PCNT 驱动。
 
+ESP32-S3 通过 esp-hal 的中断驱动在 TWAI 控制器上驱动经典 CAN 总线（`twai`）。只有在应用选定位速率时控制器才接入总线；每次启动都按新的速率重新构建驱动，由 80 MHz 的 APB 时钟分频，每位 20 个时间量子（800 kbit/s 用 25 个，否则用 16 或 10 个），采样点约在 80 %，因此时钟能整除得到的任何速率都可用，范围从 5 kbit/s 到 1 Mbit/s。
+
 ESP32-S3 还支持四线 SPI 设备、SD/MMC 卡、摄像头采集、8 位并行输出（`parallel-output`，即 i8080 模式下的 LCD_CAM 控制器，可带或不带数据/命令线）、I2S 音频流和电容触摸。
 
 ESP32-P4 还支持 I2S 音频流（`i2s-stream`，与 ESP32-S3 使用同一个适配层）和 MIPI DSI 主机（`dsi-host`）：链路、位于 PSRAM、由 VDMA 扫描输出的 RGB565 帧缓冲、视频开始前和进行中的 DCS 命令，以及背光引脚。由于 esp-hal 没有 ESP32-P4 的 LEDC 驱动，背光只能开关。

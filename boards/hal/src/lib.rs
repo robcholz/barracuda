@@ -24,6 +24,7 @@ pub use providers::{
     RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SpiProvider, SpiRequest, UartConfig,
     UartDataBits, UartParity, UartProvider, UartRequest, UartStopBits, UnsupportedFunction,
 };
+pub use providers::{DirectedUart, DirectedUartError};
 pub use runtime::{LeaseError, ResourceKind};
 
 /// Stable attached audio peripheral API.
@@ -34,6 +35,10 @@ pub use barracuda_peripheral::buttons;
 pub use barracuda_peripheral::buzzer;
 /// Stable attached camera peripheral API.
 pub use barracuda_peripheral::camera;
+/// Stable attached CAN bus API.
+pub use barracuda_peripheral::can;
+/// Stable attached fixed-function digital I/O API.
+pub use barracuda_peripheral::digital_io;
 /// Stable attached display peripheral API.
 pub use barracuda_peripheral::display;
 /// Stable attached environment-sensor peripheral API.
@@ -48,6 +53,10 @@ pub use barracuda_peripheral::infrared;
 pub use barracuda_peripheral::keyboard;
 /// Stable attached LED-strip peripheral API.
 pub use barracuda_peripheral::led_strip;
+/// Stable attached LoRa radio API.
+pub use barracuda_peripheral::lora;
+/// Stable attached NFC card-reader API.
+pub use barracuda_peripheral::nfc_reader;
 /// Stable attached electrical-power monitoring API.
 pub use barracuda_peripheral::power;
 /// Stable real-time clock API.
@@ -376,6 +385,35 @@ pub trait PwmFrequencyControl: embedded_hal::pwm::SetDutyCycle {
 
     /// Retunes the output to `frequency_hz`.
     fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error>;
+}
+
+/// An on-chip classic CAN controller (the ESP TWAI) wired to a transceiver.
+///
+/// `embedded-can` defines frames and a polling `nb` contract but no awaitable
+/// transfers, so the Platform supplies this narrow one. The controller stays
+/// off the bus until [`CanController::start`].
+pub trait CanController {
+    /// Controller or bus failure.
+    type Error: core::fmt::Debug;
+
+    /// Returns whether the controller can run at `bitrate` bits per second.
+    fn supports_bitrate(&self, bitrate: u32) -> bool;
+
+    /// Joins the bus at `bitrate` bits per second, leaving it first when
+    /// already started.
+    fn start(&mut self, bitrate: u32) -> Result<(), Self::Error>;
+
+    /// Leaves the bus.
+    fn stop(&mut self);
+
+    /// Returns the controller's part in the bus.
+    fn state(&self) -> can::BusState;
+
+    /// Sends one frame and returns once the bus carried it.
+    fn transmit(&mut self, frame: &can::Frame) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Waits for the next frame.
+    fn receive(&mut self) -> impl Future<Output = Result<can::Frame, Self::Error>>;
 }
 
 /// One Board-exposed analog output channel.
@@ -926,6 +964,149 @@ impl infrared::InfraredPeripheral for NoPeripherals {
     type Infrared = UnavailableInfrared;
 
     fn take_infrared(&mut self, _instance: Instance) -> Option<Self::Infrared> {
+        None
+    }
+}
+
+/// Uninhabited NFC card reader used when a Board has none.
+pub struct UnavailableNfcReader {
+    never: Infallible,
+}
+
+impl nfc_reader::NfcReader for UnavailableNfcReader {
+    type Error = Infallible;
+
+    async fn poll(&mut self) -> Result<Option<nfc_reader::Card>, Self::Error> {
+        match self.never {}
+    }
+
+    async fn read_block(
+        &mut self,
+        _block: u8,
+    ) -> Result<[u8; nfc_reader::BLOCK_BYTES], Self::Error> {
+        match self.never {}
+    }
+}
+
+impl nfc_reader::NfcReaderPeripheral for NoPeripherals {
+    type NfcReader = UnavailableNfcReader;
+
+    fn take_nfc_reader(&mut self, _instance: Instance) -> Option<Self::NfcReader> {
+        None
+    }
+}
+
+/// Uninhabited LoRa radio used when a Board has none.
+pub struct UnavailableLora {
+    never: Infallible,
+}
+
+impl lora::Lora for UnavailableLora {
+    type Error = Infallible;
+
+    fn limits(&self) -> lora::RadioLimits {
+        match self.never {}
+    }
+
+    async fn configure(&mut self, _config: lora::LoraConfig) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn transmit(&mut self, _payload: &[u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn receive(&mut self, _buffer: &mut [u8]) -> Result<lora::Received, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl lora::LoraPeripheral for NoPeripherals {
+    type Lora = UnavailableLora;
+
+    fn take_lora(&mut self, _instance: Instance) -> Option<Self::Lora> {
+        None
+    }
+}
+
+/// Uninhabited CAN controller used when a Board has none.
+pub struct UnavailableCan {
+    never: Infallible,
+}
+
+impl can::Can for UnavailableCan {
+    type Error = Infallible;
+
+    fn supports_bitrate(&self, _bitrate: u32) -> bool {
+        match self.never {}
+    }
+
+    fn start(&mut self, _bitrate: u32) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn stop(&mut self) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn bitrate(&self) -> Option<u32> {
+        match self.never {}
+    }
+
+    fn state(&self) -> can::BusState {
+        match self.never {}
+    }
+
+    async fn transmit(&mut self, _frame: &can::Frame) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn receive(&mut self) -> Result<can::Frame, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl can::CanPeripheral for NoPeripherals {
+    type Can = UnavailableCan;
+
+    fn take_can(&mut self, _instance: Instance) -> Option<Self::Can> {
+        None
+    }
+}
+
+/// Uninhabited digital I/O bank used when a Board has none.
+pub struct UnavailableDigitalIo {
+    never: Infallible,
+}
+
+impl digital_io::DigitalIo for UnavailableDigitalIo {
+    type Error = Infallible;
+
+    fn output_count(&self) -> usize {
+        match self.never {}
+    }
+
+    fn input_count(&self) -> usize {
+        match self.never {}
+    }
+
+    fn set_output(&mut self, _index: usize, _on: bool) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn outputs(&self) -> digital_io::Levels {
+        match self.never {}
+    }
+
+    fn read_inputs(&mut self) -> Result<digital_io::Levels, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl digital_io::DigitalIoPeripheral for NoPeripherals {
+    type DigitalIo = UnavailableDigitalIo;
+
+    fn take_digital_io(&mut self, _instance: Instance) -> Option<Self::DigitalIo> {
         None
     }
 }

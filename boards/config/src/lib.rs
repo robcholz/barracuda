@@ -384,6 +384,8 @@ pub struct PeripheralIoDefinition {
     rmt_inputs: BTreeMap<String, RmtChannelDefinition>,
     #[serde(default, rename = "pwm-output")]
     pwm_outputs: BTreeMap<String, PwmOutputDefinition>,
+    #[serde(default)]
+    twai: BTreeMap<String, TwaiDefinition>,
 }
 
 impl PeripheralIoDefinition {
@@ -408,6 +410,7 @@ impl PeripheralIoDefinition {
             && self.rmt_outputs.is_empty()
             && self.rmt_inputs.is_empty()
             && self.pwm_outputs.is_empty()
+            && self.twai.is_empty()
     }
 
     /// Finds one MIPI DSI host reserved by a display implementation.
@@ -515,6 +518,12 @@ impl PeripheralIoDefinition {
     #[must_use]
     pub fn pulse_counter(&self, name: &str) -> Option<&PulseCounterDefinition> {
         self.pulse_counters.get(name)
+    }
+
+    /// Finds one CAN controller reserved by a peripheral implementation.
+    #[must_use]
+    pub fn twai(&self, name: &str) -> Option<&TwaiDefinition> {
+        self.twai.get(name)
     }
 
     /// Finds one pulse-train output channel reserved by a peripheral
@@ -628,6 +637,10 @@ impl PeripheralIoDefinition {
                 .any(|binding| binding.peripheral == peripheral)
             || self
                 .pulse_counters
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .twai
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
             || self
@@ -781,6 +794,12 @@ impl PeripheralIoDefinition {
             validate_identifier(name, "peripheral", &counter.peripheral)?;
             validate_identifier(name, "a", &counter.a)?;
             validate_identifier(name, "b", &counter.b)?;
+        }
+        for (name, controller) in &self.twai {
+            validate_resource_name("internal twai", name)?;
+            validate_identifier(name, "peripheral", &controller.peripheral)?;
+            validate_identifier(name, "tx", &controller.tx)?;
+            validate_identifier(name, "rx", &controller.rx)?;
         }
         for (section, channels) in [
             ("internal rmt-output", &self.rmt_outputs),
@@ -1487,6 +1506,37 @@ impl AnalogInputDefinition {
     #[must_use]
     pub fn pin(&self) -> &str {
         &self.pin
+    }
+}
+
+/// One on-chip CAN controller (the ESP TWAI) and the pins of its
+/// transceiver: `tx` drives the transceiver's TXD input, `rx` reads its RXD
+/// output.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TwaiDefinition {
+    peripheral: String,
+    tx: String,
+    rx: String,
+}
+
+impl TwaiDefinition {
+    /// Returns the chip-native CAN controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the pin driving the transceiver's TXD input.
+    #[must_use]
+    pub fn tx(&self) -> &str {
+        &self.tx
+    }
+
+    /// Returns the pin reading the transceiver's RXD output.
+    #[must_use]
+    pub fn rx(&self) -> &str {
+        &self.rx
     }
 }
 
