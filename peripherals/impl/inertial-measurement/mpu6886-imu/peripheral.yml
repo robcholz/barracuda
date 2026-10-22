@@ -6,7 +6,7 @@ implementation:
   crate: barracuda_mpu6886_imu
   factory: "::{{crate}}::Mpu6886ImuImplementation<{{binding.i2c.type}}, {{hal.delay.type}}>"
   bindings-expression: "::{{crate}}::Mpu6886Bindings::new({{binding.i2c.value}}, {{hal.delay.value}})"
-  config-expression: "::{{crate}}::Mpu6886Config::new({{parameter.address}}, {{parameter.accelerometer-range}}, {{parameter.gyroscope-range}}, {{parameter.sample-rate}}, ::barracuda_board_hal::imu::AxisTransform::new({{parameter.axis-x}}, {{parameter.axis-y}}, {{parameter.axis-z}}))"
+  config-expression: "::{{crate}}::Mpu6886Config::new({{parameter.address}}, {{parameter.accelerometer-range}}, {{parameter.gyroscope-range}}, {{parameter.sample-rate}}, ::barracuda_board_hal::imu::AxisTransform::new({{parameter.axis-x}}, {{parameter.axis-y}}, {{parameter.axis-z}})).with_magnetometer({{parameter.magnetometer}}.mounted(::barracuda_board_hal::imu::AxisTransform::new({{parameter.magnetometer-axis-x}}, {{parameter.magnetometer-axis-y}}, {{parameter.magnetometer-axis-z}})))"
 # An MPU6886, or the MPU9250 or MPU6050 that share its accelerometer and
 # gyroscope registers, identified by WHO_AM_I at start as M5Unified does.
 bindings:
@@ -72,6 +72,51 @@ parameters:
       "-z": "::barracuda_board_hal::imu::SignedAxis::NegativeZ"
     default: "+y"
   axis-z:
+    type: enum
+    values: ["+x", "-x", "+y", "-y", "+z", "-z"]
+    rust-values:
+      "+x": "::barracuda_board_hal::imu::SignedAxis::PositiveX"
+      "-x": "::barracuda_board_hal::imu::SignedAxis::NegativeX"
+      "+y": "::barracuda_board_hal::imu::SignedAxis::PositiveY"
+      "-y": "::barracuda_board_hal::imu::SignedAxis::NegativeY"
+      "+z": "::barracuda_board_hal::imu::SignedAxis::PositiveZ"
+      "-z": "::barracuda_board_hal::imu::SignedAxis::NegativeZ"
+    default: "+z"
+  # A BMM150 at 10h on the same bus, read with each sample on the units that
+  # have one (M5Unified `IMU_Class::begin` probes it); a unit without it
+  # starts without a magnetometer.
+  magnetometer:
+    type: enum
+    values: [none, bmm150-if-present]
+    rust-values:
+      none: "::barracuda_mpu6886_imu::MagnetometerPart::None"
+      bmm150-if-present: "::barracuda_mpu6886_imu::MagnetometerPart::Bmm150IfPresent"
+    default: none
+  # The magnetometer's mounting: the BMM150 axis, with its sign, that each
+  # Board axis reads, in the same Board axes as the accelerometer.
+  magnetometer-axis-x:
+    type: enum
+    values: ["+x", "-x", "+y", "-y", "+z", "-z"]
+    rust-values:
+      "+x": "::barracuda_board_hal::imu::SignedAxis::PositiveX"
+      "-x": "::barracuda_board_hal::imu::SignedAxis::NegativeX"
+      "+y": "::barracuda_board_hal::imu::SignedAxis::PositiveY"
+      "-y": "::barracuda_board_hal::imu::SignedAxis::NegativeY"
+      "+z": "::barracuda_board_hal::imu::SignedAxis::PositiveZ"
+      "-z": "::barracuda_board_hal::imu::SignedAxis::NegativeZ"
+    default: "+x"
+  magnetometer-axis-y:
+    type: enum
+    values: ["+x", "-x", "+y", "-y", "+z", "-z"]
+    rust-values:
+      "+x": "::barracuda_board_hal::imu::SignedAxis::PositiveX"
+      "-x": "::barracuda_board_hal::imu::SignedAxis::NegativeX"
+      "+y": "::barracuda_board_hal::imu::SignedAxis::PositiveY"
+      "-y": "::barracuda_board_hal::imu::SignedAxis::NegativeY"
+      "+z": "::barracuda_board_hal::imu::SignedAxis::PositiveZ"
+      "-z": "::barracuda_board_hal::imu::SignedAxis::NegativeZ"
+    default: "+y"
+  magnetometer-axis-z:
     type: enum
     values: ["+x", "-x", "+y", "-y", "+z", "-z"]
     rust-values:

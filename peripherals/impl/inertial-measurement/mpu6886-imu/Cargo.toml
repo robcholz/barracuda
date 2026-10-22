@@ -6,6 +6,7 @@ description = "MPU6886, MPU9250, and MPU6050 six-axis IMU implementation over em
 license = "AGPL-3.0-only"
 
 [dependencies]
+barracuda-driver-bmm150.workspace = true
 barracuda-driver-mpu6886.workspace = true
 barracuda-peripheral.workspace = true
 embedded-hal.workspace = true

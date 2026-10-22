@@ -82,11 +82,16 @@ peripherals:
         invert-colors: true
         orientation: deg90
     # The G0 button, active low with the Board's pull-up (M5Unified
-    # `M5Unified::update`). The keyboard is not declared.
+    # `M5Unified::update`).
     buttons:
       implementation: gpio-buttons
       bindings:
         button-1: GPIO0
+    # TCA8418 at its fixed 34h on the internal bus, interrupt on GPIO11
+    # (M5Cardputer `TCA8418KeyboardReader`, Adafruit `TCA8418_DEFAULT_ADDR`).
+    keyboard:
+      implementation: cardputer-adv-keyboard
+      bindings: { i2c: internal-i2c, interrupt: GPIO11 }
 exposed-io:
   pins:
     # Grove (PORT.CUSTOM) G1/G2: M5Stack Cardputer-Adv pin map.

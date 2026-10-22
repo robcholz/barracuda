@@ -1,0 +1,40 @@
+id: cardputer-keyboard
+api-version: 1
+peripheral: keyboard
+implementation:
+  package: barracuda-cardputer-keyboard
+  crate: barracuda_cardputer_keyboard
+  factory: "::{{crate}}::CardputerKeyboardImplementation<{{binding.address-0.type}}, {{binding.input-1.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::CardputerKeyboardBindings::new([{{binding.address-0.value}}, {{binding.address-1.value}}, {{binding.address-2.value}}], [{{binding.input-1.value}}, {{binding.input-2.value}}, {{binding.input-3.value}}, {{binding.input-4.value}}, {{binding.input-5.value}}, {{binding.input-6.value}}, {{binding.input-7.value}}], {{hal.delay.value}})"
+  config-expression: "()"
+# M5Stack Cardputer's 56-key matrix: a 74HC138 decodes the three address
+# outputs into eight scan lines, and seven inputs with pull-ups read the
+# pressed keys low (M5Cardputer `IOMatrixKeyboardReader`). The keymap is
+# M5Cardputer's `_key_value_map`.
+bindings:
+  # 74HC138 address bits A0, A1, A2.
+  address-0:
+    kind: digital-output
+    initial: low
+  address-1:
+    kind: digital-output
+    initial: low
+  address-2:
+    kind: digital-output
+    initial: low
+  # The seven inputs in M5Cardputer's `input_list` order.
+  input-1:
+    kind: gpio
+  input-2:
+    kind: gpio
+  input-3:
+    kind: gpio
+  input-4:
+    kind: gpio
+  input-5:
+    kind: gpio
+  input-6:
+    kind: gpio
+  input-7:
+    kind: gpio
+parameters: {}

@@ -7,6 +7,7 @@ license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-peripheral.workspace = true
+barracuda-driver-bmm150.workspace = true
 bmi2 = "0.1.2"
 embedded-hal.workspace = true
 

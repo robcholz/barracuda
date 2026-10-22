@@ -192,7 +192,7 @@ pub struct Mpu6886Bmi270ImuImplementation<I2C, DELAY>(PhantomData<fn() -> (I2C, 
 impl<I2C, DELAY> PeripheralImplementation for Mpu6886Bmi270ImuImplementation<I2C, DELAY>
 where
     I2C: I2c + 'static,
-    DELAY: DelayNs + 'static,
+    DELAY: DelayNs + Clone + 'static,
 {
     type Bindings = Mpu6886Bmi270Bindings<I2C, DELAY>;
     type Config = Mpu6886Bmi270Config;
@@ -318,6 +318,7 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
     struct Delay;
 
     impl DelayNs for Delay {

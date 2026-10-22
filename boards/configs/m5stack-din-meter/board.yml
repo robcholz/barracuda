@@ -35,7 +35,18 @@ peripherals:
         # StampS3 module WS2812B-2020 on GPIO21 (M5Unified `_pin_table_other0` (RGBLED)).
         data: GPIO21
         frequency-hz: 2400000
+    pulse-counter:
+      knob:
+        # The knob's encoder: A GPIO41, B GPIO40 (M5Dial and M5DinMeter
+        # `DIAL_ENCODER_PIN_A`, `DIAL_ENCODER_PIN_B`), with the pull-ups and
+        # every-edge count of the PJRC Encoder library they ship.
+        peripheral: PCNT
+        a: GPIO41
+        b: GPIO40
   devices:
+    rotary-encoder:
+      implementation: quadrature-rotary-encoder
+      bindings: { counter: knob }
     battery:
       implementation: adc-battery-power-monitor
       bindings: { sense: battery-sense }
