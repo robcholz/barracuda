@@ -927,6 +927,14 @@ peripherals:
     assert!(rust.contains("__platform::hal::I2cDevice"));
     assert!(rust.contains("shared_i2c_environment.device()"));
     assert!(rust.contains("future_i2c_sensor::Config::new(118)"));
+    // The shared bus is Board wiring: failing to build it fails the Board,
+    // while the device on it is only logged and left absent.
+    assert!(rust.contains("pub enum GeneratedBoardError {"));
+    assert!(rust.contains(".map_err(GeneratedBoardError::"));
+    assert!(
+        rust.contains("Board peripheral `environment` (future-i2c-sensor) failed to initialize")
+    );
+    assert!(!rust.contains("(<EnvironmentFactory as PeripheralImplementation>::Error)"));
 }
 
 #[test]
@@ -1553,32 +1561,197 @@ fn several_displays_render_one_enum_taken_by_instance() {
     );
 }
 
-#[test]
-fn single_instance_peripherals_reject_a_second_device() {
-    let root = tempdir().expect("temporary workspace");
-    add_driver(root.path(), "indicator-led", INDICATOR_MANIFEST);
-    let catalog = load_catalog(root.path()).expect("implementation catalog");
-    let board = parse(
-        &two_device_board("indicator-led", "")
-            .replace("enable:", "pin:")
-            .replace(
-                "        pin: PB0\n",
-                "        pin: PB0\n      parameters:\n        active-level: high\n",
-            )
-            .replace(
-                "        pin: PB1\n",
-                "        pin: PB1\n      parameters:\n        active-level: high\n",
-            ),
+/// A one-pin implementation of `kind`, enough to compose a Board of it.
+fn one_pin_manifest(kind: &str) -> String {
+    format!(
+        r#"
+id: test-{kind}
+api-version: 1
+peripheral: {kind}
+implementation:
+  package: test-{kind}
+  crate: test_{crate_name}
+  factory: "::{{{{crate}}}}::Implementation<{{{{binding.enable.type}}}}>"
+  bindings-expression: "{{{{binding.enable.value}}}}"
+  config-expression: "()"
+bindings:
+  enable:
+    kind: digital-output
+    initial: low
+parameters: {{}}
+"#,
+        crate_name = kind.replace('-', "_")
     )
-    .expect("Board YAML");
-    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
-    let error = render_board_hal(&board, &resolved).expect_err("two indicators");
+}
+
+/// Every kind Plugins claim by instance, its set macro, and its associated
+/// device type.
+const CLAIMABLE_KINDS: &[(&str, &str, &str)] = &[
+    ("audio-codec", "audio_codec_set", "AudioCodec"),
+    ("buttons", "buttons_set", "Buttons"),
+    ("buzzer", "buzzer_set", "Buzzer"),
+    ("camera", "camera_set", "Camera"),
+    ("display", "display_set", "Display"),
+    (
+        "environment-sensor",
+        "environment_sensor_set",
+        "EnvironmentSensor",
+    ),
+    ("indicator", "indicator_set", "Indicator"),
+    ("inertial-measurement", "imu_set", "Imu"),
+    ("infrared", "infrared_set", "Infrared"),
+    ("keyboard", "keyboard_set", "Keyboard"),
+    ("led-strip", "led_strip_set", "LedStrip"),
+    ("power-monitor", "power_monitor_set", "PowerMonitor"),
+    ("real-time-clock", "real_time_clock_set", "RealTimeClock"),
+    ("rotary-encoder", "rotary_encoder_set", "RotaryEncoder"),
+    ("touch", "touch_set", "Touch"),
+    ("vibration", "vibration_set", "Vibration"),
+];
+
+#[test]
+fn every_claimed_kind_is_registered_and_covered_here() {
+    let mut kinds = CLAIMABLE_KINDS
+        .iter()
+        .map(|(kind, _, _)| *kind)
+        .collect::<Vec<_>>();
+    kinds.push("removable-storage");
+    kinds.sort_unstable();
+    assert_eq!(kinds, barracuda_peripheral_config::PERIPHERAL_APIS);
+}
+
+#[test]
+fn several_devices_of_any_claimed_kind_render_one_set_taken_by_instance() {
+    for (kind, set_macro, associated) in CLAIMABLE_KINDS {
+        let root = tempdir().expect("temporary workspace");
+        add_driver(
+            root.path(),
+            &format!("test-{kind}"),
+            &one_pin_manifest(kind),
+        );
+        let catalog = load_catalog(root.path()).expect("implementation catalog");
+        let implementation = format!("test-{kind}");
+        let board =
+            parse(&two_device_board(&implementation, "      primary: true\n")).expect("Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+
+        let rust = render_board_hal(&board, &resolved).expect("generated HAL");
+        assert_valid_rust(&rust);
+        let set = format!("Board{associated}");
+        assert!(
+            rust.contains(&format!("::barracuda_board_hal::{set_macro}! {{")),
+            "{kind}"
+        );
+        assert!(
+            rust.contains(&format!("type {associated} = {set};")),
+            "{kind}"
+        );
+        // Instances follow the Board's device names: `back` is 0, `front` is 1.
+        assert!(
+            rust.contains(&format!("0 => self.back.take().map({set}::Back),")),
+            "{kind}"
+        );
+        assert!(
+            rust.contains(&format!("1 => self.front.take().map({set}::Front),")),
+            "{kind}"
+        );
+    }
+}
+
+#[test]
+fn several_devices_of_a_kind_need_one_primary() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-power-monitor",
+        &one_pin_manifest("power-monitor"),
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let unmarked = parse(&two_device_board("test-power-monitor", "")).expect("Board YAML");
+    let resolved = resolve_board(&unmarked, &catalog).expect("resolved composition");
+    let error = render_board_hal(&unmarked, &resolved).expect_err("ambiguous primary monitor");
+    assert!(matches!(
+        &error,
+        GenerateError::AmbiguousPrimaryPeripheral { peripheral, devices }
+            if peripheral == "power-monitor" && devices == &["back", "front"]
+    ));
     assert!(
         error
             .to_string()
-            .contains("only `display` supports several"),
+            .contains("mark exactly one `primary: true`"),
         "{error}"
     );
+}
+
+#[test]
+fn one_device_of_a_kind_keeps_its_concrete_type() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "indicator-led", INDICATOR_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(&board(
+        "indicator-led",
+        "      pin: PB0\n",
+        "      active-level: high\n",
+    ))
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+
+    let rust = render_board_hal(&board, &resolved).expect("generated HAL");
+    assert_valid_rust(&rust);
+    assert!(rust.contains("type Indicator = StatusLedPeripheral;"));
+    assert!(rust.contains("0 => self.status_led.take(),"));
+    assert!(!rust.contains("indicator_set!"));
+    // Kinds the Board lacks take nothing.
+    assert!(rust.contains("type Buzzer = ::barracuda_board_hal::UnavailableBuzzer;"));
+}
+
+#[test]
+fn a_board_declares_at_most_one_removable_slot() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-removable-storage",
+        &one_pin_manifest("removable-storage"),
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(&two_device_board(
+        "test-removable-storage",
+        "      primary: true\n",
+    ))
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+    let error = render_board_hal(&board, &resolved).expect_err("two removable slots");
+    assert!(matches!(
+        &error,
+        GenerateError::DuplicatePeripheral { peripheral } if peripheral == "removable-storage"
+    ));
+}
+
+#[test]
+fn a_device_that_fails_to_initialize_is_logged_and_left_absent() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "indicator-led", INDICATOR_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(&board(
+        "indicator-led",
+        "      pin: PB0\n",
+        "      active-level: high\n",
+    ))
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+
+    let rust = render_board_hal(&board, &resolved).expect("generated HAL");
+    assert_valid_rust(&rust);
+    assert!(rust.contains(
+        "let status_led = match <StatusLedFactory as PeripheralImplementation>::initialize("
+    ));
+    assert!(rust.contains("Ok(peripheral) => Some(peripheral),"));
+    assert!(rust.contains(
+        "::barracuda_board_hal::__private::log::error!(\"Board peripheral `status-led` (indicator-led) failed to initialize; the Board starts without it: {:?}\", error);"
+    ));
+    assert!(rust.contains("let peripherals = GeneratedPeripherals {\n            status_led,\n"));
+    // Without a shared bus nothing else can fail the Board.
+    assert!(rust.contains("type GeneratedBoardError = core::convert::Infallible;"));
 }
 
 const ANALOG_MANIFEST: &str = r#"

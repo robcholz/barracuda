@@ -60,8 +60,21 @@ pub use barracuda_peripheral::rotary_encoder;
 pub use barracuda_peripheral::touch;
 /// Stable attached vibration-motor API.
 pub use barracuda_peripheral::vibration;
+/// One statically dispatched type over a Board's devices of one kind, used by
+/// the generated Board HAL when a Board declares several devices of a kind.
+pub use barracuda_peripheral::{
+    audio_codec_set, buttons_set, buzzer_set, camera_set, display_set, environment_sensor_set,
+    imu_set, indicator_set, infrared_set, keyboard_set, led_strip_set, power_monitor_set,
+    real_time_clock_set, rotary_encoder_set, touch_set, vibration_set,
+};
 /// Stable factory contract implemented by every peripheral implementation.
-pub use barracuda_peripheral::{display_set, Instance, PeripheralImplementation};
+pub use barracuda_peripheral::{Instance, PeripheralImplementation};
+
+/// Items the generated Board HAL reaches through this crate.
+#[doc(hidden)]
+pub mod __private {
+    pub use log;
+}
 
 /// Statically allocated owner for one blocking I2C bus shared by attached peripherals.
 pub struct SharedI2cBus<Bus> {
@@ -720,6 +733,31 @@ impl touch::TouchPeripheral for NoPeripherals {
     type Touch = UnavailableTouch;
 
     fn take_touch(&mut self, _instance: Instance) -> Option<Self::Touch> {
+        None
+    }
+}
+
+/// Uninhabited indicator used when a Board declares no indicator.
+pub struct UnavailableIndicator {
+    never: Infallible,
+}
+
+impl indicator::Indicator for UnavailableIndicator {
+    type Error = Infallible;
+
+    fn set_enabled(&mut self, _enabled: bool) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn is_enabled(&mut self) -> Result<bool, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl indicator::IndicatorPeripheral for NoPeripherals {
+    type Indicator = UnavailableIndicator;
+
+    fn take_indicator(&mut self, _instance: Instance) -> Option<Self::Indicator> {
         None
     }
 }

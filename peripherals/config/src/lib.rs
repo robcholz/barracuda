@@ -585,9 +585,10 @@ pub enum GenerateError {
     /// A data-only SPI binding has no unreserved Platform controller.
     #[error("Platform has no unreserved SPI controller for a data-only output")]
     MissingPlatformSpiController,
-    /// A Board declared several devices of a peripheral API that supports one.
+    /// A Board declared several devices of the System-owned kind it has at
+    /// most one of.
     #[error(
-        "Board declares more than one `{peripheral}` peripheral; only `display` supports several"
+        "Board declares more than one `{peripheral}` device; System mounts one removable slot, so a Board declares at most one"
     )]
     DuplicatePeripheral {
         /// Duplicated peripheral API ID.
@@ -1320,103 +1321,188 @@ const fn hal_binding(kind: BindingKind) -> Option<HalBinding> {
     }
 }
 
-/// Peripheral APIs a Board may declare several devices of. Their devices are
-/// generated as one enum type that claims select by instance.
-const MULTI_INSTANCE_PERIPHERALS: &[&str] = &["display"];
-
-/// The Board HAL trait, take function, and associated type of each peripheral
-/// API that Plugins claim by instance.
-fn claimable_peripheral(
-    peripheral_api: &str,
-) -> Option<(&'static str, &'static str, &'static str)> {
-    Some(match peripheral_api {
-        "display" => (
-            "::barracuda_board_hal::display::DisplayPeripheral",
-            "take_display",
-            "Display",
-        ),
-        "indicator" => (
-            "::barracuda_board_hal::indicator::IndicatorPeripheral",
-            "take_indicator",
-            "Indicator",
-        ),
-        "led-strip" => (
-            "::barracuda_board_hal::led_strip::LedStripPeripheral",
-            "take_led_strip",
-            "LedStrip",
-        ),
-        "camera" => (
-            "::barracuda_board_hal::camera::CameraPeripheral",
-            "take_camera",
-            "Camera",
-        ),
-        "audio-codec" => (
-            "::barracuda_board_hal::audio::AudioCodecPeripheral",
-            "take_audio_codec",
-            "AudioCodec",
-        ),
-        "inertial-measurement" => (
-            "::barracuda_board_hal::imu::ImuPeripheral",
-            "take_imu",
-            "Imu",
-        ),
-        "power-monitor" => (
-            "::barracuda_board_hal::power::PowerMonitorPeripheral",
-            "take_power_monitor",
-            "PowerMonitor",
-        ),
-        "real-time-clock" => (
-            "::barracuda_board_hal::real_time_clock::RealTimeClockPeripheral",
-            "take_real_time_clock",
-            "RealTimeClock",
-        ),
-        "touch" => (
-            "::barracuda_board_hal::touch::TouchPeripheral",
-            "take_touch",
-            "Touch",
-        ),
-        "buttons" => (
-            "::barracuda_board_hal::buttons::ButtonsPeripheral",
-            "take_buttons",
-            "Buttons",
-        ),
-        "environment-sensor" => (
-            "::barracuda_board_hal::environment::EnvironmentSensorPeripheral",
-            "take_environment_sensor",
-            "EnvironmentSensor",
-        ),
-        "keyboard" => (
-            "::barracuda_board_hal::keyboard::KeyboardPeripheral",
-            "take_keyboard",
-            "Keyboard",
-        ),
-        "rotary-encoder" => (
-            "::barracuda_board_hal::rotary_encoder::RotaryEncoderPeripheral",
-            "take_rotary_encoder",
-            "RotaryEncoder",
-        ),
-        "buzzer" => (
-            "::barracuda_board_hal::buzzer::BuzzerPeripheral",
-            "take_buzzer",
-            "Buzzer",
-        ),
-        "vibration" => (
-            "::barracuda_board_hal::vibration::VibrationPeripheral",
-            "take_vibration",
-            "Vibration",
-        ),
-        "infrared" => (
-            "::barracuda_board_hal::infrared::InfraredPeripheral",
-            "take_infrared",
-            "Infrared",
-        ),
-        _ => return None,
-    })
+/// One peripheral kind Plugins claim by instance, and how the generated Board
+/// HAL names it in `barracuda_board_hal`.
+///
+/// A Board may declare any number of devices of such a kind. With one, the
+/// kind's associated type is that device's concrete type; with several, it is
+/// an enum the kind's set macro declares over the concrete devices, so
+/// dispatch stays static. A new kind adds its API trait, its `Unavailable*`
+/// type, its set macro, and one entry in [`CLAIMABLE_KINDS`].
+struct ClaimableKind {
+    /// The `peripheral:` name of the kind's implementations.
+    kind: &'static str,
+    /// The kind's `<Kind>Peripheral` trait, relative to `barracuda_board_hal`.
+    peripheral_trait: &'static str,
+    /// The trait's take function.
+    take: &'static str,
+    /// The trait's associated device type, which also names the set type.
+    associated: &'static str,
+    /// The device type of a Board with none, relative to `barracuda_board_hal`.
+    unavailable: &'static str,
+    /// The macro that declares a set of several devices.
+    set_macro: &'static str,
+    /// Suffixes of the set's error types, one per associated error type of
+    /// the kind's trait, in the order its set macro takes them.
+    set_errors: &'static [&'static str],
 }
+
+/// Every peripheral kind Plugins claim by instance.
+const CLAIMABLE_KINDS: &[ClaimableKind] = &[
+    ClaimableKind {
+        kind: "audio-codec",
+        peripheral_trait: "audio::AudioCodecPeripheral",
+        take: "take_audio_codec",
+        associated: "AudioCodec",
+        unavailable: "UnavailableAudioCodec",
+        set_macro: "audio_codec_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "buttons",
+        peripheral_trait: "buttons::ButtonsPeripheral",
+        take: "take_buttons",
+        associated: "Buttons",
+        unavailable: "UnavailableButtons",
+        set_macro: "buttons_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "buzzer",
+        peripheral_trait: "buzzer::BuzzerPeripheral",
+        take: "take_buzzer",
+        associated: "Buzzer",
+        unavailable: "UnavailableBuzzer",
+        set_macro: "buzzer_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "camera",
+        peripheral_trait: "camera::CameraPeripheral",
+        take: "take_camera",
+        associated: "Camera",
+        unavailable: "UnavailableCamera",
+        set_macro: "camera_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "display",
+        peripheral_trait: "display::DisplayPeripheral",
+        take: "take_display",
+        associated: "Display",
+        unavailable: "UnavailableDisplay",
+        set_macro: "display_set",
+        set_errors: &["ControlError", "RenderError"],
+    },
+    ClaimableKind {
+        kind: "environment-sensor",
+        peripheral_trait: "environment::EnvironmentSensorPeripheral",
+        take: "take_environment_sensor",
+        associated: "EnvironmentSensor",
+        unavailable: "UnavailableEnvironmentSensor",
+        set_macro: "environment_sensor_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "indicator",
+        peripheral_trait: "indicator::IndicatorPeripheral",
+        take: "take_indicator",
+        associated: "Indicator",
+        unavailable: "UnavailableIndicator",
+        set_macro: "indicator_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "inertial-measurement",
+        peripheral_trait: "imu::ImuPeripheral",
+        take: "take_imu",
+        associated: "Imu",
+        unavailable: "UnavailableImu",
+        set_macro: "imu_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "infrared",
+        peripheral_trait: "infrared::InfraredPeripheral",
+        take: "take_infrared",
+        associated: "Infrared",
+        unavailable: "UnavailableInfrared",
+        set_macro: "infrared_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "keyboard",
+        peripheral_trait: "keyboard::KeyboardPeripheral",
+        take: "take_keyboard",
+        associated: "Keyboard",
+        unavailable: "UnavailableKeyboard",
+        set_macro: "keyboard_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "led-strip",
+        peripheral_trait: "led_strip::LedStripPeripheral",
+        take: "take_led_strip",
+        associated: "LedStrip",
+        unavailable: "UnavailableLedStrip",
+        set_macro: "led_strip_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "power-monitor",
+        peripheral_trait: "power::PowerMonitorPeripheral",
+        take: "take_power_monitor",
+        associated: "PowerMonitor",
+        unavailable: "UnavailablePowerMonitor",
+        set_macro: "power_monitor_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "real-time-clock",
+        peripheral_trait: "real_time_clock::RealTimeClockPeripheral",
+        take: "take_real_time_clock",
+        associated: "RealTimeClock",
+        unavailable: "UnavailableRealTimeClock",
+        set_macro: "real_time_clock_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "rotary-encoder",
+        peripheral_trait: "rotary_encoder::RotaryEncoderPeripheral",
+        take: "take_rotary_encoder",
+        associated: "RotaryEncoder",
+        unavailable: "UnavailableRotaryEncoder",
+        set_macro: "rotary_encoder_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "touch",
+        peripheral_trait: "touch::TouchPeripheral",
+        take: "take_touch",
+        associated: "Touch",
+        unavailable: "UnavailableTouch",
+        set_macro: "touch_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "vibration",
+        peripheral_trait: "vibration::VibrationPeripheral",
+        take: "take_vibration",
+        associated: "Vibration",
+        unavailable: "UnavailableVibration",
+        set_macro: "vibration_set",
+        set_errors: &["Error"],
+    },
+];
+
+/// The peripheral kind System owns and takes without an instance: it mounts
+/// the Board's one removable slot under `/removable`.
+const REMOVABLE_STORAGE: &str = "removable-storage";
 
 #[derive(Debug)]
 struct RenderedPeripheral {
     name: String,
+    implementation: String,
     field: String,
     alias: String,
     error_variant: String,
@@ -1516,15 +1602,14 @@ fn render_generic_hal(
     } = resources;
     let mut state = RenderState::default();
     let mut rendered = Vec::new();
-    let mut primary_peripherals = BTreeSet::new();
+    let mut declared_kinds = BTreeSet::new();
 
     for peripheral in resolved.peripherals() {
         let field = checked_identifier(peripheral.name(), &mut state.identifiers)?;
-        if !primary_peripherals.insert(peripheral.implementation().peripheral())
-            && !MULTI_INSTANCE_PERIPHERALS.contains(&peripheral.implementation().peripheral())
-        {
+        let kind = peripheral.implementation().peripheral();
+        if !declared_kinds.insert(kind) && kind == REMOVABLE_STORAGE {
             return Err(GenerateError::DuplicatePeripheral {
-                peripheral: peripheral.implementation().peripheral().to_owned(),
+                peripheral: kind.to_owned(),
             });
         }
 
@@ -1600,6 +1685,7 @@ fn render_generic_hal(
         )?;
         rendered.push(RenderedPeripheral {
             name: peripheral.name().to_owned(),
+            implementation: peripheral.implementation().id().to_owned(),
             alias: format!("{}Peripheral", pascal_identifier(peripheral.name())),
             error_variant: pascal_identifier(peripheral.name()),
             peripheral_api: peripheral.implementation().peripheral().to_owned(),
@@ -1611,7 +1697,7 @@ fn render_generic_hal(
         });
     }
 
-    for peripheral_api in &primary_peripherals {
+    for peripheral_api in &declared_kinds {
         let devices = resolved
             .peripherals()
             .filter(|peripheral| peripheral.implementation().peripheral() == *peripheral_api)
@@ -1791,7 +1877,7 @@ fn render_generic_hal(
     }
 
     let mut source = String::from("mod generated_board_hal {\n");
-    if !rendered.is_empty() || !state.binding_errors.is_empty() {
+    if !state.binding_errors.is_empty() {
         source.push_str("use core::fmt;\n");
     }
     source.push_str("use ::barracuda_board_hal::{BoardHal, BoardHalInitResult, BoardResources");
@@ -1874,143 +1960,21 @@ fn render_generic_hal(
                 .or_default()
                 .push(peripheral);
         }
-        for (peripheral_api, devices) in &kinds {
-            if *peripheral_api == "removable-storage" {
-                // System owns the removable slot; it is not claimed by instance.
-                if let [device] = devices.as_slice() {
-                    source.push_str(&format!(
-                        "impl ::barracuda_board_hal::removable_storage::RemovableStoragePeripheral for GeneratedPeripherals {{\n    type RemovableStorage = {};\n    fn take_removable_storage(&mut self) -> Option<Self::RemovableStorage> {{ self.{}.take() }}\n}}\n\n",
-                        device.alias, device.field
-                    ));
-                }
-                continue;
-            }
-            let Some((path, function, associated)) = claimable_peripheral(peripheral_api) else {
-                continue;
-            };
-            let (peripheral_type, wrap) = match devices.as_slice() {
-                [device] => (device.alias.clone(), None),
-                _ => {
-                    // Several displays share one type: an enum over the Board's
-                    // concrete displays.
-                    source.push_str("::barracuda_board_hal::display_set! {\n    pub enum BoardDisplay, BoardDisplayControlError, BoardDisplayRenderError {\n");
-                    for device in devices {
-                        source.push_str(&format!(
-                            "        {}({}),\n",
-                            device.error_variant, device.alias
-                        ));
-                    }
-                    source.push_str("    }\n}\n\n");
-                    (String::from("BoardDisplay"), Some("BoardDisplay"))
-                }
-            };
-            source.push_str(&format!(
-                "impl {path} for GeneratedPeripherals {{\n    type {associated} = {peripheral_type};\n    fn {function}(&mut self, instance: ::barracuda_board_hal::Instance) -> Option<Self::{associated}> {{\n        match instance.index() {{\n"
-            ));
-            for (index, device) in devices.iter().enumerate() {
-                let take = match wrap {
-                    Some(set) => format!(
-                        "self.{}.take().map({set}::{})",
-                        device.field, device.error_variant
-                    ),
-                    None => format!("self.{}.take()", device.field),
-                };
-                source.push_str(&format!("            {index} => {take},\n"));
-            }
-            source.push_str("            _ => None,\n        }\n    }\n}\n\n");
-        }
-        if !primary_peripherals.contains("led-strip") {
-            source.push_str(
-                "impl ::barracuda_board_hal::led_strip::LedStripPeripheral for GeneratedPeripherals {\n    type LedStrip = ::barracuda_board_hal::UnavailableLedStrip;\n    fn take_led_strip(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::LedStrip> { None }\n}\n\n",
-            );
-        }
-        if !primary_peripherals.contains("camera") {
-            source.push_str(
-                "impl ::barracuda_board_hal::camera::CameraPeripheral for GeneratedPeripherals {\n    type Camera = ::barracuda_board_hal::UnavailableCamera;\n    fn take_camera(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::Camera> { None }\n}\n\n",
-            );
-        }
-        if !primary_peripherals.contains("display") {
-            source.push_str(
-                "impl ::barracuda_board_hal::display::DisplayPeripheral for GeneratedPeripherals {\n    type Display = ::barracuda_board_hal::UnavailableDisplay;\n    fn take_display(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::Display> { None }\n}\n\n",
-            );
-        }
-        if !primary_peripherals.contains("audio-codec") {
-            source.push_str(
-                "impl ::barracuda_board_hal::audio::AudioCodecPeripheral for GeneratedPeripherals {\n    type AudioCodec = ::barracuda_board_hal::UnavailableAudioCodec;\n    fn take_audio_codec(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::AudioCodec> { None }\n}\n\n",
-            );
-        }
-        if !primary_peripherals.contains("inertial-measurement") {
-            source.push_str(
-                "impl ::barracuda_board_hal::imu::ImuPeripheral for GeneratedPeripherals {\n    type Imu = ::barracuda_board_hal::UnavailableImu;\n    fn take_imu(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::Imu> { None }\n}\n\n",
-            );
-        }
-        if !primary_peripherals.contains("removable-storage") {
-            source.push_str(
+        match kinds.get(REMOVABLE_STORAGE).map(Vec::as_slice) {
+            // System owns the removable slot and takes it without an instance.
+            Some([device]) => source.push_str(&format!(
+                "impl ::barracuda_board_hal::removable_storage::RemovableStoragePeripheral for GeneratedPeripherals {{\n    type RemovableStorage = {};\n    fn take_removable_storage(&mut self) -> Option<Self::RemovableStorage> {{ self.{}.take() }}\n}}\n\n",
+                device.alias, device.field
+            )),
+            _ => source.push_str(
                 "impl ::barracuda_board_hal::removable_storage::RemovableStoragePeripheral for GeneratedPeripherals {\n    type RemovableStorage = ::barracuda_board_hal::UnavailableRemovableStorage;\n    fn take_removable_storage(&mut self) -> Option<Self::RemovableStorage> { None }\n}\n\n",
-            );
-        }
-        if !primary_peripherals.contains("power-monitor") {
-            source.push_str(
-                "impl ::barracuda_board_hal::power::PowerMonitorPeripheral for GeneratedPeripherals {\n    type PowerMonitor = ::barracuda_board_hal::UnavailablePowerMonitor;\n    fn take_power_monitor(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::PowerMonitor> { None }\n}\n\n",
-            );
-        }
-        if !primary_peripherals.contains("real-time-clock") {
-            source.push_str(
-                "impl ::barracuda_board_hal::real_time_clock::RealTimeClockPeripheral for GeneratedPeripherals {\n    type RealTimeClock = ::barracuda_board_hal::UnavailableRealTimeClock;\n    fn take_real_time_clock(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::RealTimeClock> { None }\n}\n\n",
-            );
-        }
-        if !primary_peripherals.contains("touch") {
-            source.push_str(
-                "impl ::barracuda_board_hal::touch::TouchPeripheral for GeneratedPeripherals {\n    type Touch = ::barracuda_board_hal::UnavailableTouch;\n    fn take_touch(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::Touch> { None }\n}\n\n",
-            );
-        }
-        for (peripheral_api, trait_path, function, associated, unavailable) in [
-            (
-                "buzzer",
-                "buzzer::BuzzerPeripheral",
-                "take_buzzer",
-                "Buzzer",
-                "UnavailableBuzzer",
             ),
-            (
-                "vibration",
-                "vibration::VibrationPeripheral",
-                "take_vibration",
-                "Vibration",
-                "UnavailableVibration",
-            ),
-            (
-                "infrared",
-                "infrared::InfraredPeripheral",
-                "take_infrared",
-                "Infrared",
-                "UnavailableInfrared",
-            ),
-        ] {
-            if !primary_peripherals.contains(peripheral_api) {
-                source.push_str(&format!(
-                    "impl ::barracuda_board_hal::{trait_path} for GeneratedPeripherals {{\n    type {associated} = ::barracuda_board_hal::{unavailable};\n    fn {function}(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::{associated}> {{ None }}\n}}\n\n"
-                ));
-            }
         }
-        if !primary_peripherals.contains("buttons") {
-            source.push_str(
-                "impl ::barracuda_board_hal::buttons::ButtonsPeripheral for GeneratedPeripherals {\n    type Buttons = ::barracuda_board_hal::UnavailableButtons;\n    fn take_buttons(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::Buttons> { None }\n}\n\n",
-            );
-        }
-        if !primary_peripherals.contains("environment-sensor") {
-            source.push_str(
-                "impl ::barracuda_board_hal::environment::EnvironmentSensorPeripheral for GeneratedPeripherals {\n    type EnvironmentSensor = ::barracuda_board_hal::UnavailableEnvironmentSensor;\n    fn take_environment_sensor(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::EnvironmentSensor> { None }\n}\n\n",
-            );
-        }
-        if !primary_peripherals.contains("keyboard") {
-            source.push_str(
-                "impl ::barracuda_board_hal::keyboard::KeyboardPeripheral for GeneratedPeripherals {\n    type Keyboard = ::barracuda_board_hal::UnavailableKeyboard;\n    fn take_keyboard(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::Keyboard> { None }\n}\n\n",
-            );
-        }
-        if !primary_peripherals.contains("rotary-encoder") {
-            source.push_str(
-                "impl ::barracuda_board_hal::rotary_encoder::RotaryEncoderPeripheral for GeneratedPeripherals {\n    type RotaryEncoder = ::barracuda_board_hal::UnavailableRotaryEncoder;\n    fn take_rotary_encoder(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::RotaryEncoder> { None }\n}\n\n",
+        for claimable in CLAIMABLE_KINDS {
+            render_claimable_kind(
+                &mut source,
+                claimable,
+                kinds.get(claimable.kind).map_or(&[], Vec::as_slice),
             );
         }
     }
@@ -2025,7 +1989,9 @@ fn render_generic_hal(
         runtime_i2s_controllers.len(),
     ));
 
-    if rendered.is_empty() && state.binding_errors.is_empty() {
+    // Only a bus or controller the Board's devices share fails the Board: a
+    // device that fails to initialize is logged and left absent.
+    if state.binding_errors.is_empty() {
         source.push_str("type GeneratedBoardError = core::convert::Infallible;\n\n");
     } else {
         source.push_str(
@@ -2034,24 +2000,11 @@ fn render_generic_hal(
         for (variant, ty) in &state.binding_errors {
             source.push_str(&format!("    {variant}({ty}),\n"));
         }
-        for peripheral in &rendered {
-            source.push_str(&format!(
-                "    {}(<{}Factory as PeripheralImplementation>::Error),\n",
-                peripheral.error_variant, peripheral.error_variant
-            ));
-        }
         source.push_str("}\n\nimpl fmt::Display for GeneratedBoardError {\n    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {\n        match self {\n");
         for (variant, _) in &state.binding_errors {
             source.push_str(&format!(
                 "            Self::{variant}(error) => write!(formatter, {:?}, error),\n",
                 format!("failed to construct `{}` binding", variant) + ": {:?}"
-            ));
-        }
-        for peripheral in &rendered {
-            source.push_str(&format!(
-                "            Self::{}(error) => write!(formatter, {:?}, error),\n",
-                peripheral.error_variant,
-                format!("failed to initialize `{}`: {{:?}}", peripheral.name)
             ));
         }
         source.push_str(
@@ -2121,12 +2074,15 @@ fn render_generic_hal(
     }
     for peripheral in &rendered {
         source.push_str(&format!(
-            "        let {} = <{}Factory as PeripheralImplementation>::initialize({}, {}).await.map_err(GeneratedBoardError::{})?;\n",
+            "        let {} = match <{}Factory as PeripheralImplementation>::initialize({}, {}).await {{\n            Ok(peripheral) => Some(peripheral),\n            Err(error) => {{\n                ::barracuda_board_hal::__private::log::error!({:?}, error);\n                None\n            }}\n        }};\n",
             peripheral.field,
             peripheral.error_variant,
             peripheral.bindings,
             peripheral.config,
-            peripheral.error_variant,
+            format!(
+                "Board peripheral `{}` ({}) failed to initialize; the Board starts without it: {{:?}}",
+                peripheral.name, peripheral.implementation
+            ),
         ));
     }
     if rendered.is_empty() {
@@ -2134,10 +2090,7 @@ fn render_generic_hal(
     } else {
         source.push_str("        let peripherals = GeneratedPeripherals {\n");
         for peripheral in &rendered {
-            source.push_str(&format!(
-                "            {}: Some({}),\n",
-                peripheral.field, peripheral.field
-            ));
+            source.push_str(&format!("            {},\n", peripheral.field));
         }
         source.push_str("        };\n");
     }
@@ -2233,6 +2186,71 @@ fn render_generic_hal(
     source.push_str("        Ok(BoardResources::new(peripherals, exposed_io))\n    }\n}\n}\n\n");
     source.push_str("pub use generated_board_hal::*;\n");
     Ok(source)
+}
+
+/// Implements one claimable kind's `<Kind>Peripheral` trait for the Board's
+/// devices of that kind.
+///
+/// One device is taken as its concrete type. Several become one enum the
+/// kind's set macro declares, its variants named after the devices, so a
+/// Plugin's slot type stays the same whichever device its instance names. A
+/// kind the Board lacks takes nothing.
+fn render_claimable_kind(
+    source: &mut String,
+    claimable: &ClaimableKind,
+    devices: &[&RenderedPeripheral],
+) {
+    let ClaimableKind {
+        peripheral_trait,
+        take,
+        associated,
+        unavailable,
+        set_macro,
+        set_errors,
+        ..
+    } = claimable;
+    let (peripheral_type, set) = match devices {
+        [] => {
+            source.push_str(&format!(
+                "impl ::barracuda_board_hal::{peripheral_trait} for GeneratedPeripherals {{\n    type {associated} = ::barracuda_board_hal::{unavailable};\n    fn {take}(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::{associated}> {{ None }}\n}}\n\n"
+            ));
+            return;
+        }
+        [device] => (device.alias.clone(), None),
+        _ => {
+            let set = format!("Board{associated}");
+            let errors = set_errors
+                .iter()
+                .map(|suffix| format!("{set}{suffix}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            source.push_str(&format!(
+                "::barracuda_board_hal::{set_macro}! {{\n    pub enum {set}, {errors} {{\n"
+            ));
+            for device in devices {
+                source.push_str(&format!(
+                    "        {}({}),\n",
+                    device.error_variant, device.alias
+                ));
+            }
+            source.push_str("    }\n}\n\n");
+            (set.clone(), Some(set))
+        }
+    };
+    source.push_str(&format!(
+        "impl ::barracuda_board_hal::{peripheral_trait} for GeneratedPeripherals {{\n    type {associated} = {peripheral_type};\n    fn {take}(&mut self, instance: ::barracuda_board_hal::Instance) -> Option<Self::{associated}> {{\n        match instance.index() {{\n"
+    ));
+    for (index, device) in devices.iter().enumerate() {
+        let taken = match &set {
+            Some(set) => format!(
+                "self.{}.take().map({set}::{})",
+                device.field, device.error_variant
+            ),
+            None => format!("self.{}.take()", device.field),
+        };
+        source.push_str(&format!("            {index} => {taken},\n"));
+    }
+    source.push_str("            _ => None,\n        }\n    }\n}\n\n");
 }
 
 /// Renders the Board declaration of one peripheral as a
