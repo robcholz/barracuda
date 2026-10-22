@@ -10,6 +10,9 @@ use barracuda_peripheral::{
         Display, DisplayDescriptor, DisplayFeatures, DisplayOrientation, DisplayPeripheral,
         DisplayPower, DisplayTechnology, PixelFormat, RefreshMode, RefreshRequest,
     },
+    environment::{
+        EnvironmentReading, EnvironmentSensor, EnvironmentSensorPeripheral, Quantities, Quantity,
+    },
     imu::{AxisTransform, Imu, ImuDescriptor, ImuPeripheral, ImuSample, SignedAxis, Vector3},
     indicator::Indicator,
     power::{PowerMeasurement, PowerMonitor, PowerMonitorPeripheral},
@@ -334,4 +337,86 @@ fn a_display_set_forwards_to_the_display_it_holds() {
     assert_eq!(front.drawn, [Rgb565::new(1, 2, 3)]);
     assert_eq!(back.drawn, [Rgb565::new(1, 2, 3)]);
     assert_eq!((front.brightness, back.brightness), (200, 200));
+}
+
+/// Two chips behind one environment device, as a composing implementation
+/// presents them.
+struct CustomEnvironmentSensor;
+
+impl EnvironmentSensor for CustomEnvironmentSensor {
+    type Error = Infallible;
+
+    fn quantities(&self) -> Quantities {
+        Quantities::EMPTY
+            .with(Quantity::Temperature)
+            .with(Quantity::RelativeHumidity)
+            .union([Quantity::Co2, Quantity::Pm2_5].into_iter().collect())
+    }
+
+    async fn read(&mut self) -> Result<EnvironmentReading, Self::Error> {
+        let particulate = EnvironmentReading {
+            temperature_millicelsius: Some(21_500),
+            pm2_5_ng_per_m3: Some(3_400),
+            ..EnvironmentReading::EMPTY
+        };
+        let carbon_dioxide = EnvironmentReading {
+            temperature_millicelsius: Some(22_000),
+            relative_humidity_millipercent: Some(45_000),
+            co2_ppm: None,
+            ..EnvironmentReading::default()
+        };
+        Ok(particulate.or(carbon_dioxide))
+    }
+}
+
+struct EnvironmentPeripherals(Option<CustomEnvironmentSensor>);
+
+impl EnvironmentSensorPeripheral for EnvironmentPeripherals {
+    type EnvironmentSensor = CustomEnvironmentSensor;
+
+    fn take_environment_sensor(&mut self, _instance: Instance) -> Option<Self::EnvironmentSensor> {
+        self.0.take()
+    }
+}
+
+#[test]
+fn an_environment_sensor_reports_its_quantities_and_merges_chip_readings() {
+    let mut peripherals = EnvironmentPeripherals(Some(CustomEnvironmentSensor));
+    let mut sensor = peripherals
+        .take_environment_sensor(Instance::new(0))
+        .expect("one environment sensor owner");
+    assert!(
+        peripherals
+            .take_environment_sensor(Instance::new(0))
+            .is_none()
+    );
+
+    let quantities = sensor.quantities();
+    assert_eq!(quantities.len(), 4);
+    assert_eq!(
+        quantities.iter().map(Quantity::name).collect::<Vec<_>>(),
+        ["temperature", "relative_humidity", "co2", "pm2_5"]
+    );
+    assert!(!quantities.contains(Quantity::Illuminance));
+
+    let reading = ready(sensor.read()).expect("read");
+    // The first chip's temperature wins; the second fills humidity; CO2 has
+    // no value yet.
+    assert_eq!(reading.value(Quantity::Temperature), Some(21_500));
+    assert_eq!(reading.value(Quantity::RelativeHumidity), Some(45_000));
+    assert_eq!(reading.value(Quantity::Co2), None);
+    assert_eq!(
+        reading.quantities(),
+        [
+            Quantity::Temperature,
+            Quantity::RelativeHumidity,
+            Quantity::Pm2_5
+        ]
+        .into_iter()
+        .collect()
+    );
+    for quantity in Quantity::ALL {
+        assert_eq!(Quantity::from_name(quantity.name()), Some(quantity));
+    }
+    assert_eq!(Quantity::from_name("humidity"), None);
 }

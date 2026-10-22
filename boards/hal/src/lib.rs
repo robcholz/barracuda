@@ -34,6 +34,8 @@ pub use barracuda_peripheral::buttons;
 pub use barracuda_peripheral::camera;
 /// Stable attached display peripheral API.
 pub use barracuda_peripheral::display;
+/// Stable attached environment-sensor peripheral API.
+pub use barracuda_peripheral::environment;
 /// Stable attached inertial-measurement peripheral API.
 pub use barracuda_peripheral::imu;
 /// Stable attached indicator peripheral API.
@@ -578,6 +580,31 @@ impl buttons::ButtonsPeripheral for NoPeripherals {
     type Buttons = UnavailableButtons;
 
     fn take_buttons(&mut self, _instance: Instance) -> Option<Self::Buttons> {
+        None
+    }
+}
+
+/// Uninhabited environment sensor used when a Board declares none.
+pub struct UnavailableEnvironmentSensor {
+    never: Infallible,
+}
+
+impl environment::EnvironmentSensor for UnavailableEnvironmentSensor {
+    type Error = Infallible;
+
+    fn quantities(&self) -> environment::Quantities {
+        match self.never {}
+    }
+
+    async fn read(&mut self) -> Result<environment::EnvironmentReading, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl environment::EnvironmentSensorPeripheral for NoPeripherals {
+    type EnvironmentSensor = UnavailableEnvironmentSensor;
+
+    fn take_environment_sensor(&mut self, _instance: Instance) -> Option<Self::EnvironmentSensor> {
         None
     }
 }

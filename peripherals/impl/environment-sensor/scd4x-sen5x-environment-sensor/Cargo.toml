@@ -1,0 +1,28 @@
+[package]
+name = "barracuda-scd4x-sen5x-environment-sensor"
+version = "0.1.0"
+edition = "2024"
+description = "Environment sensor composing an SCD4x CO2 sensor and a SEN5x environmental sensor node over embedded-hal I2C"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-scd4x.workspace = true
+barracuda-driver-sen5x.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

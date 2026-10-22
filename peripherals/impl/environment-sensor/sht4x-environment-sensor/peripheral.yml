@@ -1,0 +1,18 @@
+id: sht4x-environment-sensor
+api-version: 1
+peripheral: environment-sensor
+implementation:
+  package: barracuda-sht4x-environment-sensor
+  crate: barracuda_sht4x_environment_sensor
+  factory: "::{{crate}}::Sht4xEnvironmentSensorImplementation<{{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Sht4xBindings::new({{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Sht4xConfig::new({{parameter.address}})"
+# A Sensirion SHT40, SHT41, SHT43, or SHT45: temperature and relative humidity.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 44h for the SHT40-AD1B; other variants answer at 45h or 46h.
+    default: 68

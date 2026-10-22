@@ -1575,3 +1575,269 @@ pub mod imu {
         fn take_imu(&mut self, instance: crate::Instance) -> Option<Self::Imu>;
     }
 }
+
+/// Stable environmental-sensing peripheral API.
+///
+/// One environment sensor reports whichever ambient quantities its chips
+/// measure: air temperature and humidity, CO2, particulate matter, VOC and
+/// NOx indices, illuminance, and proximity. A product with several such
+/// chips presents them as one device whose implementation composes the
+/// chips, so its [`Quantities`] are the union of theirs.
+pub mod environment {
+    use core::future::Future;
+
+    /// One ambient quantity an environment sensor can report, with the
+    /// integer unit [`EnvironmentReading`] carries it in.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+    pub enum Quantity {
+        /// Air temperature in milli-degrees Celsius.
+        Temperature,
+        /// Relative humidity in thousandths of a percent.
+        RelativeHumidity,
+        /// Carbon dioxide concentration in parts per million.
+        Co2,
+        /// PM1.0 particulate mass concentration in nanograms per cubic metre.
+        Pm1_0,
+        /// PM2.5 particulate mass concentration in nanograms per cubic metre.
+        Pm2_5,
+        /// PM4.0 particulate mass concentration in nanograms per cubic metre.
+        Pm4_0,
+        /// PM10 particulate mass concentration in nanograms per cubic metre.
+        Pm10,
+        /// Sensirion VOC index (1 through 500) in thousandths.
+        VocIndex,
+        /// Sensirion NOx index (1 through 500) in thousandths.
+        NoxIndex,
+        /// Ambient illuminance in millilux.
+        Illuminance,
+        /// Proximity in the sensor's raw counts; larger is nearer.
+        Proximity,
+    }
+
+    impl Quantity {
+        /// Every quantity, in the stable order [`Quantities::iter`] uses.
+        pub const ALL: [Self; 11] = [
+            Self::Temperature,
+            Self::RelativeHumidity,
+            Self::Co2,
+            Self::Pm1_0,
+            Self::Pm2_5,
+            Self::Pm4_0,
+            Self::Pm10,
+            Self::VocIndex,
+            Self::NoxIndex,
+            Self::Illuminance,
+            Self::Proximity,
+        ];
+
+        /// Returns the stable lowercase name scripts and logs use.
+        #[must_use]
+        pub const fn name(self) -> &'static str {
+            match self {
+                Self::Temperature => "temperature",
+                Self::RelativeHumidity => "relative_humidity",
+                Self::Co2 => "co2",
+                Self::Pm1_0 => "pm1_0",
+                Self::Pm2_5 => "pm2_5",
+                Self::Pm4_0 => "pm4_0",
+                Self::Pm10 => "pm10",
+                Self::VocIndex => "voc_index",
+                Self::NoxIndex => "nox_index",
+                Self::Illuminance => "illuminance",
+                Self::Proximity => "proximity",
+            }
+        }
+
+        /// Finds the quantity with the stable `name`.
+        #[must_use]
+        pub fn from_name(name: &str) -> Option<Self> {
+            Self::ALL
+                .into_iter()
+                .find(|quantity| quantity.name() == name)
+        }
+
+        const fn bit(self) -> u16 {
+            1 << (self as u16)
+        }
+    }
+
+    /// A set of quantities: what a sensor reports.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+    pub struct Quantities(u16);
+
+    impl Quantities {
+        /// The empty set.
+        pub const EMPTY: Self = Self(0);
+
+        /// Returns this set with `quantity` added.
+        #[must_use]
+        pub const fn with(self, quantity: Quantity) -> Self {
+            Self(self.0 | quantity.bit())
+        }
+
+        /// Returns every quantity in either set.
+        #[must_use]
+        pub const fn union(self, other: Self) -> Self {
+            Self(self.0 | other.0)
+        }
+
+        /// Returns whether the set holds `quantity`.
+        #[must_use]
+        pub const fn contains(self, quantity: Quantity) -> bool {
+            self.0 & quantity.bit() != 0
+        }
+
+        /// Returns whether the set holds no quantity.
+        #[must_use]
+        pub const fn is_empty(self) -> bool {
+            self.0 == 0
+        }
+
+        /// Returns the number of quantities in the set.
+        #[must_use]
+        pub const fn len(self) -> usize {
+            self.0.count_ones() as usize
+        }
+
+        /// Iterates the set in [`Quantity::ALL`] order.
+        pub fn iter(self) -> impl Iterator<Item = Quantity> {
+            Quantity::ALL
+                .into_iter()
+                .filter(move |quantity| self.contains(*quantity))
+        }
+    }
+
+    impl FromIterator<Quantity> for Quantities {
+        fn from_iter<I: IntoIterator<Item = Quantity>>(iter: I) -> Self {
+            iter.into_iter().fold(Self::EMPTY, Self::with)
+        }
+    }
+
+    /// One reading in integer SI subunits. A quantity the sensor does not
+    /// measure, or has no valid value for yet (a CO2 sensor's first
+    /// measurement period, a gas index's warm-up), is `None`.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct EnvironmentReading {
+        /// Air temperature in milli-degrees Celsius.
+        pub temperature_millicelsius: Option<i32>,
+        /// Relative humidity in thousandths of a percent, 0 through 100 000.
+        pub relative_humidity_millipercent: Option<u32>,
+        /// Carbon dioxide concentration in parts per million.
+        pub co2_ppm: Option<u32>,
+        /// PM1.0 mass concentration in nanograms per cubic metre.
+        pub pm1_0_ng_per_m3: Option<u32>,
+        /// PM2.5 mass concentration in nanograms per cubic metre.
+        pub pm2_5_ng_per_m3: Option<u32>,
+        /// PM4.0 mass concentration in nanograms per cubic metre.
+        pub pm4_0_ng_per_m3: Option<u32>,
+        /// PM10 mass concentration in nanograms per cubic metre.
+        pub pm10_ng_per_m3: Option<u32>,
+        /// VOC index in thousandths, 1 000 through 500 000.
+        pub voc_index_milli: Option<u32>,
+        /// NOx index in thousandths, 1 000 through 500 000.
+        pub nox_index_milli: Option<u32>,
+        /// Ambient illuminance in millilux.
+        pub illuminance_millilux: Option<u32>,
+        /// Proximity in the sensor's raw counts; larger is nearer.
+        pub proximity_counts: Option<u32>,
+    }
+
+    impl EnvironmentReading {
+        /// A reading with no value.
+        pub const EMPTY: Self = Self {
+            temperature_millicelsius: None,
+            relative_humidity_millipercent: None,
+            co2_ppm: None,
+            pm1_0_ng_per_m3: None,
+            pm2_5_ng_per_m3: None,
+            pm4_0_ng_per_m3: None,
+            pm10_ng_per_m3: None,
+            voc_index_milli: None,
+            nox_index_milli: None,
+            illuminance_millilux: None,
+            proximity_counts: None,
+        };
+
+        /// Returns one quantity's value in its [`Quantity`] unit.
+        #[must_use]
+        pub fn value(&self, quantity: Quantity) -> Option<i64> {
+            let unsigned = match quantity {
+                Quantity::Temperature => {
+                    return self.temperature_millicelsius.map(i64::from);
+                }
+                Quantity::RelativeHumidity => self.relative_humidity_millipercent,
+                Quantity::Co2 => self.co2_ppm,
+                Quantity::Pm1_0 => self.pm1_0_ng_per_m3,
+                Quantity::Pm2_5 => self.pm2_5_ng_per_m3,
+                Quantity::Pm4_0 => self.pm4_0_ng_per_m3,
+                Quantity::Pm10 => self.pm10_ng_per_m3,
+                Quantity::VocIndex => self.voc_index_milli,
+                Quantity::NoxIndex => self.nox_index_milli,
+                Quantity::Illuminance => self.illuminance_millilux,
+                Quantity::Proximity => self.proximity_counts,
+            };
+            unsigned.map(i64::from)
+        }
+
+        /// Returns the quantities that hold a value.
+        #[must_use]
+        pub fn quantities(&self) -> Quantities {
+            Quantity::ALL
+                .into_iter()
+                .filter(|quantity| self.value(*quantity).is_some())
+                .collect()
+        }
+
+        /// Fills each quantity this reading lacks from `other`; a value
+        /// this reading holds is kept. A sensor that composes several chips
+        /// merges their readings in priority order this way.
+        #[must_use]
+        pub fn or(self, other: Self) -> Self {
+            Self {
+                temperature_millicelsius: self
+                    .temperature_millicelsius
+                    .or(other.temperature_millicelsius),
+                relative_humidity_millipercent: self
+                    .relative_humidity_millipercent
+                    .or(other.relative_humidity_millipercent),
+                co2_ppm: self.co2_ppm.or(other.co2_ppm),
+                pm1_0_ng_per_m3: self.pm1_0_ng_per_m3.or(other.pm1_0_ng_per_m3),
+                pm2_5_ng_per_m3: self.pm2_5_ng_per_m3.or(other.pm2_5_ng_per_m3),
+                pm4_0_ng_per_m3: self.pm4_0_ng_per_m3.or(other.pm4_0_ng_per_m3),
+                pm10_ng_per_m3: self.pm10_ng_per_m3.or(other.pm10_ng_per_m3),
+                voc_index_milli: self.voc_index_milli.or(other.voc_index_milli),
+                nox_index_milli: self.nox_index_milli.or(other.nox_index_milli),
+                illuminance_millilux: self.illuminance_millilux.or(other.illuminance_millilux),
+                proximity_counts: self.proximity_counts.or(other.proximity_counts),
+            }
+        }
+    }
+
+    /// Semantic ambient-environment sensor peripheral.
+    pub trait EnvironmentSensor {
+        /// Concrete transport or measurement failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns the quantities this sensor reports; fixed once initialized.
+        fn quantities(&self) -> Quantities;
+
+        /// Reads the latest value of every reported quantity. The future
+        /// never waits for a gas index or a CO2 sensor to warm up: such a
+        /// quantity is `None` until its chip has a valid value.
+        fn read(&mut self) -> impl Future<Output = Result<EnvironmentReading, Self::Error>> + '_;
+    }
+
+    /// Move-only access to the Board's attached environment sensor.
+    pub trait EnvironmentSensorPeripheral {
+        /// Concrete, statically dispatched environment sensor.
+        type EnvironmentSensor: EnvironmentSensor;
+
+        /// Transfers the claimed environment sensor `instance` to its Plugin
+        /// once; `None` when the Board has no such device or it was already
+        /// taken.
+        fn take_environment_sensor(
+            &mut self,
+            instance: crate::Instance,
+        ) -> Option<Self::EnvironmentSensor>;
+    }
+}
