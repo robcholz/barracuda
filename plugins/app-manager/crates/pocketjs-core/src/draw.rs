@@ -3397,8 +3397,24 @@ impl<'a> Walker<'a> {
                 });
             }
         }
-        if !node.soft_breaks.is_empty() {
-            run = crate::text::with_soft_breaks(&run, &node.soft_breaks);
+        // Live text paints the rows its layout chose; text in a static rect
+        // breaks at the rect it was given.
+        let static_breaks;
+        let breaks = if node.layout_mode == crate::tree::LAYOUT_LIVE {
+            &node.soft_breaks
+        } else {
+            static_breaks = crate::text::static_soft_breaks(
+                self.fonts,
+                &run,
+                node.text_native,
+                slot,
+                r.tracking,
+                crate::text::content_width(box_w, &r.padding),
+            );
+            &static_breaks
+        };
+        if !breaks.is_empty() {
+            run = crate::text::with_soft_breaks(&run, breaks);
         }
         // The node's measurement provider was RECORDED at layout time
         // (layout.rs build(): native iff a measurer is installed, tracking

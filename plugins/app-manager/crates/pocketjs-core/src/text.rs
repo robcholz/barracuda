@@ -672,6 +672,35 @@ pub fn soft_wrap(units: &[WrapUnit], max_w: f32, mut breaks: Option<&mut Vec<u32
     rows
 }
 
+/// How much wider than its rect a run in a static rect may be before it
+/// wraps: the build rounded the rect from the width it wrapped the run at.
+const STATIC_SLACK: f32 = 1.0;
+
+/// Soft breaks of a run in a box no solver sized (a static rect a build
+/// solved): the rows it takes at `content_w`, the box's width inside its
+/// padding. Empty without soft wrap.
+pub fn static_soft_breaks(
+    fonts: &Fonts,
+    run: &str,
+    native: bool,
+    slot: u8,
+    tracking: f32,
+    content_w: f32,
+) -> Vec<u32> {
+    let mut breaks = Vec::new();
+    if fonts.soft_wrap {
+        let (units, _) = fonts.wrap_units(native, run, slot, tracking);
+        soft_wrap(&units, content_w + STATIC_SLACK, Some(&mut breaks));
+    }
+    breaks
+}
+
+/// The width inside a box's horizontal padding.
+pub fn content_width(box_w: f32, padding: &[f32; 4]) -> f32 {
+    let edge = |value: f32| if value.is_nan() { 0.0 } else { value };
+    box_w - edge(padding[1]) - edge(padding[3])
+}
+
 /// `run` broken into the rows `soft_wrap` chose: a line break at each byte
 /// offset in `breaks`, with the spaces a row hangs dropped.
 pub fn with_soft_breaks(run: &str, breaks: &[u32]) -> alloc::string::String {

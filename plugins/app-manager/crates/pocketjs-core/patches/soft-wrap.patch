@@ -14,19 +14,39 @@ the layout does it in the same solve, the way a browser does:
 - Readback records where each row starts (`Node::soft_breaks`,
   `Ui::node_soft_breaks`), and paint draws those rows, dropping the spaces a
   row hangs. Node text is unchanged.
+- Text in a static rect (`layout-baked`) has no solver node: paint breaks it
+  at the rect's width, allowing the pixel the build rounded the rect by. A
+  build that solves the rects with soft wrap on gets the rows the device
+  draws.
 
 It is off by default, so upstream layouts and goldens do not change.
 
 diff --git a/draw.rs b/draw.rs
-index c1012b3..e8c44eb 100644
+index c1012b3..05ef928 100644
 --- a/draw.rs
 +++ b/draw.rs
-@@ -3397,6 +3397,9 @@ impl<'a> Walker<'a> {
+@@ -3397,6 +3397,25 @@ impl<'a> Walker<'a> {
                  });
              }
          }
-+        if !node.soft_breaks.is_empty() {
-+            run = crate::text::with_soft_breaks(&run, &node.soft_breaks);
++        // Live text paints the rows its layout chose; text in a static rect
++        // breaks at the rect it was given.
++        let static_breaks;
++        let breaks = if node.layout_mode == crate::tree::LAYOUT_LIVE {
++            &node.soft_breaks
++        } else {
++            static_breaks = crate::text::static_soft_breaks(
++                self.fonts,
++                &run,
++                node.text_native,
++                slot,
++                r.tracking,
++                crate::text::content_width(box_w, &r.padding),
++            );
++            &static_breaks
++        };
++        if !breaks.is_empty() {
++            run = crate::text::with_soft_breaks(&run, breaks);
 +        }
          // The node's measurement provider was RECORDED at layout time
          // (layout.rs build(): native iff a measurer is installed, tracking
@@ -231,26 +251,45 @@ index 8147bab..7de5ba5 100644
              compare_reference(tree, &taffy, root_slot, (0.0, 0.0), &mut out);
          }
 diff --git a/lib.rs b/lib.rs
-index f7c9898..a35eb9a 100644
+index f7c9898..4f72a43 100644
 --- a/lib.rs
 +++ b/lib.rs
-@@ -860,6 +860,15 @@ impl Ui {
+@@ -860,6 +860,34 @@ impl Ui {
          self.tree.get(id).map(|node| node.text.as_str())
      }
  
 +    /// Under soft wrap, the byte offset in a text node's run where each row
-+    /// after the first starts, as the last layout broke it; empty when the
-+    /// run is on its hard lines.
-+    pub fn node_soft_breaks(&self, id: i32) -> &[u32] {
-+        self.tree
-+            .get(id)
-+            .map_or(&[], |node| node.soft_breaks.as_slice())
++    /// after the first starts, as paint draws it: the rows the last layout
++    /// chose, or those of the static rect a build gave it. Empty when the run
++    /// is on its hard lines.
++    pub fn node_soft_breaks(&self, id: i32) -> Vec<u32> {
++        let Some(slot) = self.tree.resolve(id) else {
++            return Vec::new();
++        };
++        let node = &self.tree.slots[slot as usize];
++        if node.node_type != spec::NodeType::Text as u8 {
++            return Vec::new();
++        }
++        if node.layout_mode == tree::LAYOUT_LIVE {
++            return node.soft_breaks.clone();
++        }
++        let mut run = alloc::string::String::new();
++        self.tree.collect_run(slot, &mut run);
++        let resolved = style::resolve(node, &self.styles, true);
++        text::static_soft_breaks(
++            &self.fonts,
++            &run,
++            node.text_native,
++            resolved.font_slot as u8,
++            resolved.tracking,
++            text::content_width(node.layout.w, &resolved.padding),
++        )
 +    }
 +
      /// Style-table record id of a node (spec::STYLE_ID_NONE when unstyled).
      /// Native presenters match mounted conditional branches by it.
      pub fn node_style(&self, id: i32) -> Option<i32> {
-@@ -2097,6 +2106,17 @@ impl Ui {
+@@ -2097,6 +2125,17 @@ impl Ui {
          self.fonts.set_native_wrap(f);
      }
  
@@ -269,7 +308,7 @@ index f7c9898..a35eb9a 100644
      /// Defaults to the PSP's 480x272; desktop hosts call this with their
      /// surface size. Values are clamped to the DrawList's i16 coordinate
 diff --git a/text.rs b/text.rs
-index ca5c73f..6752aa0 100644
+index ca5c73f..5600684 100644
 --- a/text.rs
 +++ b/text.rs
 @@ -8,6 +8,10 @@
@@ -300,7 +339,7 @@ index ca5c73f..6752aa0 100644
          }
      }
  
-@@ -540,3 +547,145 @@ impl Fonts {
+@@ -540,3 +547,174 @@ impl Fonts {
          }
      }
  }
@@ -427,6 +466,35 @@ index ca5c73f..6752aa0 100644
 +        }
 +    }
 +    rows
++}
++
++/// How much wider than its rect a run in a static rect may be before it
++/// wraps: the build rounded the rect from the width it wrapped the run at.
++const STATIC_SLACK: f32 = 1.0;
++
++/// Soft breaks of a run in a box no solver sized (a static rect a build
++/// solved): the rows it takes at `content_w`, the box's width inside its
++/// padding. Empty without soft wrap.
++pub fn static_soft_breaks(
++    fonts: &Fonts,
++    run: &str,
++    native: bool,
++    slot: u8,
++    tracking: f32,
++    content_w: f32,
++) -> Vec<u32> {
++    let mut breaks = Vec::new();
++    if fonts.soft_wrap {
++        let (units, _) = fonts.wrap_units(native, run, slot, tracking);
++        soft_wrap(&units, content_w + STATIC_SLACK, Some(&mut breaks));
++    }
++    breaks
++}
++
++/// The width inside a box's horizontal padding.
++pub fn content_width(box_w: f32, padding: &[f32; 4]) -> f32 {
++    let edge = |value: f32| if value.is_nan() { 0.0 } else { value };
++    box_w - edge(padding[1]) - edge(padding[3])
 +}
 +
 +/// `run` broken into the rows `soft_wrap` chose: a line break at each byte

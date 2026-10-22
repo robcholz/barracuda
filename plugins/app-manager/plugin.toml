@@ -42,14 +42,14 @@ env = ["POCKETJS_ROOT", "CJK_FONT_DIR"]
 [tasks.baked-360]
 cwd = "."
 command = ["bun", "resources/build-app.ts", "--target", "360x360", "crates/runtime/tests/fixtures/baked", "crates/runtime/tests/fixtures/baked-360x360.bapp"]
-inputs = ["crates/runtime/tests/fixtures/baked", "resources/build-app.ts"]
+inputs = ["crates/runtime/tests/fixtures/baked", "resources/build-app.ts", "crates/pocketjs-core"]
 outputs = ["crates/runtime/tests/fixtures/baked-360x360.bapp"]
 env = ["POCKETJS_ROOT"]
 
 [tasks.baked-320]
 cwd = "."
 command = ["bun", "resources/build-app.ts", "--target", "320x240", "crates/runtime/tests/fixtures/baked", "crates/runtime/tests/fixtures/baked-320x240.bapp"]
-inputs = ["crates/runtime/tests/fixtures/baked", "resources/build-app.ts"]
+inputs = ["crates/runtime/tests/fixtures/baked", "resources/build-app.ts", "crates/pocketjs-core"]
 outputs = ["crates/runtime/tests/fixtures/baked-320x240.bapp"]
 env = ["POCKETJS_ROOT"]
 

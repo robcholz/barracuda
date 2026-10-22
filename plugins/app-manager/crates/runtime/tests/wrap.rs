@@ -60,7 +60,7 @@ fn texts(document: &Document) -> Vec<Shown> {
         for &child in core.node_children(id) {
             if let Some(text) = core.node_text(child).filter(|text| !text.is_empty()) {
                 let rows =
-                    pocketjs_core::text::with_soft_breaks(text, core.node_soft_breaks(child));
+                    pocketjs_core::text::with_soft_breaks(text, &core.node_soft_breaks(child));
                 out.push((rows, core.layout_of(child).unwrap()));
             }
             walk(core, child, out);
@@ -160,7 +160,7 @@ fn layout_breaks_where_the_wrap_text_op_does() {
         // The run is ASCII, so the op's UTF-16 columns are byte offsets.
         assert_eq!(
             core.node_soft_breaks(node),
-            core.wrap_text(LONG, slot, box_width).as_slice(),
+            core.wrap_text(LONG, slot, box_width),
             "at {width}"
         );
     }

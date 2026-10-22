@@ -861,12 +861,31 @@ impl Ui {
     }
 
     /// Under soft wrap, the byte offset in a text node's run where each row
-    /// after the first starts, as the last layout broke it; empty when the
-    /// run is on its hard lines.
-    pub fn node_soft_breaks(&self, id: i32) -> &[u32] {
-        self.tree
-            .get(id)
-            .map_or(&[], |node| node.soft_breaks.as_slice())
+    /// after the first starts, as paint draws it: the rows the last layout
+    /// chose, or those of the static rect a build gave it. Empty when the run
+    /// is on its hard lines.
+    pub fn node_soft_breaks(&self, id: i32) -> Vec<u32> {
+        let Some(slot) = self.tree.resolve(id) else {
+            return Vec::new();
+        };
+        let node = &self.tree.slots[slot as usize];
+        if node.node_type != spec::NodeType::Text as u8 {
+            return Vec::new();
+        }
+        if node.layout_mode == tree::LAYOUT_LIVE {
+            return node.soft_breaks.clone();
+        }
+        let mut run = alloc::string::String::new();
+        self.tree.collect_run(slot, &mut run);
+        let resolved = style::resolve(node, &self.styles, true);
+        text::static_soft_breaks(
+            &self.fonts,
+            &run,
+            node.text_native,
+            resolved.font_slot as u8,
+            resolved.tracking,
+            text::content_width(node.layout.w, &resolved.padding),
+        )
     }
 
     /// Style-table record id of a node (spec::STYLE_ID_NONE when unstyled).

@@ -207,10 +207,11 @@ PocketJS's platform contracts, the build resolves the app's `pocket.json`
 against the display, its size in view pixels and its density, the way
 `app.device().display` reports them, into a plan, and compiles with it:
 
-- every `layout-baked` subtree of the view is solved for that size in
-  PocketJS's own core, built for WebAssembly from the same PocketJS commit the
-  device runs, so the rects are the ones the device would compute; BVIR
-  carries them, and the device assigns them instead of solving them;
+- every `layout-baked` subtree of the view is solved for that size in the
+  core the device runs, the vendored PocketJS core with text wrap on, built
+  for WebAssembly, so the rects, wrapped text included, are the ones the
+  device would compute; BVIR carries them, and the device assigns them
+  instead of solving them, and wraps the text in them to their width;
 - the app's own font atlases are baked at the display's density;
 - the manifest records the display as `view.target`, and any other display
   lists the app as unable to run.

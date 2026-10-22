@@ -24,8 +24,9 @@
 // <width>x<height>[@<density>]` builds it for one display, the one whose
 // `app.device().display` reports that width, height and density: the build
 // resolves the app's `pocket.json` against it into a plan, solves the view's
-// `layout-baked` subtrees for that size in PocketJS's own core (built for
-// WebAssembly from the checkout), bakes the app's own fonts at that density,
+// `layout-baked` subtrees for that size in the core the device runs (the
+// vendored `pocketjs-core`, soft wrap on, built for WebAssembly with the
+// checkout's bindings), bakes the app's own fonts at that density,
 // and records the display as the manifest's `view.target`, so only that
 // display runs it.
 //
@@ -107,12 +108,38 @@ const FONT_SLOT_BYTE = 12;
 // The system fonts views without atlases of their own draw with: a targeted
 // build measures text with them.
 const systemFonts = resolve(import.meta.dir, "../../system-fonts/filesystem/resources/fonts");
-// PocketJS's core for WebAssembly, the same crate and float math the device
-// runs, so the rects a targeted build solves are the ones the device would.
+// The core the device runs, for WebAssembly: the checkout's wasm bindings
+// (`engine/wasm`) over the vendored `pocketjs-core`, which carries the
+// soft-wrap patch, with soft wrap on as the UI runtime has it. The same crate
+// and float math as the device, so the rects a targeted build solves, wrapped
+// text included, are the ones the device would.
+const vendoredCore = resolve(import.meta.dir, "../crates/pocketjs-core");
 const coreWasm = () => {
-  const built = Bun.spawnSync([process.execPath, join(pocket, "tools/wasm.ts")], { cwd: pocket, stdout: "pipe", stderr: "inherit" });
-  if (built.exitCode !== 0) process.exit(built.exitCode ?? 1);
-  return readFileSync(join(pocket, "hosts/web/pocketjs.wasm"));
+  const bindings = join(pocket, "engine/wasm");
+  const crate = resolve(import.meta.dir, "../../../target/pocketjs-wasm");
+  const write = (path: string, text: string) => {
+    if (!existsSync(path) || readFileSync(path, "utf8") !== text) writeFileSync(path, text);
+  };
+  const replace = (text: string, from: string, to: string, file: string) => {
+    if (!text.includes(from)) {
+      console.error(`${file} in POCKETJS_ROOT no longer has \`${from}\`; update build-app.ts for this PocketJS.`);
+      process.exit(1);
+    }
+    return text.replace(from, to);
+  };
+  mkdirSync(join(crate, "src"), { recursive: true });
+  const manifest = readFileSync(join(bindings, "Cargo.toml"), "utf8");
+  write(join(crate, "Cargo.toml"), `${replace(manifest, `pocketjs-core = { path = "../core" }`, `pocketjs-core = { path = ${JSON.stringify(vendoredCore)} }`, "engine/wasm/Cargo.toml")}\n[workspace]\n`);
+  if (existsSync(join(bindings, "Cargo.lock"))) write(join(crate, "Cargo.lock"), readFileSync(join(bindings, "Cargo.lock"), "utf8"));
+  const init = "UI = Some(Ui::new_with_raster_density(raster_density.max(1)));";
+  const lib = readFileSync(join(bindings, "src/lib.rs"), "utf8");
+  write(join(crate, "src/lib.rs"), replace(lib, init, `${init}\n        ui().set_soft_wrap(true);`, "engine/wasm/src/lib.rs"));
+  const built = Bun.spawnSync(["cargo", "build", "--release", "--target", "wasm32-unknown-unknown"], { cwd: crate, stdout: "inherit", stderr: "inherit" });
+  if (built.exitCode !== 0) {
+    console.error("pocketjs-wasm: cargo build failed (missing target? run: rustup target add wasm32-unknown-unknown)");
+    process.exit(built.exitCode ?? 1);
+  }
+  return readFileSync(join(crate, "target/wasm32-unknown-unknown/release/pocketjs_wasm.wasm"));
 };
 
 /** Resolves the app's `pocket.json` against `target`: the view pixels its
