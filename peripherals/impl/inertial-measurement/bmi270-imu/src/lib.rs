@@ -553,7 +553,7 @@ fn scale(raw: i16, full_scale: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used)]
+    #![allow(clippy::expect_used, clippy::arithmetic_side_effects)]
 
     extern crate std;
 
