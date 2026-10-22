@@ -75,6 +75,16 @@ peripherals:
         width: 320
         height: 240
         reset: cores3
+    # LTR-553ALS-WA ambient-light and proximity sensor at 23h on the internal
+    # bus (M5Stack CoreS3 pin map, I2C_SYS G12/G11). It shares the camera's
+    # ribbon; the implementation switches on AXP2101 ALDO3 at 3.3 V first, as
+    # M5Unified `Power_Class::begin` does.
+    environment-sensor:
+      implementation: ltr553-environment-sensor
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 35
+        power-layout: cores3
     # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
     real-time-clock:
       implementation: bm8563-rtc

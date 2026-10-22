@@ -88,6 +88,13 @@ peripherals:
     real-time-clock:
       implementation: bm8563-rtc
       bindings: { i2c: internal-i2c }
+    # SHT30 at 44h on the internal bus with the GT911, BM8563, and FM24C02
+    # (Espressif m5stack_paper board_peripherals.yaml).
+    environment-sensor:
+      implementation: sht3x-environment-sensor
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 68
     # The rocker's up, press, and down on GPIO37, GPIO38, GPIO39, active low
     # with the Board's pull-ups (M5Unified `M5Unified::update`).
     buttons:

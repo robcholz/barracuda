@@ -96,6 +96,13 @@ peripherals:
       parameters:
         output-address: 24
         input-address: 64
+    # SHT40 at 44h on the internal bus, SYS_SDA G3 / SYS_SCL G2 (M5Stack
+    # PaperColor pin map).
+    environment-sensor:
+      implementation: sht4x-environment-sensor
+      bindings: { i2c: internal }
+      parameters:
+        address: 68
     real-time-clock:
       implementation: rx8130ce-rtc
       bindings: { i2c: internal }

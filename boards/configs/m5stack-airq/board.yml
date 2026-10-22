@@ -47,6 +47,18 @@ peripherals:
         dc: GPIO3
         reset: GPIO2
         spi: display-spi
+    # SEN55 at 69h and SCD40 at 62h on the internal bus, presented as one
+    # device. GPIO10 switches the SEN55's supply on while low (M5Stack AirQ
+    # SEN55 Arduino guide: "AirQ external sensor enable pin, keep LOW").
+    environment-sensor:
+      implementation: scd4x-sen5x-environment-sensor
+      bindings:
+        i2c: internal-i2c
+        power-enable: GPIO10
+      parameters:
+        scd4x-address: 98
+        sen5x-address: 105
+        power-active-level: low
     # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
     real-time-clock:
       implementation: bm8563-rtc
