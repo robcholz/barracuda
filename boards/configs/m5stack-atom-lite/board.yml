@@ -15,6 +15,12 @@ peripherals:
         # GRB).
         data: GPIO27
         frequency-hz: 2400000
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO12, active high (Espressif `m5stack_atom_lite` ir_tx).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO12
   devices:
     # The RGB LED under the button, one LED, GRB order.
     led-strip:
@@ -30,6 +36,10 @@ peripherals:
       implementation: gpio-buttons
       bindings:
         button-1: GPIO39
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
 exposed-io:
   pins:
     # Grove port G26/G32 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).

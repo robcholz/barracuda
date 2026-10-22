@@ -9,18 +9,21 @@ native-layout:
   artifact: partitions.csv
 peripherals:
   io:
-    spi-output:
+    rmt-output:
       rgb-led-data:
         # SK6812 on GPIO2 (M5Unified `_pin_table_other0` (RGBLED); EBM `m5stack_stamp_c3`, GRB).
         # GPIO2 is a strapping pin sampled only at reset.
-        data: GPIO2
-        frequency-hz: 2400000
+        # Clocked out of RMT channel 0, so the LED takes no SPI controller
+        # from the runtime SPI pool the exposed pins use.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO2
   devices:
     # The RGB LED, one LED, GRB order.
     led-strip:
-      implementation: ws2812-spi-led-strip
+      implementation: rmt-led-strip
       bindings:
-        spi: rgb-led-data
+        data: rgb-led-data
       parameters:
         led-count: 1
         color-order: grb

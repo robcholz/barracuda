@@ -15,6 +15,13 @@ peripherals:
         # EBM `m5stack_atoms3_lite`, from Sch_M5_AtomS3_v1.0, GRB).
         data: GPIO35
         frequency-hz: 2400000
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO4, active high (Espressif `m5stack_atoms3_lite`,
+        # Sch_M5_AtomS3 "RGB & IR" block).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO4
   devices:
     # The RGB LED under the button, one LED, GRB order.
     led-strip:
@@ -30,6 +37,10 @@ peripherals:
       implementation: gpio-buttons
       bindings:
         button-1: GPIO41
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
 exposed-io:
   pins:
     # Grove (PORT.CUSTOM) G1/G2: M5Stack AtomS3 Lite pin map.

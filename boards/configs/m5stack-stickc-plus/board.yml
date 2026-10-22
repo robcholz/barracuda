@@ -35,6 +35,20 @@ peripherals:
         din: GPIO34
         sample-rate-hz: 16000
         dma-buffer-bytes: 4096
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO9, active high (Espressif `m5stack_stickc_plus` gpio_ir_tx).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO9
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO2 (M5Unified `_begin_audio` board_M5StickCPlus:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO2
   devices:
     microphone:
       # SPM1423 PDM microphone, powered by AXP192 LDOio0 at 2.8 V (M5Unified
@@ -84,6 +98,15 @@ peripherals:
         pin: GPIO10
       parameters:
         active-level: low
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
 exposed-io:
   pins:
     # Grove port G32/G33 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).

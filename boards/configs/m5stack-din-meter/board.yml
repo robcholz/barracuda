@@ -30,11 +30,22 @@ peripherals:
         # the battery on ADC1 GPIO10 through a divider of two.
         peripheral: ADC1
         pin: GPIO10
-    spi-output:
+    rmt-output:
       rgb-led-data:
         # StampS3 module WS2812B-2020 on GPIO21 (M5Unified `_pin_table_other0` (RGBLED)).
-        data: GPIO21
-        frequency-hz: 2400000
+        # Clocked out of RMT channel 0, so the LED takes no SPI controller
+        # from the runtime SPI pool the exposed pins use.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO21
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO3 (M5Unified `_begin_audio` board_M5DinMeter:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO3
   devices:
     battery:
       implementation: adc-battery-power-monitor
@@ -43,9 +54,9 @@ peripherals:
         divider-numerator: 2
     # The StampS3's RGB LED, one LED, GRB order.
     led-strip:
-      implementation: ws2812-spi-led-strip
+      implementation: rmt-led-strip
       bindings:
-        spi: rgb-led-data
+        data: rgb-led-data
       parameters:
         led-count: 1
         color-order: grb
@@ -70,6 +81,11 @@ peripherals:
       bindings:
         button-1: GPIO42
         button-2: GPIO0
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
 exposed-io:
   pins:
     # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Port B: M5Unified

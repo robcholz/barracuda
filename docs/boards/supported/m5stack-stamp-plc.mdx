@@ -33,6 +33,11 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `real-time-clock` | Real-time clock (RX8130CE) | — |
 | `buttons` | Buttons A, B, C (PI4IOE5V6408 P2, P1, P0) | — |
 | `micro-sd` | microSD card slot (FAT, SPI) | — |
+| `led-strip` | RGB LED (WS2812, GPIO21) | [`light`](/plugins/vm-led-strip) |
+| `buzzer` | Passive buzzer (GPIO44) | [`buzzer`](/plugins/vm-buzzer) |
+
+The Stamp-S3A switches the RGB LED's supply with GPIO38; the LED turns it
+on at start.
 
 The buttons share the PI4IOE5V6408 at `43h` with the display's backlight; each
 implementation configures only its own pins.

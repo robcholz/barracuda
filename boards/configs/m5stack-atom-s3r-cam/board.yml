@@ -20,6 +20,15 @@ peripherals:
         scl: GPIO0
         sda: GPIO45
         frequency-hz: 400000
+    rmt-output:
+      ir-transmit:
+        # IR LED driver `IR_LED_DRV` on GPIO47 (docs.m5stack.com AtomS3R,
+        # AtomS3R-CAM, and AtomS3R-Ext pin maps, "BMI270 & IR": the block's
+        # other pins are the BMI270 bus G0/G45 and the button G41 in
+        # M5Unified).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO47
   devices:
     inertial-measurement:
       implementation: bmi270-imu
@@ -27,6 +36,10 @@ peripherals:
       parameters:
         # BMI270 at 68h (M5Stack pin map).
         address: 104
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
 exposed-io:
   pins:
     # Grove (PORT.CUSTOM) G1/G2: M5Stack AtomS3R-CAM pin map.

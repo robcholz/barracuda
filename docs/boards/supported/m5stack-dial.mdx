@@ -33,10 +33,10 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `touch` | Touch controller (FT3267) | — |
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `buttons` | Buttons A (knob press) and B (GPIO42, GPIO0) | — |
+| `buzzer` | Passive buzzer (GPIO3) | [`buzzer`](/plugins/vm-buzzer) |
 
-This Board describes the Dial with a StampS3. Dial v1.1 carries a Stamp-S3A,
-whose RGB LED is powered through GPIO38; this Board does not drive GPIO38, so
-the LED stays dark on v1.1.
+Dial v1.1 carries a Stamp-S3A, whose RGB LED is powered through GPIO38; the
+LED switches GPIO38 on at start. On the StampS3 of v1.0 GPIO38 is unused.
 
 ## Exposed pins
 

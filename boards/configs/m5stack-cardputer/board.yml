@@ -13,9 +13,7 @@ peripherals:
     spi-device:
       card-spi:
         # M5Unified `_pin_table_sd` (board_M5Cardputer, board_M5CardputerADV);
-        # the LCD keeps SPI3. With both SPI controllers taken, none is left
-        # for an spi-output, so the StampS3's WS2812B on GPIO21 (M5Unified
-        # `_pin_table_other0`) is not declared.
+        # the LCD keeps SPI3.
         peripheral: SPI2
         sck: GPIO40
         mosi: GPIO14
@@ -48,6 +46,21 @@ peripherals:
         dout: GPIO42
         sample-rate-hz: 16000
         dma-buffer-bytes: 4096
+    rmt-output:
+      rgb-led-data:
+        # The Stamp module's WS2812B on GPIO21 (M5Unified `_pin_table_other0`
+        # (RGBLED)), on RMT channel 0 since both SPI controllers are taken.
+        # A Stamp-S3A powers it from the display backlight line, GPIO38, so
+        # it lights while the backlight is on (docs.m5stack.com Stamp-S3A).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO21
+      ir-transmit:
+        # IR LED on GPIO44, active high (Espressif `m5stack_cardputer` ir_tx;
+        # docs.m5stack.com pin map), on RMT channel 1.
+        peripheral: RMT
+        channel: 1
+        pin: GPIO44
   devices:
     micro-sd:
       implementation: spi-sd-fat-removable-storage
@@ -77,6 +90,18 @@ peripherals:
       implementation: gpio-buttons
       bindings:
         button-1: GPIO0
+    # The Stamp module's RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
 exposed-io:
   pins:
     # Grove (PORT.CUSTOM) G1/G2: M5Stack Cardputer pin map.

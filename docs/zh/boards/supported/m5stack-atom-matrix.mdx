@@ -31,6 +31,7 @@ cargo image deploy
 | `led-strip` | LED 灯带（WS2812） | [`light`](/zh/plugins/vm-led-strip) |
 | `inertial-measurement` | 运动传感器（MPU6886，较新单元为 BMI270） | [`motion`](/zh/plugins/vm-imu) |
 | `buttons` | 按键（GPIO39） | — |
+| `infrared` | 红外发射器（GPIO12） | [`infrared`](/zh/plugins/vm-infrared) |
 
 运动传感器实现先读取 MPU6886 的标识，读不到时改用 BMI270，与 M5Unified 相同；两者的 X 轴和 Z 轴都反向安装。
 

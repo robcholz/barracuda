@@ -90,6 +90,13 @@ peripherals:
       parameters:
         # RX8130CE at 32h (M5GFX probe list; M5Unified RTC_Class).
         address: 50
+    # The vibration motor on PWM channel 1 (IO9) of the M5IOE1 at 4Fh the
+    # display also uses (M5Unified `Power_Class::setVibration`).
+    vibration:
+      implementation: m5ioe1-vibration
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 79
 exposed-io:
   pins:
     # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA).

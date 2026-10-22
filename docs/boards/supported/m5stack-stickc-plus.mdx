@@ -35,6 +35,8 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `power-monitor` | Battery gauge (AXP192) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `buttons` | Buttons A and B (GPIO37, GPIO39) | — |
 | `microphone` | Microphone (SPM1423 PDM) | [`audio`](/plugins/vm-audio) |
+| `infrared` | Infrared transmitter (GPIO9) | [`infrared`](/plugins/vm-infrared) |
+| `buzzer` | Passive buzzer (GPIO2) | [`buzzer`](/plugins/vm-buzzer) |
 
 The battery gauge shares the PMIC with the display: it reads only the PMIC's
 measurement registers, and the display keeps its regulators.

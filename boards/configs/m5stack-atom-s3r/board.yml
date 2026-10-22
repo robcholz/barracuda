@@ -33,6 +33,15 @@ peripherals:
         read-frequency-hz: 8000000
         chip-select: GPIO14
         frequency-hz: 40000000
+    rmt-output:
+      ir-transmit:
+        # IR LED driver `IR_LED_DRV` on GPIO47 (docs.m5stack.com AtomS3R,
+        # AtomS3R-CAM, and AtomS3R-Ext pin maps, "BMI270 & IR": the block's
+        # other pins are the BMI270 bus G0/G45 and the button G41 in
+        # M5Unified).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO47
   devices:
     display:
       # GC9107 or ST7735S, identified from the panel's ID at start-up, lit by
@@ -57,6 +66,10 @@ peripherals:
       parameters:
         # BMI270 at 68h (M5Stack AtomS3R pin map; Espressif m5_atom_s3r).
         address: 104
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
 exposed-io:
   pins:
     # Grove (PORT.CUSTOM) G1/G2: M5Stack AtomS3R pin map.

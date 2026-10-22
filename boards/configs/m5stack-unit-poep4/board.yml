@@ -33,6 +33,13 @@ toolchain:
 native-layout:
   artifact: partitions.csv
 peripherals:
+  io:
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO14 (docs.m5stack.com Unit PoE-P4 (U213) pin map).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO14
   devices:
     # The button on GPIO45, active low with the Board's pull-up (M5Unified
     # `M5Unified::update`).
@@ -40,6 +47,10 @@ peripherals:
       implementation: gpio-buttons
       bindings:
         button-1: GPIO45
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
 exposed-io:
   pins:
     # Grove port G53/G54 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
