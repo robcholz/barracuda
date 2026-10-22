@@ -281,15 +281,91 @@ pdm-i2s-stream:
     dma-buffer-bytes: 4096
 ~~~
 
-A Board has one device of each kind except displays. A product with several
-chips of one kind presents them through one implementation that composes their
-drivers: the M5Stack AirQ's SEN55 particulate sensor and SCD40 CO2 sensor are
-one `environment-sensor` device, `scd4x-sen5x-environment-sensor`, whose
-quantities are the union of the two chips'.
+A Board may declare several devices of any kind except removable storage, and
+marks exactly one of them `primary: true`: the product's main device of that
+kind, such as the front display or the speaker's codec. A kind with one device
+needs no mark. A product whose several chips make up one device presents them
+through one implementation that composes their drivers: the M5Stack AirQ's
+SEN55 particulate sensor and SCD40 CO2 sensor are one `environment-sensor`
+device, `scd4x-sen5x-environment-sensor`, whose quantities are the union of
+the two chips'.
+
+~~~yaml
+peripherals:
+  devices:
+    front-buttons:
+      implementation: gpio-buttons
+      primary: true
+      bindings: { ... }
+    side-buttons:
+      implementation: gpio-buttons
+      bindings: { ... }
+~~~
+
+A Board has at most one `removable-storage` device. System, not a Plugin,
+takes it, without an instance, and mounts it at `/removable/<slot-id>` with one
+lifecycle task; `cargo board select` rejects a second card.
 
 Every generated semantic slot is optional. A Board with no real-time clock has
 no `RealTimeClock` value; a Board with one has `Some(concrete_clock)`. Absence
 does not require fake hardware, and presence does not expose helper chips.
+
+## Several devices of a kind
+
+Each kind's `<Kind>Peripheral` trait takes a device by `Instance`, its position
+among the Board's devices of that kind in name order, and returns one
+associated type. The generator picks that type by the number of devices:
+
+- With one device, it is the device's concrete implementation type, exactly
+  as if the kind allowed only one.
+- With several, it is a `Board<Kind>` enum with one variant per device, named
+  after it, and a `Board<Kind>Error` enum with one variant per device for each
+  error type of the kind's trait. The enum implements the kind's trait by
+  matching on the variant and forwarding the call, so dispatch stays static
+  and no trait object or allocation is involved.
+
+The enums come from one macro per kind in `peripherals/api`, re-exported by
+`boards/hal`: `buzzer_set!`, `power_monitor_set!`, `display_set!`, and so on.
+Each has the same form; `display_set!` alone names two error types, because
+`Display` has a control and a render error:
+
+~~~rust
+barracuda_board_hal::buttons_set! {
+    pub enum BoardButtons, BoardButtonsError {
+        FrontButtons(FrontButtonsPeripheral),
+        SideButtons(SideButtonsPeripheral),
+    }
+}
+~~~
+
+A Plugin takes devices through the slots it declares: a `"primary"` slot
+receives the primary device, and a `"*"` slot every device no other slot
+takes, the primary one first. The Lua packages over Board devices use one
+`"*"` slot, list their devices by Board name, and use the primary device when
+a script names none, so a script written for a Board with one device runs
+unchanged on a Board with several.
+
+## Initialization failures
+
+The generated Board composition builds every shared bus and controller first,
+then initializes each device. A device whose initialization fails is logged at
+error level through `log`, with its Board name, its implementation, and the
+error, and its slot stays empty:
+
+~~~text
+Board peripheral `<name>` (<implementation>) failed to initialize; the Board starts without it: <error>
+~~~
+
+The Board starts without that device, exactly as if it were absent: a Plugin's
+optional slot receives nothing, and the other devices work. A shared bus or
+controller that cannot be built, such as an I2C or SPI bus, an RMT
+transceiver, or a DMA buffer, is a wiring error that no device on it can work
+around: it fails Board initialization with `GeneratedBoardError`.
+
+A Plugin whose required slot is empty because its device failed returns
+`PluginError::PeripheralUnavailable` from `register`. Plugin Manager logs it,
+leaves that Plugin and every Plugin depending on it out, and starts the rest of
+System.
 
 ## Implementation manifests
 
@@ -378,6 +454,25 @@ Adding a Board that reuses existing implementations normally requires only
 existing semantic peripheral adds a chip driver when needed, one peripheral
 implementation, and its manifest. Adding a genuinely new semantic peripheral
 starts with its API trait and optional ownership slot, then adds implementations.
+
+A new kind is one additive change in four places, each next to its
+neighbours:
+
+1. `peripherals/api`: the semantic trait, its `<Kind>Peripheral` trait with a
+   `take_<kind>(instance)` function, and its `<kind>_set!` macro in
+   `src/sets.rs`, built from the shared helpers there. The macro forwards
+   every trait method, default methods included, and awaits the async ones;
+   it declares one set error type per associated error type.
+2. `boards/hal`: re-export the macro, and add the kind's `Unavailable<Kind>`
+   type and its `NoPeripherals` implementation.
+3. `peripherals/config`: register the kind in `PERIPHERAL_APIS` and add one
+   `ClaimableKind` entry to `CLAIMABLE_KINDS`, naming the trait, the take
+   function, the associated type, the unavailable type, the set macro, and
+   the set's error suffixes. The generator has no other per-kind code.
+4. Tests: a two-device case for the macro in `peripherals/api/tests/sets.rs`
+   and the kind in the `CLAIMABLE_KINDS` list of
+   `peripherals/config/tests/catalog.rs`, which checks every registered kind
+   renders a set.
 
 This keeps Board count from multiplying Rust code: reusable chip behavior,
 semantic adaptation, Platform resource construction, and product wiring each

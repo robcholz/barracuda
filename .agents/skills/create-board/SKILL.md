@@ -59,9 +59,10 @@ plugins:
   selected Platform must list each category in its `hal.bindings`.
 - Each `peripherals.devices` entry names an `implementation` that exists under
   `peripherals/impl/<kind>/<implementation-id>/peripheral.yml` and fills that
-  manifest's bindings and parameters. A Board may have several displays;
-  every other kind has at most one device. With several devices of a kind,
-  mark exactly one `primary: true`.
+  manifest's bindings and parameters. A Board may have several devices of
+  any kind except `removable-storage`; with several devices of a kind, mark
+  exactly one `primary: true`, the product's main one. A device that fails
+  to initialize at boot is logged and the Board starts without it.
 - `exposed-io.pins` names only the pins applications may claim at runtime,
   each once, by a stable name printed on the product (`port-a-sda`,
   `expansion-1`). A pin used by a peripheral is never also exposed.

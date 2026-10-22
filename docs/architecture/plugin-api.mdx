@@ -208,8 +208,9 @@ optional. A Plugin may declare several slots of one kind. Kinds are the
 `peripheral:` names of `peripherals/impl/`: `display`, `touch`, `buttons`,
 `indicator`, `led-strip`, `buzzer`, `vibration`, `infrared`, `camera`,
 `audio-codec`, `inertial-measurement`, `environment-sensor`, `keyboard`,
-`rotary-encoder`, `power-monitor`, and `real-time-clock`. Removable storage is
-System-owned and never claimed.
+`rotary-encoder`, `power-monitor`, and `real-time-clock`. A Board may have
+several devices of any of them. Removable storage is System-owned and never
+claimed.
 
 The Board supplies named devices under `peripherals.devices`, marking one
 `primary: true` when it has several of a kind, and wires a slot only to
@@ -224,7 +225,8 @@ plugins:
 
 Each Board resolves every slot of every enabled Plugin at build time: a wired
 slot takes its device, then `"primary"` slots, then `"any"` slots, then the
-one `"*"` slot of a kind takes what is left in device-name order. A device
+one `"*"` slot of a kind takes what is left, the primary device first and the
+others in device-name order. A device
 taken twice, two `"*"` slots of one kind, an `"any"` slot with several
 candidates, a required slot left empty, or wiring naming an unknown device,
 a device of another kind, or an undeclared slot fails the build, and the
@@ -235,6 +237,14 @@ The Plugin's `build.rs` calls `barracuda_plugin_build::build()`, and
 `<KIND>_<SLOT>`: an `Option<Instance>` for one device, or a
 `&[(&str, Instance)]` of device names and instances for `"*"`. The Plugin
 takes its devices by those constants; it never names a Board device.
+
+A device the build resolved may still be absent at run time: a device that
+fails to initialize is logged and left out, and `take_<kind>` returns `None`
+for it. An optional slot treats that as a Board without the device. A Plugin
+with a required slot keeps the `Option` from construction and returns
+`PluginError::PeripheralUnavailable { kind, slot }` from `register` when it is
+empty; Plugin Manager logs that, leaves the Plugin and every Plugin depending
+on it out, and registers the rest.
 
 ### Host tasks
 

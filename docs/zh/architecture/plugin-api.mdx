@@ -154,7 +154,7 @@ main = { fill = "primary", optional = true }   # starts without touch
 | `"any"` | 该类型中没有被其他槽位取走的唯一设备 |
 | `"*"` | 该类型中所有没有被其他槽位取走的设备，以列表形式 |
 
-除非写明 `optional = true`，槽位都是必需的；`"*"` 槽位总是可选的。插件可以为一种类型声明多个槽位。类型就是 `peripherals/impl/` 中的 `peripheral:` 名称：`display`、`touch`、`buttons`、`indicator`、`led-strip`、`buzzer`、`vibration`、`infrared`、`camera`、`audio-codec`、`inertial-measurement`、`environment-sensor`、`keyboard`、`rotary-encoder`、`power-monitor` 和 `real-time-clock`。可移动存储由 System 拥有，永远不会被认领。
+除非写明 `optional = true`，槽位都是必需的；`"*"` 槽位总是可选的。插件可以为一种类型声明多个槽位。类型就是 `peripherals/impl/` 中的 `peripheral:` 名称：`display`、`touch`、`buttons`、`indicator`、`led-strip`、`buzzer`、`vibration`、`infrared`、`camera`、`audio-codec`、`inertial-measurement`、`environment-sensor`、`keyboard`、`rotary-encoder`、`power-monitor` 和 `real-time-clock`。开发板可以有任何一种类型的多个设备。可移动存储由 System 拥有，永远不会被认领。
 
 开发板在 `peripherals.devices` 下提供具名设备，当某种类型有多个设备时把其中一个标记为 `primary: true`，并且只在需要覆盖默认值或消除歧义时才为槽位接线：
 
@@ -165,9 +165,11 @@ plugins:
       display.main: back-eink
 ```
 
-每块开发板在构建期解析每个已启用插件的每个槽位：先由接了线的槽位取走它的设备，然后是 `"primary"` 槽位，然后是 `"any"` 槽位，最后某种类型唯一的 `"*"` 槽位按设备名顺序取走剩下的设备。以下情况都会让构建失败：一个设备被取走两次、同一种类型有两个 `"*"` 槽位、`"any"` 槽位有多个候选、必需的槽位为空，或者接线指向未知设备、其他类型的设备或未声明的槽位；错误信息会打印出能解决问题的 `plugins.<id>.peripherals` 行。
+每块开发板在构建期解析每个已启用插件的每个槽位：先由接了线的槽位取走它的设备，然后是 `"primary"` 槽位，然后是 `"any"` 槽位，最后某种类型唯一的 `"*"` 槽位取走剩下的设备，主设备排在最前，其余按设备名顺序排列。以下情况都会让构建失败：一个设备被取走两次、同一种类型有两个 `"*"` 槽位、`"any"` 槽位有多个候选、必需的槽位为空，或者接线指向未知设备、其他类型的设备或未声明的槽位；错误信息会打印出能解决问题的 `plugins.<id>.peripherals` 行。
 
 插件的 `build.rs` 调用 `barracuda_plugin_build::build()`，`config!()` 在 `config::peripherals` 中为每个槽位定义一个常量，命名为 `<KIND>_<SLOT>`：单个设备是 `Option<Instance>`，`"*"` 则是由设备名和实例组成的 `&[(&str, Instance)]`。插件通过这些常量取得它的设备；它永远不提到某个开发板设备的名字。
+
+构建期解析出的设备在运行时仍可能缺席：初始化失败的设备会被记录并略过，`take_<kind>` 对它返回 `None`。可选槽位把这种情况当作开发板没有这个设备。带必需槽位的插件在构造时保留这个 `Option`，在它为空时从 `register` 返回 `PluginError::PeripheralUnavailable { kind, slot }`；插件管理器记录这一点，不加载这个插件以及所有依赖它的插件，并注册其余插件。
 
 ### 主机任务
 

@@ -343,10 +343,11 @@ Platform types, Plugin identities, and application policy do not belong in the
 Board matrix. An implementation identifier selects registered composition
 code; YAML does not name a Rust type or crate path.
 
-Device names are the Board's own. A Board may attach several displays; every
-other peripheral kind has at most one device. With several devices of a kind,
-exactly one is marked `primary: true`, a hardware fact about the product's
-main device rather than a Plugin choice. A kind with one device needs no mark.
+Device names are the Board's own. A Board may attach several devices of any
+kind except removable storage, which System mounts as one slot. With several
+devices of a kind, exactly one is marked `primary: true`, a hardware fact about
+the product's main device rather than a Plugin choice. A kind with one device
+needs no mark.
 
 Board resources contain no third hardware category:
 
@@ -363,9 +364,14 @@ each selected Board. Every generated peripheral field is `Option<T>` because no
 peripheral kind is mandatory. Each peripheral trait takes a device by
 `Instance`, the device's position among the Board's devices of that kind in
 name order; Plugins never build an `Instance` themselves but take the
-constants their build resolved from their declared slots. Several displays are
-returned as one generated `BoardDisplay` enum over the Board's display
-implementations, built by `display_set!`, so dispatch stays static. The single
+constants their build resolved from their declared slots. One device of a
+kind is returned as its concrete type. Several are returned as one generated
+`Board<Kind>` enum over the Board's implementations of that kind, such as
+`BoardDisplay` or `BoardPowerMonitor`, built by that kind's set macro
+(`display_set!`, `power_monitor_set!`, and so on), so dispatch stays static. A
+device that fails to initialize is logged and left `None`, and the Board
+starts without it; only a shared bus or controller that cannot be built fails
+Board initialization. The single
 exposed-I/O value owns all runtime physical resources.
 System places it in `PluginContext` behind one shared `Arc`; Plugins that use
 exposed hardware clone that owner, not independent protocol collections. Platform-owned

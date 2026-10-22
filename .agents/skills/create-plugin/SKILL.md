@@ -47,7 +47,11 @@ add the same `build.rs` and `config` module, and take the device with
 `config::peripherals::<KIND>_<SLOT>` and
 `context.hal.peripherals.take_<peripheral>(instance)`. Never name a Board
 device in the Plugin; a Board that needs another device wires the slot in
-`plugins.<id>.peripherals`.
+`plugins.<id>.peripherals`. A device that failed to initialize is `None` at
+run time: an optional slot treats it as absent, and a required slot returns
+`PluginError::PeripheralUnavailable` from `register`, which leaves the Plugin
+out. A Lua package over Board devices takes a `"*"` slot, lists the devices,
+and defaults to the first, the primary one.
 
 ## 4. Register and start
 
