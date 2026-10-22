@@ -35,9 +35,12 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `power-monitor` | Battery gauge (AXP2101) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `audio-codec` | Audio codec (AW88298 amplifier, ES7210 microphone ADC) | [`audio`](/plugins/vm-audio) |
+| `camera` | Camera (GC0308, 320x240 RGB565) | [`camera`](/plugins/vm-camera) |
 
 The touch implementation releases the controller's reset, P0_0 of the AW9523B
-expander at `58h`, which is not a device of its own.
+expander at `58h`, which is not a device of its own. The camera implementation
+switches on the camera supply, the AXP2101's ALDO3, and releases the sensor's
+reset, P1_0 of the same expander.
 
 The battery gauge shares the PMIC with the display: it reads only the PMIC's
 measurement registers, and the display keeps its regulators.

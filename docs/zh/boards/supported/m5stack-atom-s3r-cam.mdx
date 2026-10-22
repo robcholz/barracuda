@@ -28,8 +28,11 @@ cargo image deploy
 
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
+| `camera` | 摄像头（GC0308，320x240 RGB565；AtomS3R-M12 上为 OV3660，320x240 JPEG） | [`camera`](/zh/plugins/vm-camera) |
 | `inertial-measurement` | 运动传感器（BMI270，其辅助总线上带 BMM150 磁力计） | [`motion`](/zh/plugins/vm-imu) |
 | `infrared` | 红外发射器（GPIO47） | [`infrared`](/zh/plugins/vm-infrared) |
+
+AtomS3R-M12 在相同接线上装有 OV3660，也使用此 Board。摄像头实现先探测 GC0308，GC0308 无应答时再探测 OV3660；`camera:descriptor()` 给出所找到传感器的格式。
 
 ## 可用引脚
 

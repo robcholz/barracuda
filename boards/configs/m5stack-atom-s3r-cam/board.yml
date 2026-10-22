@@ -20,6 +20,28 @@ peripherals:
         scl: GPIO0
         sda: GPIO45
         frequency-hz: 400000
+      camera-control:
+        # The camera's own SCCB bus: CAM_SDA G12, CAM_SCL G9 (M5Stack
+        # AtomS3R-CAM pin map; M5Unified probes the sensor on the same pins),
+        # at esp32-camera's default 100 kHz.
+        peripheral: I2C1
+        scl: GPIO9
+        sda: GPIO12
+        frequency-hz: 100000
+    camera-capture:
+      camera-data:
+        # M5Stack AtomS3R-CAM pin map: XCLK G21, PCLK G40, VSYNC G10, HREF
+        # G14, Y2-Y9 (D0-D7) = G3, G42, G46, G48, G4, G17, G11, G13. 20 MHz
+        # XCLK as esp32-camera's examples use. One 320x240 RGB565 frame.
+        peripheral: LCD_CAM
+        dma: DMA_CH0
+        xclk: GPIO21
+        pclk: GPIO40
+        vsync: GPIO10
+        href: GPIO14
+        data: [GPIO3, GPIO42, GPIO46, GPIO48, GPIO4, GPIO17, GPIO11, GPIO13]
+        xclk-frequency-hz: 20000000
+        dma-buffer-bytes: 153600
     rmt-output:
       ir-transmit:
         # IR LED driver `IR_LED_DRV` on GPIO47 (docs.m5stack.com AtomS3R,
@@ -30,6 +52,15 @@ peripherals:
         channel: 0
         pin: GPIO47
   devices:
+    camera:
+      # GC0308 at 21h, or on the AtomS3R-M12 an OV3660 at 3Ch on the same
+      # wiring: M5Unified tells the two apart only by which address answers
+      # and runs both as the AtomS3R-CAM. G18 low (POWER_N) switches the
+      # camera on.
+      implementation: gc0308-camera
+      bindings: { capture: camera-data, control: camera-control, power-down: GPIO18 }
+      parameters:
+        alternate-sensor: ov3660
     inertial-measurement:
       implementation: bmi270-imu
       bindings: { i2c: internal-i2c }
