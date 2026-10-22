@@ -3,12 +3,6 @@
 //! The walk mirrors what MicroTS-generated Rust does: siblings update in reverse
 //! so each knows its insertion anchor, element bindings are memoised so an
 //! unchanged value never touches the tree, and keyed lists reuse rows.
-//!
-//! Text wraps as it does on a web page: after layout, text wider than the room
-//! it has breaks between words at that width ([`View::wrap`]). The room is the
-//! element's own width when something narrower than its parent sets it, such
-//! as a flex share (`flex-1 min-w-0`) or a width class, and otherwise the
-//! width inside its parent.
 
 use crate::program::{BinaryOp, Cast, Element, Expr, Layout, Node, Program, TextPart};
 use crate::value::{Key, Value};
@@ -129,10 +123,7 @@ enum Instance {
         style: Option<i32>,
         props: Vec<Option<Value>>,
         text_inputs: Option<Vec<Value>>,
-        /// The element's text before wrapping.
         text: String,
-        /// The width the shown text was last wrapped at.
-        wrapped_at: Option<f32>,
         children: Instances,
     },
     If {
@@ -232,8 +223,7 @@ fn mount_node(ui: &mut Ui, node: &Node, parent: NodeId, anchor: NodeId) -> Insta
                 style: None,
                 props: element.props.iter().map(|_| None).collect(),
                 text_inputs: None,
-                text: element.static_text.clone().unwrap_or_default(),
-                wrapped_at: None,
+                text: String::new(),
                 children,
             }
         }
@@ -245,72 +235,6 @@ fn mount_node(ui: &mut Ui, node: &Node, parent: NodeId, anchor: NodeId) -> Insta
             rows: KeyedList::new(),
         },
     }
-}
-
-/// How far text may run past its room, in pixels, before it wraps.
-const WRAP_SLACK: f32 = 0.5;
-
-/// Shows `text` on `node` broken into lines that fit its room; returns
-/// whether the shown text changed.
-fn wrap_text(ui: &mut Ui, node: NodeId, text: &str, wrapped_at: &mut Option<f32>) -> bool {
-    let core = ui.core();
-    let (Some((_, _, width, _)), Some(style)) = (
-        core.layout_unrounded_of(node.0),
-        core.resolved_style(node.0),
-    ) else {
-        return false;
-    };
-    let parent = core.node_parent(node.0);
-    let room = match (
-        core.layout_unrounded_of(parent),
-        core.resolved_style(parent),
-    ) {
-        // A border is drawn over the box and takes no room.
-        (Some((_, _, parent_width, _)), Some(outer)) => {
-            let edge = |value: f32| if value.is_nan() { 0.0 } else { value };
-            parent_width
-                - edge(outer.padding[1])
-                - edge(outer.padding[3])
-                - edge(style.margin[1])
-                - edge(style.margin[3])
-        }
-        _ => f32::INFINITY,
-    };
-    // A box narrower than its parent's inside was sized by something other
-    // than its text; one as wide takes the parent's width. Half a pixel of
-    // slack keeps a box sized by its own text from breaking it over float
-    // error.
-    let limit = if width < room { width } else { room } + WRAP_SLACK;
-    if *wrapped_at == Some(limit) {
-        return false;
-    }
-    *wrapped_at = Some(limit);
-    let slot = style.font_slot as u8;
-    let mut shown = String::with_capacity(text.len());
-    for (index, line) in text.split('\n').enumerate() {
-        if index > 0 {
-            shown.push('\n');
-        }
-        let mut breaks = core.wrap_text(line, slot, limit).into_iter().peekable();
-        let mut column = 0u32;
-        for character in line.chars() {
-            if breaks.peek() == Some(&column) {
-                breaks.next();
-                // A break hangs the spaces before it on the row it ends.
-                while shown.ends_with(' ') {
-                    shown.pop();
-                }
-                shown.push('\n');
-            }
-            shown.push(character);
-            column += character.len_utf16() as u32;
-        }
-    }
-    if core.node_text(node.0) == Some(shown.as_str()) {
-        return false;
-    }
-    ui.set_text(node, &shown);
-    true
 }
 
 /// Reusable buffers for text formatting.
@@ -362,14 +286,11 @@ impl Walk<'_> {
                     props,
                     text_inputs,
                     text,
-                    wrapped_at,
                     children,
                     ..
                 },
             ) => {
-                if self.update_element(ui, element, *node, style, props, text_inputs, text) {
-                    *wrapped_at = None;
-                }
+                self.update_element(ui, element, *node, style, props, text_inputs, text);
                 self.update_nodes(ui, &element.children, children, *node, NodeId::NONE);
             }
             (Node::If(branches), Instance::If { selected, block }) => {
@@ -420,7 +341,6 @@ impl Walk<'_> {
         }
     }
 
-    /// Brings `node` up to date; returns whether its text changed.
     #[allow(clippy::too_many_arguments)]
     fn update_element(
         &mut self,
@@ -431,7 +351,7 @@ impl Walk<'_> {
         props: &mut [Option<Value>],
         text_inputs: &mut Option<Vec<Value>>,
         text: &mut String,
-    ) -> bool {
+    ) {
         if let Some(expr) = &element.dynamic_style
             && let Value::I32(id) = eval(expr, self.slots, &self.locals)
             && *style != Some(id)
@@ -447,7 +367,7 @@ impl Walk<'_> {
             }
         }
         if element.text.is_empty() {
-            return false;
+            return;
         }
         let Scratch {
             inputs,
@@ -460,7 +380,7 @@ impl Walk<'_> {
             }
         }
         if text_inputs.as_ref() == Some(inputs) {
-            return false;
+            return;
         }
         scratch.clear();
         let mut values = inputs.iter();
@@ -474,8 +394,7 @@ impl Walk<'_> {
                 }
             }
         }
-        let changed = *scratch != *text;
-        if changed {
+        if *scratch != *text {
             core::mem::swap(scratch, text);
             ui.set_text(node, text);
         }
@@ -486,7 +405,6 @@ impl Walk<'_> {
             }
             None => *text_inputs = Some(core::mem::take(inputs)),
         }
-        changed
     }
 
     fn dispatch(
@@ -603,59 +521,27 @@ impl View {
         find(&self.root, node)
     }
 
-    /// Appends the text of every text-bearing element in document order, as
-    /// written, before wrapping.
-    pub(crate) fn collect_texts(&self, out: &mut Vec<String>) {
-        fn walk(instances: &Instances, out: &mut Vec<String>) {
+    /// Appends the text of every text-bearing element in document order.
+    pub(crate) fn collect_texts(&self, ui: &Ui, out: &mut Vec<String>) {
+        fn walk(instances: &Instances, ui: &Ui, out: &mut Vec<String>) {
             for instance in &instances.0 {
                 match instance {
-                    Instance::Element { text, children, .. } => {
-                        if !text.is_empty() {
-                            out.push(text.clone());
+                    Instance::Element { node, children, .. } => {
+                        if let Some(text) =
+                            ui.core().node_text(node.0).filter(|text| !text.is_empty())
+                        {
+                            out.push(String::from(text));
                         }
-                        walk(children, out);
+                        walk(children, ui, out);
                     }
-                    Instance::If { block, .. } => walk(block, out),
+                    Instance::If { block, .. } => walk(block, ui, out),
                     Instance::For { rows } => {
-                        rows.rows.iter().for_each(|row| walk(&row.block, out))
+                        rows.rows.iter().for_each(|row| walk(&row.block, ui, out))
                     }
                 }
             }
         }
-        walk(&self.root, out);
-    }
-
-    /// Breaks the text of every element that is wider than its room into
-    /// lines, from the last layout; returns whether any shown text changed,
-    /// so the caller lays out again.
-    pub(crate) fn wrap(&mut self, ui: &mut Ui) -> bool {
-        fn walk(instances: &mut Instances, ui: &mut Ui) -> bool {
-            let mut changed = false;
-            for instance in &mut instances.0 {
-                match instance {
-                    Instance::Element {
-                        node,
-                        text,
-                        wrapped_at,
-                        children,
-                        ..
-                    } => {
-                        if !text.is_empty() {
-                            changed |= wrap_text(ui, *node, text, wrapped_at);
-                        }
-                        changed |= walk(children, ui);
-                    }
-                    Instance::If { block, .. } => changed |= walk(block, ui),
-                    Instance::For { rows } => {
-                        for row in &mut rows.rows {
-                            changed |= walk(&mut row.block, ui);
-                        }
-                    }
-                }
-            }
-            changed
-        }
-        walk(&mut self.root, ui)
+        walk(&self.root, ui, out);
     }
 
     /// The handler a resolved press selects, with its evaluated arguments.

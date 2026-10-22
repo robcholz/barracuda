@@ -194,12 +194,11 @@ The UI kit runs compiled MicroTS views. A view is a BVIR program
 (`view.bvir`), its compiled stylesheet (`styles.bin`) and baked font atlases
 (`font-<slot>.bin`), produced from MicroTS sources by the MicroTS compiler. The
 crate `barracuda-ui-runtime` reads BVIR, mounts it into a vendored PocketJS
-core tree, and re-evaluates the tree when values change. After a change it
-also wraps text, as a web page does: text wider than its room breaks between
-words, with the core's `wrap_text`, and the view is laid out again. The room
-is the element's own width when something narrower than its parent sets it,
-such as a `flex-1 min-w-0` share, and otherwise the width inside its parent;
-`UiSession::texts` reports text as written. A view built for
+core tree, and re-evaluates the tree when values change. Text wraps as it
+does on a web page: the core's layout breaks text between words at the width
+its box is given, in the same solve, and paint draws those rows
+([soft wrap](/plugins/app-manager/pocketjs)). `UiSession::texts` reports text
+as written. A view built for
 one display carries the rects its build solved: an element marked static
 takes its rect when it mounts and never enters the layout solver, and one
 marked formula follows its own inset and size, as PocketJS's generated views

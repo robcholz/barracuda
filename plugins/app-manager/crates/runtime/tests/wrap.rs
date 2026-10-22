@@ -51,12 +51,17 @@ fn write(document: &mut Document, message: &str, label: &str, value: &str) {
     document.frame();
 }
 
-/// Each text node's shown text and rect, in tree order.
-fn texts(document: &Document) -> Vec<(String, (f32, f32, f32, f32))> {
-    fn walk(core: &pocketjs_core::Ui, id: i32, out: &mut Vec<(String, (f32, f32, f32, f32))>) {
+/// A text node's rows, one per line, and its rect.
+type Shown = (String, (f32, f32, f32, f32));
+
+/// Each text node's rows and rect, in tree order.
+fn texts(document: &Document) -> Vec<Shown> {
+    fn walk(core: &pocketjs_core::Ui, id: i32, out: &mut Vec<Shown>) {
         for &child in core.node_children(id) {
             if let Some(text) = core.node_text(child).filter(|text| !text.is_empty()) {
-                out.push((text.into(), core.layout_of(child).unwrap()));
+                let rows =
+                    pocketjs_core::text::with_soft_breaks(text, core.node_soft_breaks(child));
+                out.push((rows, core.layout_of(child).unwrap()));
             }
             walk(core, child, out);
         }
@@ -139,4 +144,24 @@ fn wrapping_settles() {
         document.frame();
     }
     assert_eq!(texts(&document), before);
+}
+
+#[test]
+fn layout_breaks_where_the_wrap_text_op_does() {
+    for width in [160.0, 220.0, 300.0] {
+        let document = shown(width, LONG, "Volume", "80%");
+        let core = document.ui().core();
+        let node = (1..256)
+            .find(|&id| core.node_text(id) == Some(LONG))
+            .unwrap();
+        let (_, _, box_width, _) = core.layout_unrounded_of(node).unwrap();
+        let slot = core.resolved_style(node).unwrap().font_slot as u8;
+        assert!(!core.node_soft_breaks(node).is_empty(), "at {width}");
+        // The run is ASCII, so the op's UTF-16 columns are byte offsets.
+        assert_eq!(
+            core.node_soft_breaks(node),
+            core.wrap_text(LONG, slot, box_width).as_slice(),
+            "at {width}"
+        );
+    }
 }

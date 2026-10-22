@@ -860,6 +860,15 @@ impl Ui {
         self.tree.get(id).map(|node| node.text.as_str())
     }
 
+    /// Under soft wrap, the byte offset in a text node's run where each row
+    /// after the first starts, as the last layout broke it; empty when the
+    /// run is on its hard lines.
+    pub fn node_soft_breaks(&self, id: i32) -> &[u32] {
+        self.tree
+            .get(id)
+            .map_or(&[], |node| node.soft_breaks.as_slice())
+    }
+
     /// Style-table record id of a node (spec::STYLE_ID_NONE when unstyled).
     /// Native presenters match mounted conditional branches by it.
     pub fn node_style(&self, id: i32) -> Option<i32> {
@@ -2095,6 +2104,17 @@ impl Ui {
     /// A pure query: no layout state depends on it.
     pub fn set_text_wrap(&mut self, f: Option<text::WrapFn>) {
         self.fonts.set_native_wrap(f);
+    }
+
+    /// Wrap text to its box (default off: runs break only on '\n'). Layout
+    /// breaks a run wider than the width its box is offered into rows, by
+    /// the greedy rules of OP wrapText, and the box takes that width and the
+    /// rows' height; paint draws the same rows. Every text leaf re-measures.
+    pub fn set_soft_wrap(&mut self, on: bool) {
+        if self.fonts.soft_wrap != on {
+            self.fonts.soft_wrap = on;
+            self.mark_layout_dirty();
+        }
     }
 
     /// Resize the logical viewport (root node + layout bounds + draw clip).

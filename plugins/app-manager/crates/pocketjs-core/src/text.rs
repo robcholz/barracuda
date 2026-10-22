@@ -8,6 +8,10 @@
 //! v1 line model (documented limitation): NO automatic word wrap — a run
 //! breaks only on explicit '\n'. Measurement is the max line width (sum of
 //! advances + tracking per glyph) by lines x line height.
+//!
+//! Soft wrap (opt-in, `Ui::set_soft_wrap`): layout also breaks a run into
+//! rows that fit the width its box is given, by the greedy rules of
+//! `Fonts::wrap_text`, and paint draws the rows layout chose (`soft_wrap`).
 
 use alloc::vec::Vec;
 use core::cell::Cell;
@@ -247,6 +251,8 @@ pub struct Fonts {
     native: Option<MeasureFn>,
     /// Native line wrapper (OP wrapText); absent = greedy over `measure_run`.
     wrap_native: Option<WrapFn>,
+    /// Layout wraps text to its box (`Ui::set_soft_wrap`).
+    pub soft_wrap: bool,
 }
 
 impl Default for Fonts {
@@ -270,6 +276,7 @@ impl Fonts {
             misses: Cell::new(0),
             native: None,
             wrap_native: None,
+            soft_wrap: false,
         }
     }
 
@@ -539,4 +546,146 @@ impl Fonts {
             line_top += lh;
         }
     }
+}
+
+/// One character of a run shaped for soft wrap: its byte offset in the run
+/// and its advance (tracking included), or a hard line break.
+#[derive(Clone, Copy, Debug)]
+pub struct WrapUnit {
+    pub at: u32,
+    pub advance: f32,
+    pub kind: u8,
+}
+
+const UNIT_GLYPH: u8 = 0;
+const UNIT_SPACE: u8 = 1;
+const UNIT_NEWLINE: u8 = 2;
+
+/// How far a row may run past its width before it wraps: absorbs the float
+/// error between the width layout measured at and the one it assigned.
+const WRAP_EPSILON: f32 = 0.001;
+
+impl Fonts {
+    /// Shape `text` for soft wrap with the provider that sizes its box:
+    /// every character's advance, and the widest word (the run's min-content
+    /// width). The public miss counter is left as it was: the run's misses
+    /// already counted when it was measured.
+    pub fn wrap_units(
+        &self,
+        native: bool,
+        text: &str,
+        slot: u8,
+        tracking: f32,
+    ) -> (Vec<WrapUnit>, f32) {
+        let misses = self.misses.get();
+        let mut units = Vec::with_capacity(text.len());
+        let mut buffer = [0u8; 4];
+        let (mut word, mut widest) = (0.0f32, 0.0f32);
+        for (at, ch) in text.char_indices() {
+            let kind = match ch {
+                '\n' => UNIT_NEWLINE,
+                ' ' => UNIT_SPACE,
+                _ => UNIT_GLYPH,
+            };
+            let advance = if kind == UNIT_NEWLINE {
+                0.0
+            } else {
+                let ch = ch.encode_utf8(&mut buffer);
+                self.measure_run_provider(native, ch, slot, tracking, f32::NAN)
+                    .0
+            };
+            if kind == UNIT_GLYPH {
+                word += advance;
+                widest = widest.max(word);
+            } else {
+                word = 0.0;
+            }
+            units.push(WrapUnit {
+                at: at as u32,
+                advance,
+                kind,
+            });
+        }
+        self.misses.set(misses);
+        (units, widest)
+    }
+}
+
+/// Greedy soft wrap of shaped `units` into rows no wider than `max_w`, by the
+/// rules of `Fonts::wrap_text`: break before the word that overflows, hang
+/// space runs on the row they end, and split a word wider than a whole row
+/// at characters. Returns the row count, hard lines included; `breaks`
+/// receives the byte offset each soft row starts at.
+pub fn soft_wrap(units: &[WrapUnit], max_w: f32, mut breaks: Option<&mut Vec<u32>>) -> u32 {
+    let limit = max_w + WRAP_EPSILON;
+    let mut rows = 1u32;
+    let mut push = |at: u32, rows: &mut u32| {
+        *rows += 1;
+        if let Some(breaks) = breaks.as_mut() {
+            breaks.push(at);
+        }
+    };
+    let width = |from: usize, to: usize| units[from..to].iter().map(|u| u.advance).sum::<f32>();
+    let (mut row_from, mut x, mut i) = (0usize, 0.0f32, 0usize);
+    while i < units.len() {
+        match units[i].kind {
+            UNIT_NEWLINE => {
+                rows += 1;
+                i += 1;
+                row_from = i;
+                x = 0.0;
+            }
+            UNIT_SPACE => {
+                x += units[i].advance;
+                i += 1;
+            }
+            _ => {
+                let mut j = i;
+                while j < units.len() && units[j].kind == UNIT_GLYPH {
+                    j += 1;
+                }
+                let word = width(i, j);
+                if i > row_from && x + word > limit {
+                    push(units[i].at, &mut rows);
+                    row_from = i;
+                    x = 0.0;
+                }
+                if word > limit {
+                    // A word wider than a whole row: hard character chunks.
+                    let mut row = 0.0f32;
+                    for k in i..j {
+                        if k > row_from && row + units[k].advance > limit {
+                            push(units[k].at, &mut rows);
+                            row_from = k;
+                            row = 0.0;
+                        }
+                        row += units[k].advance;
+                    }
+                    x = row;
+                } else {
+                    x += word;
+                }
+                i = j;
+            }
+        }
+    }
+    rows
+}
+
+/// `run` broken into the rows `soft_wrap` chose: a line break at each byte
+/// offset in `breaks`, with the spaces a row hangs dropped.
+pub fn with_soft_breaks(run: &str, breaks: &[u32]) -> alloc::string::String {
+    let mut out = alloc::string::String::with_capacity(run.len() + breaks.len());
+    let mut from = 0usize;
+    for &at in breaks {
+        let at = at as usize;
+        if at <= from || at > run.len() || !run.is_char_boundary(at) {
+            continue;
+        }
+        out.push_str(run[from..at].trim_end_matches(' '));
+        out.push('\n');
+        from = at;
+    }
+    out.push_str(&run[from..]);
+    out
 }

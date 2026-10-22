@@ -111,6 +111,9 @@ pub struct Node {
     /// provider per node per layout, never re-decided at paint time
     /// (docs/BACKENDS.md).
     pub text_native: bool,
+    /// Text nodes under soft wrap: the byte offset in the run where each row
+    /// after the first starts, as layout broke it (`text::soft_wrap`).
+    pub soft_breaks: Vec<u32>,
 }
 
 impl Node {
@@ -141,6 +144,7 @@ impl Node {
             layout_mode: LAYOUT_LIVE,
             region_root: false,
             text_native: false,
+            soft_breaks: Vec::new(),
         }
     }
 

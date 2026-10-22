@@ -87,7 +87,8 @@ A view is laid out at the display's size in view pixels, from 135 px wide to
 - Text wraps between words to the room it has, as on a web page. Text beside
   other items in a row takes the room they leave with `flex-1 min-w-0`, or
   `basis-[72px] grow min-w-0` to move to its own line when even that is too
-  narrow.
+  narrow. As on the web, a text box shrinks below its longest word only with
+  `min-w-0`, and then breaks that word.
 - Let rows `flex-wrap`, so their items move to the next line on a narrow
   display.
 - Center a column with a `flex-1 min-h-0` spacer above and below its content:

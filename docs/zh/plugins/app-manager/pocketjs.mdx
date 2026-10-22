@@ -13,4 +13,6 @@ description: "内置的 PocketJS crate 从哪里来，以及它们与上游有�
 
 两者都采用 MIT 许可证（每个目录下都有 `LICENSE`）。库源码未做修改，只是删除了三个测试模块，因为它们会从 PocketJS 仓库读取测试夹具：独立文件 `core/src/tests.rs` 和 `core/src/physics/tests.rs` 及其 `mod tests;` 声明，以及 `core/src/package.rs` 末尾的内联 `mod tests`。另有一行不同：`microts/src/model.rs` 在所有目标上都从 `portable_atomic` 引入 `AtomicU32` 和 `Ordering`，而上游在支持 32 位原子操作的目标上从 `core::sync::atomic` 引入，这样同一行引入也能用于 ESP32-C3。源码还用本工作区的 `rustfmt` 重新格式化过。清单文件经过改写，可以在本工作区中独立使用，并关闭了 Clippy 的风格类 lint。
 
-更新时，从较新的提交复制同样的路径，重新执行这三处删除和 `portable_atomic` 引入，再运行 `cargo fmt --all`。`plugins/app-manager/resources` 中的构建脚本使用同一提交的 PocketJS 检出来编译视图。不要把 Barracuda 专用的代码放进这些目录；它们应该放在 `barracuda-ui-runtime` 中。
+`pocketjs-core` 还带有一处对 PocketJS 本身的修改，记录在 `pocketjs-core/patches/soft-wrap.patch` 中，并附有原因说明。上游只在 `\n` 处断行；这个补丁加入 `Ui::set_soft_wrap`，让布局在同一次求解中按盒子得到的宽度为文字换行，并让绘制按这些行来画。它默认关闭，所以上游的行为不变；UI 运行时为每个视图打开它。
+
+更新时，从较新的提交复制同样的路径，重新执行这三处删除和 `portable_atomic` 引入，运行 `cargo fmt --all`，再在 `pocketjs-core/src` 中用 `patch -p1 < ../patches/soft-wrap.patch` 应用补丁。上游合入这项修改后，删除这个补丁。`plugins/app-manager/resources` 中的构建脚本使用同一提交的 PocketJS 检出来编译视图。不要把 Barracuda 专用的代码放进这些目录；它们应该放在 `barracuda-ui-runtime` 中。

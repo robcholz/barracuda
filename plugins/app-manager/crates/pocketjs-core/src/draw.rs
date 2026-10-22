@@ -3397,6 +3397,9 @@ impl<'a> Walker<'a> {
                 });
             }
         }
+        if !node.soft_breaks.is_empty() {
+            run = crate::text::with_soft_breaks(&run, &node.soft_breaks);
+        }
         // The node's measurement provider was RECORDED at layout time
         // (layout.rs build(): native iff a measurer is installed, tracking
         // is 0 and the subtree declared no transform). Paint follows the

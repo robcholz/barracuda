@@ -9,8 +9,6 @@ use microts::{Input, NodeId, Ui};
 
 /// The byte of a baked font atlas that names its slot.
 const FONT_SLOT_BYTE: usize = 12;
-/// The most layout passes a frame spends wrapping text.
-const WRAP_PASSES: usize = 4;
 /// The slot the PocketJS compiler bakes for text without a size or weight
 /// class: 16 px regular.
 const DEFAULT_FONT_SLOT: u8 = 2;
@@ -73,6 +71,8 @@ impl Document {
         }
         let mut ui = Ui::new();
         ui.core_mut().set_viewport(width, height);
+        // Text wraps to the width its box is given, as on a web page.
+        ui.core_mut().set_soft_wrap(true);
         if !ui.load_styles(assets.styles) {
             return Err(DocumentError::Styles);
         }
@@ -161,26 +161,13 @@ impl Document {
         self.dirty
     }
 
-    /// Brings the tree up to date with the values and steps layout and
-    /// animation. When the values changed, it also wraps text that overflows
-    /// its room and lays out again.
+    /// Brings the tree up to date with the values and steps layout and animation.
     pub fn frame(&mut self) {
-        let changed = self.dirty;
         if self.dirty {
             self.view.update(&mut self.ui, &self.program, &self.slots);
             self.dirty = false;
         }
         self.ui.tick();
-        if changed {
-            // A wrapped line can narrow a parent sized by its content, which
-            // narrows other text in it; a few passes settle any real view.
-            for _ in 0..WRAP_PASSES {
-                self.ui.core_mut().relayout_outputs();
-                if !self.view.wrap(&mut self.ui) {
-                    break;
-                }
-            }
-        }
     }
 
     /// Draws the tree into `words`, the UI core's DrawList, and returns the
@@ -216,12 +203,11 @@ impl Document {
         event
     }
 
-    /// The text of every text-bearing node, in document order, as written
-    /// rather than as wrapped.
+    /// The text of every text-bearing node, in document order.
     #[must_use]
     pub fn texts(&self) -> Vec<String> {
         let mut out = Vec::new();
-        self.view.collect_texts(&mut out);
+        self.view.collect_texts(&self.ui, &mut out);
         out
     }
 }

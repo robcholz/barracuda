@@ -25,9 +25,18 @@ the ESP32-C3 too. The sources are also reformatted with this workspace's
 `rustfmt`. The manifests are rewritten to
 stand alone in this workspace and silence Clippy's style lints.
 
+`pocketjs-core` also carries one change to PocketJS itself, recorded in
+`pocketjs-core/patches/soft-wrap.patch` with its reasons. Upstream breaks text
+only at `\n`; the patch adds `Ui::set_soft_wrap`, which makes the layout wrap
+text to the width its box is given, in the same solve, and makes paint draw
+those rows. It is off by default, so upstream behavior is unchanged, and the
+UI runtime turns it on for every view.
+
 Update by copying the same paths from a newer commit, re-applying the three
-deletions and the `portable_atomic` import, and running
-`cargo fmt --all`. The build scripts in
+deletions and the `portable_atomic` import, running `cargo fmt --all`, and
+applying the patch from `pocketjs-core/src` with
+`patch -p1 < ../patches/soft-wrap.patch`. Drop the patch once upstream has
+the change. The build scripts in
 `plugins/app-manager/resources` compile views with the PocketJS checkout at
 the same commit. Keep Barracuda-specific code out of these directories; it belongs in
 `barracuda-ui-runtime`.
