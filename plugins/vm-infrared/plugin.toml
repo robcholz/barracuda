@@ -1,0 +1,6 @@
+id = "infrared"
+depends-on = ["vm"]
+description = "Registers the built-in infrared remote-control Lua package."
+
+[peripherals.infrared]
+device = { fill = "primary", optional = true }

@@ -606,7 +606,7 @@ impl RuntimePwmTimer {
 /// Platform-owned LEDC controller, timer, and channel allocation.
 #[cfg(feature = "runtime-pwm")]
 pub struct RuntimePwmResource {
-    controller: esp_hal::peripherals::LEDC<'static>,
+    controller: PwmController,
     timer: Option<RuntimePwmTimer>,
     channel: Option<LedcChannelNumber>,
 }
@@ -926,11 +926,11 @@ impl RuntimePwmPlatform for RuntimeAdapter {
             .channel
             .take()
             .ok_or(ExposedPwmError::MissingResource)?;
-        let ledc = Ledc::new(resource.controller);
-        let mut configured_timer = ledc.timer::<LowSpeed>(timer.number);
+        let ledc = resource.controller;
+        let mut configured_timer = ledc.timer(timer.number);
         configure_ledc_timer(&mut configured_timer, frequency_hz)?;
         let configured_timer = timer.storage.init(configured_timer);
-        let mut channel = ledc.channel::<LowSpeed>(channel_number, pin);
+        let mut channel = ledc.channel(channel_number, pin);
         channel
             .configure(esp_hal::ledc::channel::config::Config {
                 timer: configured_timer,
@@ -1301,7 +1301,7 @@ pub use __barracuda_esp32_runtime_gpio_number as runtime_gpio_number;
 #[must_use]
 #[cfg(feature = "runtime-pwm")]
 pub fn runtime_pwm_resource(
-    controller: esp_hal::peripherals::LEDC<'static>,
+    controller: PwmController,
     timers: &[RuntimePwmTimer],
     channels: &[LedcChannelNumber],
 ) -> RuntimePwmResource {
@@ -1679,3 +1679,493 @@ macro_rules! __barracuda_esp32_controller_binding_type {
 pub use __barracuda_esp32_controller_binding_type as controller_binding_type;
 #[doc(hidden)]
 pub use __barracuda_esp32_pin_binding_type as pin_binding_type;
+
+/// Counter clock of the remote-control transceiver: the 80 MHz default
+/// source on every ESP chip this file serves (the ESP32 accepts no other).
+const RMT_CLOCK_HZ: u32 = 80_000_000;
+
+/// Symbols one ESP32 receive records: its channel memory, 64 symbols, which
+/// the chip cannot refill during a reception. The other chips refill it.
+const RMT_RX_BLOCK_SYMBOLS: usize = 64;
+
+/// How often an awaited transfer checks the hardware. Infrared symbols last
+/// half a millisecond or more, so half a channel's memory takes over 10 ms
+/// to send or fill, and a check every 500 µs refills or drains it in time.
+const RMT_POLL_MICROS: u64 = 500;
+
+/// The Board's remote-control transceiver, whose channels its pulse-train
+/// bindings take one by one.
+///
+/// It runs in the vendor's blocking mode: the channels then move freely
+/// between tasks, and an awaited transfer polls the hardware between short
+/// timer waits instead of binding the transceiver's interrupt.
+pub type RmtController = esp_hal::rmt::Rmt<'static, Blocking>;
+
+/// Failure to build or use a transceiver channel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RmtError {
+    /// The transceiver rejected a clock, channel, or memory configuration.
+    Config(esp_hal::rmt::ConfigError),
+    /// A transmission or reception failed.
+    Transfer(esp_hal::rmt::Error),
+    /// The tick frequency is not the 80 MHz clock divided by 1 to 255.
+    Resolution,
+    /// The carrier cannot be built from the 80 MHz clock.
+    Carrier,
+}
+
+impl core::fmt::Display for RmtError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Config(error) => write!(formatter, "invalid RMT configuration: {error}"),
+            Self::Transfer(error) => write!(formatter, "RMT transfer failed: {error}"),
+            Self::Resolution => formatter.write_str("unreachable RMT tick frequency"),
+            Self::Carrier => formatter.write_str("unreachable RMT carrier"),
+        }
+    }
+}
+
+impl core::error::Error for RmtError {}
+
+/// Builds the transceiver once for every pulse-train binding of the Board.
+///
+/// # Errors
+///
+/// Returns [`RmtError::Config`] when the clock cannot be set.
+pub fn rmt_controller(
+    rmt: esp_hal::peripherals::RMT<'static>,
+) -> Result<RmtController, RmtError> {
+    esp_hal::rmt::Rmt::new(rmt, Rate::from_hz(RMT_CLOCK_HZ)).map_err(RmtError::Config)
+}
+
+/// Takes one channel of a transceiver built by [`rmt_controller`].
+#[macro_export]
+macro_rules! __barracuda_esp_rmt_channel {
+    ($rmt:ident, 0) => {
+        $rmt.channel0
+    };
+    ($rmt:ident, 1) => {
+        $rmt.channel1
+    };
+    ($rmt:ident, 2) => {
+        $rmt.channel2
+    };
+    ($rmt:ident, 3) => {
+        $rmt.channel3
+    };
+    ($rmt:ident, 4) => {
+        $rmt.channel4
+    };
+    ($rmt:ident, 5) => {
+        $rmt.channel5
+    };
+    ($rmt:ident, 6) => {
+        $rmt.channel6
+    };
+    ($rmt:ident, 7) => {
+        $rmt.channel7
+    };
+}
+
+#[doc(hidden)]
+pub use __barracuda_esp_rmt_channel as rmt_channel;
+
+/// Channel divider of the 80 MHz clock for `tick_hz`.
+fn rmt_divider(tick_hz: u32) -> Result<u8, RmtError> {
+    if tick_hz == 0 || !RMT_CLOCK_HZ.is_multiple_of(tick_hz) {
+        return Err(RmtError::Resolution);
+    }
+    u8::try_from(RMT_CLOCK_HZ / tick_hz)
+        .ok()
+        .filter(|divider| *divider != 0)
+        .ok_or(RmtError::Resolution)
+}
+
+const fn rmt_level(high: bool) -> Level {
+    if high {
+        Level::High
+    } else {
+        Level::Low
+    }
+}
+
+/// One transceiver channel that transmits pulse trains on its pin.
+///
+/// A blocking transfer keeps the CPU while the chain is clocked out, so the
+/// channel's memory is refilled without delay, as LED chains need; an awaited
+/// transfer polls, as infrared needs.
+pub struct PulseOutputChannel {
+    channel: esp_hal::rmt::Channel<'static, Blocking, esp_hal::rmt::Tx>,
+    config: esp_hal::rmt::TxChannelConfig,
+}
+
+/// Configures one transmit channel at 1 MHz ticks, resting low, and routes
+/// it to its pin.
+///
+/// # Errors
+///
+/// Returns [`RmtError::Config`] when the channel's memory is taken.
+pub fn rmt_output(
+    channel: impl esp_hal::rmt::TxChannelCreator<'static, Blocking>,
+    pin: impl PeripheralOutput<'static>,
+) -> Result<PulseOutputChannel, RmtError> {
+    let config = esp_hal::rmt::TxChannelConfig::default()
+        .with_clk_divider(rmt_divider(1_000_000)?)
+        .with_idle_output(true)
+        .with_idle_output_level(Level::Low);
+    let channel = channel
+        .configure_tx(&config)
+        .map_err(RmtError::Config)?
+        .with_pin(pin);
+    Ok(PulseOutputChannel { channel, config })
+}
+
+impl barracuda_board_hal::PulseOutput for PulseOutputChannel {
+    type Symbol = esp_hal::rmt::PulseCode;
+    type Error = RmtError;
+
+    fn symbol(
+        first: barracuda_board_hal::PulseLevel,
+        second: barracuda_board_hal::PulseLevel,
+    ) -> Self::Symbol {
+        esp_hal::rmt::PulseCode::new_clamped(
+            rmt_level(first.high),
+            first.ticks,
+            rmt_level(second.high),
+            second.ticks,
+        )
+    }
+
+    fn end_marker() -> Self::Symbol {
+        esp_hal::rmt::PulseCode::end_marker()
+    }
+
+    fn configure(
+        &mut self,
+        config: barracuda_board_hal::PulseOutputConfig,
+    ) -> Result<(), Self::Error> {
+        let (carrier_high, carrier_low) = match config.carrier {
+            Some(carrier) => {
+                if carrier.frequency_hz == 0 || !(1..=99).contains(&carrier.duty_percent) {
+                    return Err(RmtError::Carrier);
+                }
+                let period = RMT_CLOCK_HZ / carrier.frequency_hz;
+                let high = period * u32::from(carrier.duty_percent) / 100;
+                let low = period.saturating_sub(high);
+                (
+                    u16::try_from(high)
+                        .ok()
+                        .filter(|ticks| *ticks != 0)
+                        .ok_or(RmtError::Carrier)?,
+                    u16::try_from(low)
+                        .ok()
+                        .filter(|ticks| *ticks != 0)
+                        .ok_or(RmtError::Carrier)?,
+                )
+            }
+            None => (1, 1),
+        };
+        let updated = self
+            .config
+            .with_clk_divider(rmt_divider(config.tick_hz)?)
+            .with_idle_output_level(rmt_level(config.idle_high))
+            .with_carrier_modulation(config.carrier.is_some())
+            .with_carrier_high(carrier_high)
+            .with_carrier_low(carrier_low)
+            // The carrier rides on the level opposite the idle one.
+            .with_carrier_level(rmt_level(!config.idle_high));
+        self.channel
+            .apply_config(&updated)
+            .map_err(RmtError::Config)?;
+        self.config = updated;
+        Ok(())
+    }
+
+    fn transmit_blocking(&mut self, symbols: &[Self::Symbol]) -> Result<(), Self::Error> {
+        // A reborrowed channel goes back to `self` however the transfer ends.
+        self.channel
+            .reborrow()
+            .transmit(symbols)
+            .map_err(|(error, _)| RmtError::Transfer(error))?
+            .wait()
+            .map(drop)
+            .map_err(|(error, _)| RmtError::Transfer(error))
+    }
+
+    async fn transmit(&mut self, symbols: &[Self::Symbol]) -> Result<(), Self::Error> {
+        // Dropping the transfer stops the channel.
+        let mut transfer = self
+            .channel
+            .reborrow()
+            .transmit(symbols)
+            .map_err(|(error, _)| RmtError::Transfer(error))?;
+        while !transfer.poll() {
+            embassy_time::Timer::after_micros(RMT_POLL_MICROS).await;
+        }
+        transfer
+            .wait()
+            .map(drop)
+            .map_err(|(error, _)| RmtError::Transfer(error))
+    }
+}
+
+/// One transceiver channel that records the pulse trains on its pin.
+pub struct PulseInputChannel {
+    channel: esp_hal::rmt::Channel<'static, Blocking, esp_hal::rmt::Rx>,
+    config: esp_hal::rmt::RxChannelConfig,
+}
+
+/// Configures one receive channel at 1 MHz ticks, ending a reception after
+/// 12 ms at one level, and routes it from its pin.
+///
+/// # Errors
+///
+/// Returns [`RmtError::Config`] when the channel's memory is taken.
+pub fn rmt_input(
+    channel: impl esp_hal::rmt::RxChannelCreator<'static, Blocking>,
+    pin: impl PeripheralInput<'static>,
+) -> Result<PulseInputChannel, RmtError> {
+    let config = esp_hal::rmt::RxChannelConfig::default()
+        .with_clk_divider(rmt_divider(1_000_000)?)
+        .with_idle_threshold(12_000);
+    let channel = channel
+        .configure_rx(&config)
+        .map_err(RmtError::Config)?
+        .with_pin(pin);
+    Ok(PulseInputChannel { channel, config })
+}
+
+impl barracuda_board_hal::PulseInput for PulseInputChannel {
+    type Symbol = esp_hal::rmt::PulseCode;
+    type Error = RmtError;
+
+    fn empty_symbol() -> Self::Symbol {
+        esp_hal::rmt::PulseCode::end_marker()
+    }
+
+    fn levels(
+        symbol: Self::Symbol,
+    ) -> (
+        barracuda_board_hal::PulseLevel,
+        barracuda_board_hal::PulseLevel,
+    ) {
+        (
+            barracuda_board_hal::PulseLevel::new(symbol.level1() == Level::High, symbol.length1()),
+            barracuda_board_hal::PulseLevel::new(symbol.level2() == Level::High, symbol.length2()),
+        )
+    }
+
+    fn capacity(&self) -> usize {
+        if esp_hal::rmt::HAS_RX_WRAP {
+            usize::MAX
+        } else {
+            RMT_RX_BLOCK_SYMBOLS
+        }
+    }
+
+    fn configure(
+        &mut self,
+        config: barracuda_board_hal::PulseInputConfig,
+    ) -> Result<(), Self::Error> {
+        // The glitch filter counts cycles of the 80 MHz clock, at most 255.
+        let filter = u64::from(config.filter_ns) * u64::from(RMT_CLOCK_HZ) / 1_000_000_000;
+        let updated = self
+            .config
+            .with_clk_divider(rmt_divider(config.tick_hz)?)
+            .with_idle_threshold(config.idle_ticks)
+            .with_filter_threshold(u8::try_from(filter).unwrap_or(u8::MAX));
+        self.channel
+            .apply_config(&updated)
+            .map_err(RmtError::Config)?;
+        self.config = updated;
+        Ok(())
+    }
+
+    async fn receive(&mut self, symbols: &mut [Self::Symbol]) -> Result<usize, Self::Error> {
+        let limit = symbols.len().min(barracuda_board_hal::PulseInput::capacity(self));
+        let symbols = symbols.get_mut(..limit).unwrap_or_default();
+        // Dropping the reception stops the channel; the reborrowed channel
+        // goes back to `self` either way.
+        let mut reception = self
+            .channel
+            .reborrow()
+            .receive(symbols)
+            .map_err(|(error, _)| RmtError::Transfer(error))?;
+        while !reception.poll() {
+            embassy_time::Timer::after_micros(RMT_POLL_MICROS).await;
+        }
+        reception
+            .wait()
+            .map(|(count, _)| count)
+            .map_err(|(error, _)| RmtError::Transfer(error))
+    }
+}
+
+/// The Board's LEDC controller, enabled once, which its PWM outputs and the
+/// runtime PWM pool share; each takes its own timers and channels.
+///
+/// The vendor driver keeps the enabled controller in static storage at the
+/// Board call site; this handle only reaches its timers and channels, which
+/// address the controller's registers by number.
+#[cfg(feature = "runtime-pwm")]
+#[derive(Clone, Copy)]
+pub struct PwmController {
+    _enabled: (),
+}
+
+#[cfg(feature = "runtime-pwm")]
+impl PwmController {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn __enabled(_controller: &'static Ledc<'static>) -> Self {
+        Self { _enabled: () }
+    }
+
+    fn timer(self, number: LedcTimerNumber) -> Timer<'static, LowSpeed> {
+        Timer::new(esp_hal::peripherals::LEDC::regs(), number)
+    }
+
+    fn channel(
+        self,
+        number: LedcChannelNumber,
+        pin: impl PeripheralOutput<'static>,
+    ) -> Channel<'static, LowSpeed> {
+        Channel::new(number, pin)
+    }
+}
+
+/// Builds the LEDC controller once, in static storage at the Board call
+/// site, with its low-speed timers clocked from APB.
+#[macro_export]
+#[cfg(feature = "runtime-pwm")]
+macro_rules! __barracuda_esp_pwm_controller {
+    ($ledc:expr) => {{
+        static CONTROLLER: $crate::hal::__StaticCell<
+            $crate::hal::__vendor::ledc::Ledc<'static>,
+        > = $crate::hal::__StaticCell::new();
+        let mut controller = $crate::hal::__vendor::ledc::Ledc::new($ledc);
+        controller.set_global_slow_clock($crate::hal::__vendor::ledc::LSGlobalClkSource::APBClk);
+        $crate::hal::PwmController::__enabled(CONTROLLER.init(controller))
+    }};
+}
+
+#[doc(hidden)]
+#[cfg(feature = "runtime-pwm")]
+pub use __barracuda_esp_pwm_controller as pwm_controller;
+
+/// Duty resolution of a PWM output: ten bits reach about 76 Hz to 78 kHz
+/// from an 80 MHz clock, the whole audible range of a buzzer.
+#[cfg(feature = "runtime-pwm")]
+const PWM_OUTPUT_DUTY: LedcDuty = LedcDuty::Duty10Bit;
+#[cfg(feature = "runtime-pwm")]
+const PWM_OUTPUT_DUTY_STEPS: u64 = 1 << 10;
+/// Largest LEDC clock divisor, eight fractional bits included.
+#[cfg(feature = "runtime-pwm")]
+const PWM_OUTPUT_MAX_DIVISOR: u64 = 0x3_ffff;
+#[cfg(feature = "runtime-pwm")]
+const PWM_OUTPUT_INITIAL_HZ: u32 = 1_000;
+
+/// One LEDC timer and channel driving one pin at a retunable frequency.
+///
+/// The channel keeps the timer it was configured with in static storage;
+/// retuning reprograms the same hardware timer through a second handle with
+/// the same duty resolution, so the channel's duty stays a share of the
+/// period.
+#[cfg(feature = "runtime-pwm")]
+pub struct PwmOutput {
+    channel: Channel<'static, LowSpeed>,
+    retune: Timer<'static, LowSpeed>,
+    source_hz: u32,
+}
+
+/// Configures one LEDC timer at 1 kHz and its channel, silent, on `pin`.
+///
+/// # Errors
+///
+/// Returns [`ExposedPwmError`] when the timer or channel rejects its
+/// configuration.
+#[cfg(feature = "runtime-pwm")]
+pub fn pwm_output(
+    controller: PwmController,
+    timer: RuntimePwmTimer,
+    channel: LedcChannelNumber,
+    pin: impl PeripheralOutput<'static>,
+) -> Result<PwmOutput, ExposedPwmError> {
+    let config = LedcTimerConfig {
+        duty: PWM_OUTPUT_DUTY,
+        clock_source: LSClockSource::APBClk,
+        frequency: Rate::from_hz(PWM_OUTPUT_INITIAL_HZ),
+    };
+    let mut configured = controller.timer(timer.number);
+    configured
+        .configure(config)
+        .map_err(ExposedPwmError::Timer)?;
+    let source_hz = configured.freq().map_or(0, |rate| rate.as_hz());
+    let configured: &'static Timer<'static, LowSpeed> = timer.storage.init(configured);
+    let mut output = controller.channel(channel, pin);
+    output
+        .configure(esp_hal::ledc::channel::config::Config {
+            timer: configured,
+            duty_pct: 0,
+            drive_mode: DriveMode::PushPull,
+        })
+        .map_err(ExposedPwmError::Channel)?;
+    Ok(PwmOutput {
+        channel: output,
+        retune: controller.timer(timer.number),
+        source_hz,
+    })
+}
+
+// SAFETY: a `PwmOutput` is the only owner of its LEDC timer and channel. The
+// references inside the vendor handles point at the LEDC register block and
+// at the timer descriptor in static storage; neither is tied to the task or
+// core that built them, and only this owner touches its timer's and
+// channel's registers.
+#[allow(unsafe_code)]
+#[cfg(feature = "runtime-pwm")]
+unsafe impl Send for PwmOutput {}
+
+#[cfg(feature = "runtime-pwm")]
+impl embedded_hal::pwm::ErrorType for PwmOutput {
+    type Error = LedcChannelError;
+}
+
+#[cfg(feature = "runtime-pwm")]
+impl embedded_hal::pwm::SetDutyCycle for PwmOutput {
+    fn max_duty_cycle(&self) -> u16 {
+        self.channel.max_duty_cycle()
+    }
+
+    fn set_duty_cycle(&mut self, duty: u16) -> Result<(), Self::Error> {
+        self.channel.set_duty_cycle(duty)
+    }
+}
+
+#[cfg(feature = "runtime-pwm")]
+impl barracuda_board_hal::PwmFrequencyControl for PwmOutput {
+    fn frequency_range(&self) -> (u32, u32) {
+        // The timer divides its clock by 1 to 1024 (with eight fractional
+        // bits) and counts `PWM_OUTPUT_DUTY_STEPS` per period.
+        let source = u64::from(self.source_hz);
+        let lowest = (source << 8).div_ceil(PWM_OUTPUT_MAX_DIVISOR * PWM_OUTPUT_DUTY_STEPS);
+        let highest = source / PWM_OUTPUT_DUTY_STEPS;
+        (
+            u32::try_from(lowest).unwrap_or(u32::MAX),
+            u32::try_from(highest).unwrap_or(u32::MAX),
+        )
+    }
+
+    fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error> {
+        if frequency_hz == 0 {
+            return Err(LedcChannelError::Timer);
+        }
+        self.retune
+            .configure(LedcTimerConfig {
+                duty: PWM_OUTPUT_DUTY,
+                clock_source: LSClockSource::APBClk,
+                frequency: Rate::from_hz(frequency_hz),
+            })
+            .map_err(|_| LedcChannelError::Timer)
+    }
+}

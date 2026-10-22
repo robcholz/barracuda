@@ -32,6 +32,14 @@ peripherals:
         # through 25.1 k over 5.1 k (`_adc_ratio = 25.1f / 5.1f`).
         peripheral: ADC1
         pin: GPIO35
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO2 (M5Unified `_begin_audio` board_M5StackCoreInk:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO2
   devices:
     battery:
       implementation: adc-battery-power-monitor
@@ -69,6 +77,11 @@ peripherals:
         pin: GPIO10
       parameters:
         active-level: low
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
 exposed-io:
   pins:
     # Grove port G32/G33 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).

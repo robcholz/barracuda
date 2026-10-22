@@ -1,0 +1,34 @@
+[package]
+name = "barracuda-buzzer-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda Plugin exposing the built-in buzzer to Lua"
+license = "AGPL-3.0-only"
+
+[build-dependencies]
+barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
+
+[dependencies]
+portable-atomic-util.workspace = true
+portable-atomic.workspace = true
+barracuda-board-hal.workspace = true
+barracuda-plugin.workspace = true
+barracuda-vm-plugin.workspace = true
+critical-section = "1"
+
+[dev-dependencies]
+barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }
+critical-section = { version = "1", features = ["std"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

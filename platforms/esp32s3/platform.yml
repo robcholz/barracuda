@@ -17,7 +17,7 @@ build:
       cargo install espup
       espup install --toolchain-version 1.98.1.0
 hal:
-  bindings: [digital-input, digital-output, gpio, spi-device, quad-spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, camera-capture, parallel-output, i2s-stream, pdm-i2s-stream, capacitive-touch, analog-input, pulse-counter, power-hold]
+  bindings: [digital-input, digital-output, gpio, spi-device, quad-spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, camera-capture, parallel-output, i2s-stream, pdm-i2s-stream, capacitive-touch, analog-input, pulse-counter, power-hold, rmt-output, rmt-input, pwm-output]
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2, SPI3]
   runtime-uart-controllers: [UART1]
@@ -46,6 +46,10 @@ hal:
   # reach any pin through the GPIO matrix and run from the Board's own 3.3 V.
   sdmmc-slots:
     - slot: 0
+  # RMT: channels 0-3 transmit and 4-7 receive (esp-hal `rmt`).
+  rmt-channels:
+    transmit: [0, 1, 2, 3]
+    receive: [4, 5, 6, 7]
 selection:
   board-chips:
     - esp32s3

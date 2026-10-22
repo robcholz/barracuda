@@ -29,12 +29,15 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
-| `status-led` | 指示 LED | — |
 | `real-time-clock` | 实时时钟（BM8563） | — |
 | `inertial-measurement` | 运动传感器（MPU6886） | [`motion`](/zh/plugins/vm-imu) |
 | `buttons` | 按键 A、B 和电源键（GPIO37、GPIO39、GPIO35） | — |
 | `battery` | 电池电压（ADC 电阻分压） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `microphone` | 麦克风（SPM1423 PDM） | [`audio`](/zh/plugins/vm-audio) |
+| `infrared` | 红外发射器（GPIO19） | [`infrared`](/zh/plugins/vm-infrared) |
+| `buzzer` | 无源蜂鸣器（GPIO2） | [`buzzer`](/zh/plugins/vm-buzzer) |
+
+红色 LED 与红外 LED 共用 GPIO19，每次红外发射时都会亮起；它没有声明为指示灯。
 
 平台入口在构建任何其他部分之前就把电池电源锁存脚 `GPIO4`（`hardware.power-hold`）驱动为高电平，因此不接 USB 时松开电源键后开发板也会保持开机。
 

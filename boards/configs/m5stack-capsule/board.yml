@@ -42,12 +42,29 @@ peripherals:
         miso: GPIO39
         chip-select: GPIO11
         frequency-hz: 20000000
-    spi-output:
+    rmt-output:
       rgb-led-data:
         # StampS3 module WS2812C on GPIO21 (M5Unified `_pin_table_other0` (RGBLED);
         # EBM `m5stack_capsule`, GRB).
-        data: GPIO21
-        frequency-hz: 2400000
+        # Clocked out of RMT channel 0, so the LED takes no SPI controller
+        # from the runtime SPI pool the exposed pins use.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO21
+      ir-transmit:
+        # IR LED on GPIO4, active high (Espressif `m5stack_capsule`:
+        # Sch_M5Capsule sheet 1, IR1 anode on G4), on RMT channel 1.
+        peripheral: RMT
+        channel: 1
+        pin: GPIO4
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO2 (M5Unified `_begin_audio` board_M5Capsule:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO2
   devices:
     micro-sd:
       implementation: spi-sd-fat-removable-storage
@@ -62,9 +79,9 @@ peripherals:
         divider-numerator: 2
     # The StampS3's RGB LED, one LED, GRB order.
     led-strip:
-      implementation: ws2812-spi-led-strip
+      implementation: rmt-led-strip
       bindings:
-        spi: rgb-led-data
+        data: rgb-led-data
       parameters:
         led-count: 1
         color-order: grb
@@ -86,6 +103,15 @@ peripherals:
         # BMI270 at 69h: SDO pulled to VDDIO (Capsule schematic, sheet 2; Espressif
         # m5stack_capsule).
         address: 105
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
 exposed-io:
   pins:
     # Grove port G13/G15 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).

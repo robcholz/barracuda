@@ -53,6 +53,14 @@ peripherals:
         miso: GPIO40
         chip-select: GPIO47
         frequency-hz: 20000000
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO21 (M5Unified `_begin_audio` board_M5PaperS3:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO21
   devices:
     micro-sd:
       implementation: spi-sd-fat-removable-storage
@@ -98,6 +106,11 @@ peripherals:
       parameters:
         # BMI270 at 68h (Espressif m5stack_papers3; M5Stack PaperS3 pin map).
         address: 104
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
 exposed-io:
   pins:
     # Grove port G1/G2 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).

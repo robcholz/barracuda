@@ -378,6 +378,12 @@ pub struct PeripheralIoDefinition {
     pdm_i2s_streams: BTreeMap<String, PdmI2sStreamDefinition>,
     #[serde(default, rename = "pulse-counter")]
     pulse_counters: BTreeMap<String, PulseCounterDefinition>,
+    #[serde(default, rename = "rmt-output")]
+    rmt_outputs: BTreeMap<String, RmtChannelDefinition>,
+    #[serde(default, rename = "rmt-input")]
+    rmt_inputs: BTreeMap<String, RmtChannelDefinition>,
+    #[serde(default, rename = "pwm-output")]
+    pwm_outputs: BTreeMap<String, PwmOutputDefinition>,
 }
 
 impl PeripheralIoDefinition {
@@ -399,6 +405,9 @@ impl PeripheralIoDefinition {
             && self.analog_inputs.is_empty()
             && self.pdm_i2s_streams.is_empty()
             && self.pulse_counters.is_empty()
+            && self.rmt_outputs.is_empty()
+            && self.rmt_inputs.is_empty()
+            && self.pwm_outputs.is_empty()
     }
 
     /// Finds one MIPI DSI host reserved by a display implementation.
@@ -508,6 +517,47 @@ impl PeripheralIoDefinition {
         self.pulse_counters.get(name)
     }
 
+    /// Finds one pulse-train output channel reserved by a peripheral
+    /// implementation.
+    #[must_use]
+    pub fn rmt_output(&self, name: &str) -> Option<&RmtChannelDefinition> {
+        self.rmt_outputs.get(name)
+    }
+
+    /// Iterates every declared pulse-train output in stable Board-name order.
+    pub fn rmt_outputs(&self) -> impl Iterator<Item = (&str, &RmtChannelDefinition)> {
+        self.rmt_outputs
+            .iter()
+            .map(|(name, channel)| (name.as_str(), channel))
+    }
+
+    /// Finds one pulse-train input channel reserved by a peripheral
+    /// implementation.
+    #[must_use]
+    pub fn rmt_input(&self, name: &str) -> Option<&RmtChannelDefinition> {
+        self.rmt_inputs.get(name)
+    }
+
+    /// Iterates every declared pulse-train input in stable Board-name order.
+    pub fn rmt_inputs(&self) -> impl Iterator<Item = (&str, &RmtChannelDefinition)> {
+        self.rmt_inputs
+            .iter()
+            .map(|(name, channel)| (name.as_str(), channel))
+    }
+
+    /// Finds one retunable PWM output reserved by a peripheral implementation.
+    #[must_use]
+    pub fn pwm_output(&self, name: &str) -> Option<&PwmOutputDefinition> {
+        self.pwm_outputs.get(name)
+    }
+
+    /// Iterates every declared PWM output in stable Board-name order.
+    pub fn pwm_outputs(&self) -> impl Iterator<Item = (&str, &PwmOutputDefinition)> {
+        self.pwm_outputs
+            .iter()
+            .map(|(name, output)| (name.as_str(), output))
+    }
+
     /// Returns how many `spi-device` declarations share the SPI controller
     /// `peripheral`. Devices on one controller share its clock and data
     /// lines, each with its own chip select and clock rate.
@@ -579,6 +629,11 @@ impl PeripheralIoDefinition {
             || self
                 .pulse_counters
                 .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .rmt_outputs
+                .values()
+                .chain(self.rmt_inputs.values())
                 .any(|binding| binding.peripheral == peripheral)
     }
 
@@ -727,7 +782,123 @@ impl PeripheralIoDefinition {
             validate_identifier(name, "a", &counter.a)?;
             validate_identifier(name, "b", &counter.b)?;
         }
+        for (section, channels) in [
+            ("internal rmt-output", &self.rmt_outputs),
+            ("internal rmt-input", &self.rmt_inputs),
+        ] {
+            for (name, channel) in channels {
+                validate_resource_name(section, name)?;
+                validate_identifier(name, "peripheral", &channel.peripheral)?;
+                validate_identifier(name, "pin", &channel.pin)?;
+            }
+        }
+        // One channel of a transceiver serves one direction of one device.
+        let rmt_channels = self
+            .rmt_outputs
+            .iter()
+            .chain(self.rmt_inputs.iter())
+            .collect::<Vec<_>>();
+        for (index, (name, channel)) in rmt_channels.iter().enumerate() {
+            if let Some((other, _)) = rmt_channels[..index].iter().find(|(_, candidate)| {
+                candidate.peripheral == channel.peripheral && candidate.channel == channel.channel
+            }) {
+                return Err(ConfigError::RmtChannelInUse {
+                    resource: (*name).clone(),
+                    channel: channel.channel,
+                    other: (*other).clone(),
+                });
+            }
+        }
+        for (name, output) in &self.pwm_outputs {
+            validate_resource_name("internal pwm-output", name)?;
+            validate_identifier(name, "peripheral", &output.peripheral)?;
+            validate_identifier(name, "timer", &output.timer)?;
+            validate_identifier(name, "channel", &output.channel)?;
+            validate_identifier(name, "pin", &output.pin)?;
+            // Each output retunes its own timer, so outputs share neither.
+            if let Some((other, _)) = self.pwm_outputs.iter().find(|(other, candidate)| {
+                *other < name
+                    && candidate.peripheral == output.peripheral
+                    && (candidate.timer == output.timer || candidate.channel == output.channel)
+            }) {
+                return Err(ConfigError::PwmOutputShared {
+                    resource: name.clone(),
+                    other: other.clone(),
+                });
+            }
+        }
         Ok(())
+    }
+}
+
+/// One channel of a remote-control transceiver (the ESP RMT) and its pin.
+///
+/// Several channels may name one transceiver; the composition builds it once
+/// and hands each implementation its channel.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RmtChannelDefinition {
+    peripheral: String,
+    channel: u8,
+    pin: String,
+}
+
+impl RmtChannelDefinition {
+    /// Returns the chip-native transceiver.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the transceiver channel.
+    #[must_use]
+    pub const fn channel(&self) -> u8 {
+        self.channel
+    }
+
+    /// Returns the pin the channel drives or samples.
+    #[must_use]
+    pub fn pin(&self) -> &str {
+        &self.pin
+    }
+}
+
+/// One timer and output channel of a PWM controller (the ESP LEDC) and the
+/// pin it drives. The implementation retunes the timer, so a buzzer can
+/// change pitch; the controller's other timers and channels stay with the
+/// runtime PWM pool.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PwmOutputDefinition {
+    peripheral: String,
+    timer: String,
+    channel: String,
+    pin: String,
+}
+
+impl PwmOutputDefinition {
+    /// Returns the chip-native PWM controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the controller timer the output owns.
+    #[must_use]
+    pub fn timer(&self) -> &str {
+        &self.timer
+    }
+
+    /// Returns the controller output channel the output owns.
+    #[must_use]
+    pub fn channel(&self) -> &str {
+        &self.channel
+    }
+
+    /// Returns the pin the channel drives.
+    #[must_use]
+    pub fn pin(&self) -> &str {
+        &self.pin
     }
 }
 
@@ -2622,6 +2793,24 @@ pub enum ConfigError {
     ZeroDmaBuffer {
         /// Board-level camera or I2S resource name.
         resource: String,
+    },
+    /// Two pulse-train resources name one transceiver channel.
+    #[error("Board RMT resource `{resource}` claims channel {channel}, which `{other}` uses")]
+    RmtChannelInUse {
+        /// Board-level resource name.
+        resource: String,
+        /// The doubly claimed channel.
+        channel: u8,
+        /// The resource that claimed it first.
+        other: String,
+    },
+    /// Two PWM outputs name one timer or channel of a controller.
+    #[error("Board PWM output `{resource}` shares a timer or channel with `{other}`")]
+    PwmOutputShared {
+        /// Board-level resource name.
+        resource: String,
+        /// The other output.
+        other: String,
     },
 }
 

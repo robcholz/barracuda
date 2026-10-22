@@ -49,6 +49,23 @@ peripherals:
         din: GPIO34
         sample-rate-hz: 16000
         dma-buffer-bytes: 4096
+    rmt-output:
+      ir-transmit:
+        # The red status LED and the IR LED hang on one pin, GPIO19, active high
+        # (Espressif `m5stack_stickc_plus2`: "an IR burst also blinks the red
+        # LED"). The pin serves the infrared transmitter, so the red LED lights
+        # with each burst and is no status indicator.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO19
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO2 (M5Unified `_begin_audio` board_M5StickCPlus2:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO2
   devices:
     battery:
       implementation: adc-battery-power-monitor
@@ -89,14 +106,15 @@ peripherals:
         button-1: GPIO37
         button-2: GPIO39
         button-3: GPIO35
-    status-led:
-      implementation: indicator-led
-      bindings:
-        # Red status LED, shared with the IR emitter, on GPIO19, active high (Espressif
-        # m5stack_stickc_plus2; M5Unified `StickCPlus2_LED_PIN`).
-        pin: GPIO19
-      parameters:
-        active-level: high
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
 exposed-io:
   pins:
     # Grove port G32/G33 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).

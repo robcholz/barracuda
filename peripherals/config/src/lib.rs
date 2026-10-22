@@ -21,11 +21,13 @@ pub const PERIPHERAL_API_VERSION: u16 = 1;
 pub const PERIPHERAL_APIS: &[&str] = &[
     "audio-codec",
     "buttons",
+    "buzzer",
     "camera",
     "display",
     "environment-sensor",
     "indicator",
     "inertial-measurement",
+    "infrared",
     "keyboard",
     "led-strip",
     "power-monitor",
@@ -33,6 +35,7 @@ pub const PERIPHERAL_APIS: &[&str] = &[
     "removable-storage",
     "rotary-encoder",
     "touch",
+    "vibration",
 ];
 
 /// All convention-discovered peripheral implementation manifests, indexed by stable ID.
@@ -205,8 +208,8 @@ pub enum BindingKind {
     /// A concrete pin the implementation switches between input and output,
     /// through Barracuda's `ConfigurableDigitalPin`.
     Gpio,
-    /// One PWM output channel.
-    Pwm,
+    /// One retunable PWM output: a timer and channel of a PWM controller.
+    PwmOutput,
     /// One addressed I2C device.
     I2cDevice,
     /// One selected SPI device.
@@ -237,6 +240,10 @@ pub enum BindingKind {
     PdmI2sStream,
     /// One pulse-counter unit decoding a quadrature encoder.
     PulseCounter,
+    /// One pulse-train output channel of a shared remote-control transceiver.
+    RmtOutput,
+    /// One pulse-train input channel of a shared remote-control transceiver.
+    RmtInput,
     /// A semantic power-control binding.
     PowerControl,
     /// A semantic brightness-control binding.
@@ -550,6 +557,30 @@ pub enum GenerateError {
         slot: u8,
         /// The supply the Platform powers the slot from, in Board terms.
         expected: String,
+    },
+    /// A Board's pulse-train resource names a transceiver channel the
+    /// Platform does not offer in that direction.
+    #[error(
+        "Platform `{platform}` offers no RMT channel {channel} in the direction `{resource}` uses"
+    )]
+    UnsupportedRmtChannel {
+        /// Platform selected for the Board.
+        platform: String,
+        /// Board-level resource name.
+        resource: String,
+        /// The channel the Board declares.
+        channel: u8,
+    },
+    /// A Board's PWM output names a timer or channel of the Platform's
+    /// runtime PWM pool.
+    #[error(
+        "PWM output `{resource}` names a timer or channel that Platform `{platform}` keeps for its runtime PWM pool"
+    )]
+    PwmOutputInRuntimePool {
+        /// Platform selected for the Board.
+        platform: String,
+        /// Board-level resource name.
+        resource: String,
     },
     /// A data-only SPI binding has no unreserved Platform controller.
     #[error("Platform has no unreserved SPI controller for a data-only output")]
@@ -984,7 +1015,13 @@ pub fn resolve_board<'a>(
                     || (schema.kind() == BindingKind::PdmI2sStream
                         && board.peripheral_io().pdm_i2s_stream(resource).is_none())
                     || (schema.kind() == BindingKind::PulseCounter
-                        && board.peripheral_io().pulse_counter(resource).is_none()))
+                        && board.peripheral_io().pulse_counter(resource).is_none())
+                    || (schema.kind() == BindingKind::RmtOutput
+                        && board.peripheral_io().rmt_output(resource).is_none())
+                    || (schema.kind() == BindingKind::RmtInput
+                        && board.peripheral_io().rmt_input(resource).is_none())
+                    || (schema.kind() == BindingKind::PwmOutput
+                        && board.peripheral_io().pwm_output(resource).is_none()))
             {
                 return Err(ResolveError::UnknownInternalResource {
                     peripheral: name.to_owned(),
@@ -1197,6 +1234,49 @@ pub fn validate_platform_hal(
             binding: HalBinding::SpiBus,
         });
     }
+    for (resource, channel) in board.peripheral_io().rmt_outputs() {
+        if !platform
+            .hal()
+            .rmt_channels()
+            .transmit()
+            .contains(&channel.channel())
+        {
+            return Err(GenerateError::UnsupportedRmtChannel {
+                platform: platform.name().to_owned(),
+                resource: resource.to_owned(),
+                channel: channel.channel(),
+            });
+        }
+    }
+    for (resource, channel) in board.peripheral_io().rmt_inputs() {
+        if !platform
+            .hal()
+            .rmt_channels()
+            .receive()
+            .contains(&channel.channel())
+        {
+            return Err(GenerateError::UnsupportedRmtChannel {
+                platform: platform.name().to_owned(),
+                resource: resource.to_owned(),
+                channel: channel.channel(),
+            });
+        }
+    }
+    for (resource, output) in board.peripheral_io().pwm_outputs() {
+        if platform.hal().runtime_pwm_controllers().iter().any(|pool| {
+            pool.controller() == output.peripheral()
+                && (pool.timers().iter().any(|timer| timer == output.timer())
+                    || pool
+                        .channels()
+                        .iter()
+                        .any(|channel| channel == output.channel()))
+        }) {
+            return Err(GenerateError::PwmOutputInRuntimePool {
+                platform: platform.name().to_owned(),
+                resource: resource.to_owned(),
+            });
+        }
+    }
     for peripheral in resolved.peripherals() {
         for (role, schema) in peripheral.implementation().bindings() {
             if peripheral.binding(role).is_some()
@@ -1233,6 +1313,9 @@ const fn hal_binding(kind: BindingKind) -> Option<HalBinding> {
         BindingKind::AnalogInput => Some(HalBinding::AnalogInput),
         BindingKind::PdmI2sStream => Some(HalBinding::PdmI2sStream),
         BindingKind::PulseCounter => Some(HalBinding::PulseCounter),
+        BindingKind::RmtOutput => Some(HalBinding::RmtOutput),
+        BindingKind::RmtInput => Some(HalBinding::RmtInput),
+        BindingKind::PwmOutput => Some(HalBinding::PwmOutput),
         _ => None,
     }
 }
@@ -1312,6 +1395,21 @@ fn claimable_peripheral(
             "take_rotary_encoder",
             "RotaryEncoder",
         ),
+        "buzzer" => (
+            "::barracuda_board_hal::buzzer::BuzzerPeripheral",
+            "take_buzzer",
+            "Buzzer",
+        ),
+        "vibration" => (
+            "::barracuda_board_hal::vibration::VibrationPeripheral",
+            "take_vibration",
+            "Vibration",
+        ),
+        "infrared" => (
+            "::barracuda_board_hal::infrared::InfraredPeripheral",
+            "take_infrared",
+            "Infrared",
+        ),
         _ => return None,
     })
 }
@@ -1347,6 +1445,23 @@ struct RenderedSpiBus {
     constructor: String,
 }
 
+/// One remote-control transceiver whose channels several pulse-train
+/// bindings use.
+#[derive(Debug)]
+struct RenderedRmtController {
+    local: String,
+    controller: String,
+    error_variant: String,
+}
+
+/// One PWM controller whose timers and channels PWM outputs and the runtime
+/// PWM pool share.
+#[derive(Debug)]
+struct RenderedPwmController {
+    local: String,
+    controller: String,
+}
+
 /// One ADC controller whose channels several analog inputs use.
 #[derive(Debug)]
 struct RenderedAdcConverter {
@@ -1370,6 +1485,8 @@ struct RenderState {
     i2c_buses: BTreeMap<String, RenderedI2cBus>,
     spi_buses: BTreeMap<String, RenderedSpiBus>,
     adc_converters: BTreeMap<String, RenderedAdcConverter>,
+    rmt_controllers: BTreeMap<String, RenderedRmtController>,
+    pwm_controllers: BTreeMap<String, RenderedPwmController>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1621,17 +1738,21 @@ fn render_generic_hal(
     }
     for resource in &runtime_pwm_controllers {
         validate_hardware_identifier(resource.controller())?;
-        let field = checked_identifier(
-            &format!("runtime_pwm_controller_{}", resource.controller()),
-            &mut state.identifiers,
-        )?;
-        state.raw_fields.push((
-            field,
-            format!(
-                "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
-                resource.controller()
-            ),
-        ));
+        // A controller a Board PWM output also uses is built once, before
+        // the peripherals, and the pool takes its own timers from it.
+        if !state.pwm_controllers.contains_key(resource.controller()) {
+            let field = checked_identifier(
+                &format!("runtime_pwm_controller_{}", resource.controller()),
+                &mut state.identifiers,
+            )?;
+            state.raw_fields.push((
+                field,
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                    resource.controller()
+                ),
+            ));
+        }
         for timer in resource.timers() {
             validate_hardware_identifier(timer)?;
         }
@@ -1843,6 +1964,35 @@ fn render_generic_hal(
                 "impl ::barracuda_board_hal::touch::TouchPeripheral for GeneratedPeripherals {\n    type Touch = ::barracuda_board_hal::UnavailableTouch;\n    fn take_touch(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::Touch> { None }\n}\n\n",
             );
         }
+        for (peripheral_api, trait_path, function, associated, unavailable) in [
+            (
+                "buzzer",
+                "buzzer::BuzzerPeripheral",
+                "take_buzzer",
+                "Buzzer",
+                "UnavailableBuzzer",
+            ),
+            (
+                "vibration",
+                "vibration::VibrationPeripheral",
+                "take_vibration",
+                "Vibration",
+                "UnavailableVibration",
+            ),
+            (
+                "infrared",
+                "infrared::InfraredPeripheral",
+                "take_infrared",
+                "Infrared",
+                "UnavailableInfrared",
+            ),
+        ] {
+            if !primary_peripherals.contains(peripheral_api) {
+                source.push_str(&format!(
+                    "impl ::barracuda_board_hal::{trait_path} for GeneratedPeripherals {{\n    type {associated} = ::barracuda_board_hal::{unavailable};\n    fn {function}(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::{associated}> {{ None }}\n}}\n\n"
+                ));
+            }
+        }
         if !primary_peripherals.contains("buttons") {
             source.push_str(
                 "impl ::barracuda_board_hal::buttons::ButtonsPeripheral for GeneratedPeripherals {\n    type Buttons = ::barracuda_board_hal::UnavailableButtons;\n    fn take_buttons(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::Buttons> { None }\n}\n\n",
@@ -1947,6 +2097,18 @@ fn render_generic_hal(
             converter.local, converter.controller_token, converter.controller, converter.config,
         ));
     }
+    for rmt in state.rmt_controllers.values() {
+        source.push_str(&format!(
+            "        let {} = ::barracuda_platform_selected::__platform::hal::rmt_controller(bindings.{}).map_err(GeneratedBoardError::{})?;\n",
+            rmt.local, rmt.controller, rmt.error_variant,
+        ));
+    }
+    for pwm in state.pwm_controllers.values() {
+        source.push_str(&format!(
+            "        let {}: ::barracuda_platform_selected::__platform::hal::PwmController = ::barracuda_platform_selected::__platform::hal::pwm_controller!(bindings.{});\n",
+            pwm.local, pwm.controller,
+        ));
+    }
     if peripheral_models {
         // The HAL attaches each declared peripheral's device model before
         // any implementation starts talking to its bus.
@@ -2026,9 +2188,15 @@ fn render_generic_hal(
     }
     source.push_str("        ], [\n");
     for resource in &runtime_pwm_controllers {
-        let field = rust_identifier(&format!("runtime_pwm_controller_{}", resource.controller()));
+        let controller = match state.pwm_controllers.get(resource.controller()) {
+            Some(shared) => shared.local.clone(),
+            None => format!(
+                "::barracuda_platform_selected::__platform::hal::pwm_controller!(bindings.{})",
+                rust_identifier(&format!("runtime_pwm_controller_{}", resource.controller()))
+            ),
+        };
         source.push_str(&format!(
-            "            ::barracuda_platform_selected::__platform::hal::runtime_pwm_resource(bindings.{field}, &[\n"
+            "            ::barracuda_platform_selected::__platform::hal::runtime_pwm_resource({controller}, &[\n"
         ));
         for timer in resource.timers() {
             source.push_str(&format!(
@@ -2141,6 +2309,9 @@ fn optional_binding_type(
         )),
         BindingKind::I2cDevice => Ok(String::from(
             "::barracuda_platform_selected::__platform::hal::I2cDevice",
+        )),
+        BindingKind::RmtInput => Ok(String::from(
+            "::barracuda_platform_selected::__platform::hal::PulseInputChannel",
         )),
         _ => Err(GenerateError::UnsupportedBindingKind {
             implementation: peripheral.implementation().id().to_owned(),
@@ -3360,12 +3531,177 @@ fn render_binding(
                 ),
             ))
         }
+        BindingKind::RmtOutput | BindingKind::RmtInput => {
+            render_rmt_channel(board, peripheral, role, schema.kind(), resource, state)
+        }
+        BindingKind::PwmOutput => render_pwm_output(board, peripheral, role, resource, state),
         kind => Err(GenerateError::UnsupportedBindingKind {
             implementation: peripheral.implementation().id().to_owned(),
             binding: role.to_owned(),
             kind,
         }),
     }
+}
+
+/// Renders one pulse-train channel of a transceiver several bindings share:
+/// the transceiver is built once, and each binding takes its own channel.
+fn render_rmt_channel(
+    board: &BoardDefinition,
+    peripheral: &ResolvedPeripheral<'_>,
+    role: &str,
+    kind: BindingKind,
+    resource: &str,
+    state: &mut RenderState,
+) -> Result<(String, String), GenerateError> {
+    let output = kind == BindingKind::RmtOutput;
+    let unresolved = || GenerateError::UnsupportedResolvedValue {
+        peripheral: peripheral.name().to_owned(),
+        parameter: format!("{role} binding"),
+    };
+    let channel = if output {
+        board.peripheral_io().rmt_output(resource)
+    } else {
+        board.peripheral_io().rmt_input(resource)
+    }
+    .ok_or_else(unresolved)?;
+    validate_hardware_identifier(channel.peripheral())?;
+    validate_hardware_identifier(channel.pin())?;
+    if !state.rmt_controllers.contains_key(channel.peripheral()) {
+        let prefix = format!("shared_rmt_{}", channel.peripheral());
+        let local = checked_identifier(&prefix, &mut state.identifiers)?;
+        let controller =
+            checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+        state.raw_fields.push((
+            controller.clone(),
+            format!(
+                "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                channel.peripheral()
+            ),
+        ));
+        let error_variant = format!("{}Controller", pascal_identifier(channel.peripheral()));
+        state.binding_errors.push((
+            error_variant.clone(),
+            String::from("::barracuda_platform_selected::__platform::hal::RmtError"),
+        ));
+        state.rmt_controllers.insert(
+            channel.peripheral().to_owned(),
+            RenderedRmtController {
+                local,
+                controller,
+                error_variant,
+            },
+        );
+    }
+    let prefix = format!("{}_{}", peripheral.name(), role);
+    let pin = checked_identifier(&format!("{prefix}_pin"), &mut state.identifiers)?;
+    state.raw_fields.push((
+        pin.clone(),
+        format!(
+            "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+            channel.pin()
+        ),
+    ));
+    let variant = format!(
+        "{}{}Binding",
+        pascal_identifier(peripheral.name()),
+        pascal_identifier(role)
+    );
+    state.binding_errors.push((
+        variant.clone(),
+        String::from("::barracuda_platform_selected::__platform::hal::RmtError"),
+    ));
+    let local = state
+        .rmt_controllers
+        .get(channel.peripheral())
+        .map(|rmt| rmt.local.clone())
+        .ok_or_else(unresolved)?;
+    let (ty, function) = if output {
+        ("PulseOutputChannel", "rmt_output")
+    } else {
+        ("PulseInputChannel", "rmt_input")
+    };
+    Ok((
+        format!("::barracuda_platform_selected::__platform::hal::{ty}"),
+        format!(
+            "::barracuda_platform_selected::__platform::hal::{function}(::barracuda_platform_selected::__platform::hal::rmt_channel!({local}, {}), bindings.{pin}).map_err(GeneratedBoardError::{variant})?",
+            channel.channel()
+        ),
+    ))
+}
+
+/// Renders one retunable PWM output on a controller it may share with other
+/// outputs and the runtime PWM pool: the controller is built once.
+fn render_pwm_output(
+    board: &BoardDefinition,
+    peripheral: &ResolvedPeripheral<'_>,
+    role: &str,
+    resource: &str,
+    state: &mut RenderState,
+) -> Result<(String, String), GenerateError> {
+    let unresolved = || GenerateError::UnsupportedResolvedValue {
+        peripheral: peripheral.name().to_owned(),
+        parameter: format!("{role} binding"),
+    };
+    let output = board
+        .peripheral_io()
+        .pwm_output(resource)
+        .ok_or_else(unresolved)?;
+    for identifier in [
+        output.peripheral(),
+        output.timer(),
+        output.channel(),
+        output.pin(),
+    ] {
+        validate_hardware_identifier(identifier)?;
+    }
+    if !state.pwm_controllers.contains_key(output.peripheral()) {
+        let prefix = format!("shared_pwm_{}", output.peripheral());
+        let local = checked_identifier(&prefix, &mut state.identifiers)?;
+        let controller =
+            checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+        state.raw_fields.push((
+            controller.clone(),
+            format!(
+                "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                output.peripheral()
+            ),
+        ));
+        state.pwm_controllers.insert(
+            output.peripheral().to_owned(),
+            RenderedPwmController { local, controller },
+        );
+    }
+    let prefix = format!("{}_{}", peripheral.name(), role);
+    let pin = checked_identifier(&format!("{prefix}_pin"), &mut state.identifiers)?;
+    state.raw_fields.push((
+        pin.clone(),
+        format!(
+            "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+            output.pin()
+        ),
+    ));
+    let variant = format!(
+        "{}{}Binding",
+        pascal_identifier(peripheral.name()),
+        pascal_identifier(role)
+    );
+    state.binding_errors.push((
+        variant.clone(),
+        String::from("::barracuda_platform_selected::__platform::hal::ExposedPwmError"),
+    ));
+    let local = state
+        .pwm_controllers
+        .get(output.peripheral())
+        .map(|pwm| pwm.local.clone())
+        .ok_or_else(unresolved)?;
+    Ok((
+        String::from("::barracuda_platform_selected::__platform::hal::PwmOutput"),
+        format!(
+            "::barracuda_platform_selected::__platform::hal::pwm_output({local}, ::barracuda_platform_selected::__platform::hal::runtime_pwm_timer!({}), ::barracuda_platform_selected::__platform::hal::runtime_pwm_channel!({}), bindings.{pin}).map_err(GeneratedBoardError::{variant})?",
+            output.timer(),
+            output.channel(),
+        ),
+    ))
 }
 
 /// Renders one `spi-device` on a controller other devices share: the bus is

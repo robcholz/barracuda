@@ -37,6 +37,21 @@ peripherals:
         miso: GPIO9
         chip-select: GPIO10
         frequency-hz: 20000000
+    rmt-output:
+      rgb-led-data:
+        # The Stamp-S3A module's WS2812 on GPIO21 (M5Unified
+        # `_pin_table_other0` (RGBLED), board_M5StampPLC).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO21
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO44 (M5Unified `_begin_audio` board_M5StampPLC:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO44
   devices:
     micro-sd:
       implementation: spi-sd-fat-removable-storage
@@ -89,6 +104,22 @@ peripherals:
       parameters:
         # RX8130CE at 32h (M5Unified RTC_Class; M5Stack StamPLC pin map).
         address: 50
+    # The Stamp-S3A's RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: rgb-led-data
+        # The Stamp-S3A switches the LED supply on with GPIO38 high
+        # (docs.m5stack.com StamPLC).
+        power-enable: GPIO38
+      parameters:
+        led-count: 1
+        color-order: grb
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
 exposed-io:
   pins:
     # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Port C: M5Stack

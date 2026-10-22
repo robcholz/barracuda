@@ -238,7 +238,7 @@ Barracuda 不替换上游 HAL trait 已经定义的操作。`ConfigurableDigital
 
 应用指定的是暴露的引脚和功能参数，而不是芯片的控制器实例。例如，`i2c.open(scl, sda, frequency)` 请求提供者选择一个兼容的空闲控制器。这样就把控制器分配和外设预留留在平台组合中，并为控制器编号不同的开发板提供相同的应用 API。
 
-可复用的外设实现直接导入 `embedded-hal`、`embedded-hal-async` 和成熟的领域生态 trait。只有当生态中没有合适的契约时，Barracuda 才定义一个窄范围的绑定。目前的例子是并行摄像头帧接收、PCM 流，以及同时为 MIPI DBI 面板控制器和直接驱动的电子墨水屏源极驱动器输出数据的 8 位 Intel 8080 式并行输出；它们与外设 API 放在一起，而不是构成第二个通用 HAL。在 `embedded-hal` 之外，Board HAL 还增加了两个：`AnalogVoltageInput`，以毫伏读取的校准 ADC 通道；以及 `SpiDeviceControl`，让 SPI 模式的 SD 卡可以修改其设备的时钟，并在释放片选的情况下输出时钟。所选构建让具体的存储和分发保持静态分配；使用者不会在运行时查找平台、开发板或外设实现，异步 HAL trait 也不会被转换为 `dyn` trait 对象。
+可复用的外设实现直接导入 `embedded-hal`、`embedded-hal-async` 和成熟的领域生态 trait。只有当生态中没有合适的契约时，Barracuda 才定义一个窄范围的绑定。目前的例子是并行摄像头帧接收、PCM 流，以及同时为 MIPI DBI 面板控制器和直接驱动的电子墨水屏源极驱动器输出数据的 8 位 Intel 8080 式并行输出；它们与外设 API 放在一起，而不是构成第二个通用 HAL。在 `embedded-hal` 之外，Board HAL 还增加了几个：`AnalogVoltageInput`，以毫伏读取的校准 ADC 通道；`PulseOutput` 和 `PulseInput`，为 LED 灯带和红外输出或记录电平与时长符号的脉冲序列通道；`PwmFrequencyControl`，为蜂鸣器重新设置 PWM 输出的频率；以及 `SpiDeviceControl`，让 SPI 模式的 SD 卡可以修改其设备的时钟，并在释放片选的情况下输出时钟。所选构建让具体的存储和分发保持静态分配；使用者不会在运行时查找平台、开发板或外设实现，异步 HAL trait 也不会被转换为 `dyn` trait 对象。
 
 `embedded-hal` 没有对在输入和输出模式之间切换 GPIO 做标准化。因此，每个暴露给 VM 的数字句柄除了上游的操作 trait 之外，还实现小巧的开发板 HAL 配置契约。协议的复用功能由对应的提供者建立，而不是由数字 API 建立。每个平台的 `hal` 模块拥有厂商的引脚复用和控制器构造。
 

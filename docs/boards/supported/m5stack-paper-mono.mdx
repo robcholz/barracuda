@@ -33,6 +33,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `real-time-clock` | Real-time clock (RX8130CE) | — |
 | `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `buttons` | Buttons A and B (GPIO2, GPIO3) | — |
+| `buzzer` | Passive buzzer (GPIO42) | [`buzzer`](/plugins/vm-buzzer) |
 
 The M5PM1 measures the battery voltage only. This Board does not route the
 charger's status to it, so the battery reads as charging while VIN is present

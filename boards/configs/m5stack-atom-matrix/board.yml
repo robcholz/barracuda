@@ -21,6 +21,12 @@ peripherals:
         # M5Stack Atom Matrix: 25 WS2812C LEDs driven from GPIO27.
         data: GPIO27
         frequency-hz: 2400000
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO12, active high (Espressif `m5stack_atom_matrix` ir_tx).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO12
   devices:
     led-strip:
       implementation: ws2812-spi-led-strip
@@ -44,6 +50,10 @@ peripherals:
       implementation: gpio-buttons
       bindings:
         button-1: GPIO39
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
 exposed-io:
   pins:
     # M5Stack Atom Matrix Grove port (EBM m5stack_atom_matrix, M5Unified ex-I2C).

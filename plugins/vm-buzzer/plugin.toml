@@ -1,0 +1,6 @@
+id = "buzzer"
+depends-on = ["vm"]
+description = "Registers the built-in buzzer Lua package."
+
+[peripherals.buzzer]
+device = { fill = "primary", optional = true }

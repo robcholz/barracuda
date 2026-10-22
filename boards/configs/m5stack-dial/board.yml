@@ -26,13 +26,22 @@ peripherals:
         mosi: GPIO5
         chip-select: GPIO7
         frequency-hz: 80000000
-    spi-output:
+    rmt-output:
       rgb-led-data:
         # StampS3 module WS2812B-2020 on GPIO21 (M5Unified `_pin_table_other0` (RGBLED)).
-        # Dial v1.1 carries a Stamp-S3A, whose LED supply is switched by GPIO38
-        # (docs.m5stack.com K130-V11); this Board does not drive GPIO38.
-        data: GPIO21
-        frequency-hz: 2400000
+        # Clocked out of RMT channel 0, so the LED takes no SPI controller
+        # from the runtime SPI pool the exposed pins use.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO21
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO3 (M5Unified `_begin_audio` board_M5Dial:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO3
     pulse-counter:
       knob:
         # The knob's encoder: A GPIO41, B GPIO40 (M5Dial and M5DinMeter
@@ -47,9 +56,13 @@ peripherals:
       bindings: { counter: knob }
     # The StampS3's RGB LED, one LED, GRB order.
     led-strip:
-      implementation: ws2812-spi-led-strip
+      implementation: rmt-led-strip
       bindings:
-        spi: rgb-led-data
+        data: rgb-led-data
+        # Dial v1.1's Stamp-S3A switches the LED supply on with GPIO38 high
+        # (docs.m5stack.com K130-V11); on the StampS3 of v1.0 GPIO38 is the
+        # unused screen-FPC backlight line, so driving it is harmless.
+        power-enable: GPIO38
       parameters:
         led-count: 1
         color-order: grb
@@ -88,6 +101,11 @@ peripherals:
       bindings:
         button-1: GPIO42
         button-2: GPIO0
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
 exposed-io:
   pins:
     # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Port B: M5Unified

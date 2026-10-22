@@ -34,6 +34,7 @@ cargo image deploy
 | `real-time-clock` | 实时时钟（BM8563） | — |
 | `battery` | 电池电压（ADC 电阻分压）和充电状态 | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `micro-sd` | microSD 卡槽（FAT，SPI） | — |
+| `buzzer` | 无源蜂鸣器（GPIO21） | [`buzzer`](/zh/plugins/vm-buzzer) |
 
 这块屏幕没有控制器：Barracuda 在 CPU 上运行 M5GFX 的波形，并逐行输出每一帧，所以刷新完成之前显示屏一直被占用。
 

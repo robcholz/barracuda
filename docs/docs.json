@@ -480,6 +480,7 @@
                   "plugins/vm-agent",
                   "plugins/vm-analog",
                   "plugins/vm-audio",
+                  "plugins/vm-buzzer",
                   "plugins/vm-camera",
                   "plugins/vm-display",
                   "plugins/vm-environment-sensor",
@@ -489,6 +490,7 @@
                   "plugins/vm-i2c",
                   "plugins/vm-i2s",
                   "plugins/vm-imu",
+                  "plugins/vm-infrared",
                   "plugins/vm-keyboard",
                   "plugins/vm-led-strip",
                   "plugins/vm-message-queue",
@@ -499,6 +501,7 @@
                   "plugins/vm-systeminfo",
                   "plugins/vm-time",
                   "plugins/vm-uart",
+                  "plugins/vm-vibration",
                   "plugins/vm-webserver"
                 ]
               }
@@ -992,6 +995,7 @@
                   "zh/plugins/vm-agent",
                   "zh/plugins/vm-analog",
                   "zh/plugins/vm-audio",
+                  "zh/plugins/vm-buzzer",
                   "zh/plugins/vm-camera",
                   "zh/plugins/vm-display",
                   "zh/plugins/vm-environment-sensor",
@@ -1001,6 +1005,7 @@
                   "zh/plugins/vm-i2c",
                   "zh/plugins/vm-i2s",
                   "zh/plugins/vm-imu",
+                  "zh/plugins/vm-infrared",
                   "zh/plugins/vm-keyboard",
                   "zh/plugins/vm-led-strip",
                   "zh/plugins/vm-message-queue",
@@ -1011,6 +1016,7 @@
                   "zh/plugins/vm-systeminfo",
                   "zh/plugins/vm-time",
                   "zh/plugins/vm-uart",
+                  "zh/plugins/vm-vibration",
                   "zh/plugins/vm-webserver"
                 ]
               }

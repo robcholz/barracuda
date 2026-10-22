@@ -1075,6 +1075,385 @@ pub mod led_strip {
     }
 }
 
+/// Stable buzzer peripheral API.
+pub mod buzzer {
+    use core::future::Future;
+
+    /// Loudness of a tone, in percent of the loudest the buzzer makes.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct Volume(u8);
+
+    impl Volume {
+        /// The loudest tone.
+        pub const MAX: Self = Self(100);
+
+        /// Creates a volume from a percentage; values above 100 mean 100.
+        #[must_use]
+        pub const fn percent(percent: u8) -> Self {
+            if percent > 100 {
+                Self::MAX
+            } else {
+                Self(percent)
+            }
+        }
+
+        /// Returns the volume in percent, 0 through 100.
+        #[must_use]
+        pub const fn get(self) -> u8 {
+            self.0
+        }
+    }
+
+    /// One note of a melody: a tone, or a rest, held for a duration.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct Note {
+        frequency_hz: u32,
+        duration_ms: u32,
+    }
+
+    impl Note {
+        /// Creates a tone of `frequency_hz` held for `duration_ms`; a zero
+        /// frequency is a rest.
+        #[must_use]
+        pub const fn new(frequency_hz: u32, duration_ms: u32) -> Self {
+            Self {
+                frequency_hz,
+                duration_ms,
+            }
+        }
+
+        /// Creates a silent rest of `duration_ms`.
+        #[must_use]
+        pub const fn rest(duration_ms: u32) -> Self {
+            Self::new(0, duration_ms)
+        }
+
+        /// Returns the tone frequency in hertz; zero for a rest.
+        #[must_use]
+        pub const fn frequency_hz(self) -> u32 {
+            self.frequency_hz
+        }
+
+        /// Returns how long the note lasts in milliseconds.
+        #[must_use]
+        pub const fn duration_ms(self) -> u32 {
+            self.duration_ms
+        }
+
+        /// Returns whether the note is a rest.
+        #[must_use]
+        pub const fn is_rest(self) -> bool {
+            self.frequency_hz == 0
+        }
+    }
+
+    /// Semantic tone output of a passive buzzer.
+    ///
+    /// A tone keeps sounding until [`Buzzer::stop`] or the next tone. A note
+    /// future silences the buzzer when it completes and when it is dropped,
+    /// so cancelling a melody never leaves a tone sounding.
+    pub trait Buzzer {
+        /// Concrete output failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns the lowest and highest tone frequency in hertz.
+        fn frequency_range(&self) -> (u32, u32);
+
+        /// Sounds `frequency_hz` at `volume` until stopped.
+        fn start(&mut self, frequency_hz: u32, volume: Volume) -> Result<(), Self::Error>;
+
+        /// Silences the buzzer.
+        fn stop(&mut self) -> Result<(), Self::Error>;
+
+        /// Sounds one note for its duration, then silences the buzzer.
+        fn play_note(
+            &mut self,
+            note: Note,
+            volume: Volume,
+        ) -> impl Future<Output = Result<(), Self::Error>>;
+
+        /// Plays `melody` note by note at `volume`.
+        fn play(
+            &mut self,
+            melody: &[Note],
+            volume: Volume,
+        ) -> impl Future<Output = Result<(), Self::Error>> {
+            async move {
+                for note in melody {
+                    self.play_note(*note, volume).await?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Move-only access to the Board's attached buzzer.
+    pub trait BuzzerPeripheral {
+        /// Concrete, statically dispatched buzzer peripheral.
+        type Buzzer: Buzzer;
+
+        /// Transfers the claimed buzzer `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_buzzer(&mut self, instance: crate::Instance) -> Option<Self::Buzzer>;
+    }
+}
+
+/// Stable vibration-motor peripheral API.
+pub mod vibration {
+    use core::future::Future;
+
+    /// Motor drive strength, in percent of the strongest.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct Strength(u8);
+
+    impl Strength {
+        /// The motor stopped.
+        pub const OFF: Self = Self(0);
+        /// The strongest vibration.
+        pub const MAX: Self = Self(100);
+
+        /// Creates a strength from a percentage; values above 100 mean 100.
+        #[must_use]
+        pub const fn percent(percent: u8) -> Self {
+            if percent > 100 {
+                Self::MAX
+            } else {
+                Self(percent)
+            }
+        }
+
+        /// Returns the strength in percent, 0 through 100.
+        #[must_use]
+        pub const fn get(self) -> u8 {
+            self.0
+        }
+
+        /// Returns whether the motor is stopped at this strength.
+        #[must_use]
+        pub const fn is_off(self) -> bool {
+            self.0 == 0
+        }
+    }
+
+    /// One step of a vibration pattern: the motor runs, then rests.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct Pulse {
+        on_ms: u32,
+        off_ms: u32,
+    }
+
+    impl Pulse {
+        /// Creates a step that runs the motor for `on_ms`, then rests for
+        /// `off_ms`.
+        #[must_use]
+        pub const fn new(on_ms: u32, off_ms: u32) -> Self {
+            Self { on_ms, off_ms }
+        }
+
+        /// Returns how long the motor runs, in milliseconds.
+        #[must_use]
+        pub const fn on_ms(self) -> u32 {
+            self.on_ms
+        }
+
+        /// Returns how long the motor rests afterwards, in milliseconds.
+        #[must_use]
+        pub const fn off_ms(self) -> u32 {
+            self.off_ms
+        }
+    }
+
+    /// Semantic vibration motor.
+    ///
+    /// A motor without strength control runs at full strength for any
+    /// non-zero [`Strength`]. A pattern future stops the motor when it
+    /// completes and when it is dropped.
+    pub trait Vibration {
+        /// Concrete output failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns whether the motor's strength is adjustable.
+        fn has_variable_strength(&self) -> bool;
+
+        /// Runs the motor at `strength` until changed; [`Strength::OFF`]
+        /// stops it.
+        fn set(&mut self, strength: Strength) -> Result<(), Self::Error>;
+
+        /// Runs `pattern` once at `strength`, then stops the motor.
+        fn pulse(
+            &mut self,
+            pattern: &[Pulse],
+            strength: Strength,
+        ) -> impl Future<Output = Result<(), Self::Error>>;
+    }
+
+    /// Move-only access to the Board's attached vibration motor.
+    pub trait VibrationPeripheral {
+        /// Concrete, statically dispatched vibration peripheral.
+        type Vibration: Vibration;
+
+        /// Transfers the claimed vibration motor `instance` to its Plugin
+        /// once; `None` when the Board has no such device or it was already
+        /// taken.
+        fn take_vibration(&mut self, instance: crate::Instance) -> Option<Self::Vibration>;
+    }
+}
+
+/// Stable infrared remote-control peripheral API.
+pub mod infrared {
+    use core::future::Future;
+
+    /// One NEC remote-control command.
+    ///
+    /// Standard NEC sends an eight-bit address and its inverse; extended NEC
+    /// uses all sixteen address bits. The command is always followed by its
+    /// inverse on the wire.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct NecCommand {
+        address: u16,
+        command: u8,
+        extended: bool,
+    }
+
+    impl NecCommand {
+        /// Creates a standard NEC command with an eight-bit address.
+        #[must_use]
+        pub const fn new(address: u8, command: u8) -> Self {
+            Self {
+                address: address as u16,
+                command,
+                extended: false,
+            }
+        }
+
+        /// Creates an extended NEC command with a sixteen-bit address, sent
+        /// low byte first.
+        #[must_use]
+        pub const fn extended(address: u16, command: u8) -> Self {
+            Self {
+                address,
+                command,
+                extended: true,
+            }
+        }
+
+        /// Returns the address: eight bits, or sixteen when extended.
+        #[must_use]
+        pub const fn address(self) -> u16 {
+            self.address
+        }
+
+        /// Returns the command byte.
+        #[must_use]
+        pub const fn command(self) -> u8 {
+            self.command
+        }
+
+        /// Returns whether the address uses all sixteen bits.
+        #[must_use]
+        pub const fn is_extended(self) -> bool {
+            self.extended
+        }
+    }
+
+    /// Carrier a transmitter modulates its marks with.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct Carrier {
+        frequency_hz: u32,
+        duty_percent: u8,
+    }
+
+    impl Carrier {
+        /// The 38 kHz, one-third duty carrier of NEC and most consumer remotes.
+        pub const NEC: Self = Self::new(38_000, 33);
+
+        /// Creates a carrier of `frequency_hz` lit for `duty_percent` of each
+        /// period; duties above 100 mean 100.
+        #[must_use]
+        pub const fn new(frequency_hz: u32, duty_percent: u8) -> Self {
+            Self {
+                frequency_hz,
+                duty_percent: if duty_percent > 100 {
+                    100
+                } else {
+                    duty_percent
+                },
+            }
+        }
+
+        /// Returns the carrier frequency in hertz.
+        #[must_use]
+        pub const fn frequency_hz(self) -> u32 {
+            self.frequency_hz
+        }
+
+        /// Returns the lit share of each period in percent.
+        #[must_use]
+        pub const fn duty_percent(self) -> u8 {
+            self.duty_percent
+        }
+    }
+
+    /// One frame a receiver captured.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum Received {
+        /// A complete NEC command.
+        Nec(NecCommand),
+        /// The NEC repeat code a held button sends.
+        NecRepeat,
+        /// A frame of another protocol: its first `len` timings, alternating
+        /// mark and space in microseconds and starting with a mark, are in
+        /// the caller's buffer.
+        Raw {
+            /// Number of timings written.
+            len: usize,
+        },
+    }
+
+    /// Semantic infrared transmitter, with a receiver where the Board has one.
+    pub trait Infrared {
+        /// Concrete transfer failure, including a receive on a Board without
+        /// a receiver.
+        type Error: core::fmt::Debug;
+
+        /// Returns whether the Board has an infrared receiver.
+        fn can_receive(&self) -> bool;
+
+        /// Sends one NEC command on the 38 kHz NEC carrier.
+        fn send_nec(
+            &mut self,
+            command: NecCommand,
+        ) -> impl Future<Output = Result<(), Self::Error>>;
+
+        /// Sends a pulse train: `timings_us` alternates mark and space in
+        /// microseconds, starting with a mark, and marks carry `carrier`.
+        fn send_raw(
+            &mut self,
+            carrier: Carrier,
+            timings_us: &[u16],
+        ) -> impl Future<Output = Result<(), Self::Error>>;
+
+        /// Waits for the next frame. An NEC frame is decoded; any other frame
+        /// leaves its timings in `timings_us`, mark first, truncated to its
+        /// length.
+        fn receive(
+            &mut self,
+            timings_us: &mut [u16],
+        ) -> impl Future<Output = Result<Received, Self::Error>>;
+    }
+
+    /// Move-only access to the Board's attached infrared transceiver.
+    pub trait InfraredPeripheral {
+        /// Concrete, statically dispatched infrared peripheral.
+        type Infrared: Infrared;
+
+        /// Transfers the claimed infrared device `instance` to its Plugin
+        /// once; `None` when the Board has no such device or it was already
+        /// taken.
+        fn take_infrared(&mut self, instance: crate::Instance) -> Option<Self::Infrared>;
+    }
+}
+
 /// Stable camera peripheral API.
 pub mod camera {
     use core::future::Future;
