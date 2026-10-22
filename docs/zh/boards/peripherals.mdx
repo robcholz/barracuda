@@ -203,6 +203,16 @@ pulse-counter:
     b: GPIO40
 ~~~
 
+`twai` 是芯片自带的经典 CAN 控制器（ESP 的 TWAI）以及收发器的引脚：`tx` 驱动收发器的 TXD 输入，`rx` 读取它的 RXD 输出。收发器不需要驱动程序。实现收到一个 `CanController`，在应用选定位速率之前它不会接入总线，因此开发板不会干扰位速率未知的总线。M5Stack StamPLC 的 CAN 接口：
+
+~~~yaml
+twai:
+  can-bus:
+    peripheral: TWAI0
+    tx: GPIO42
+    rx: GPIO43
+~~~
+
 `pdm-i2s-stream` 是同一个 I2S 控制器上的 PDM 麦克风和 I2S 功放，每次只工作在一个方向：`clk` 是麦克风的时钟，同时也是功放的字选择，`din` 是麦克风的数据，`bclk` 和 `dout` 是功放的线路。只有其中一种器件的产品省略另一种的线路。数据流以 `sample-rate-hz` 传输单声道 16 位 PCM；平台按 `dma-buffer-bytes` 分配 DMA 缓冲区。M5Stack Atom Echo：
 
 ~~~yaml

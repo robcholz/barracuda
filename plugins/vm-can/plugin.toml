@@ -1,0 +1,6 @@
+id = "can"
+depends-on = ["vm"]
+description = "Registers the built-in CAN bus Lua package."
+
+[peripherals.can]
+device = { fill = "primary", optional = true }

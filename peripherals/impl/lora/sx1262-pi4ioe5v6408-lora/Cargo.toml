@@ -1,0 +1,31 @@
+[package]
+name = "barracuda-sx1262-pi4ioe5v6408-lora"
+version = "0.1.0"
+edition = "2024"
+description = "LoRa radio implementation for an SX1262 whose reset and RF enables sit on a PI4IOE5V6408"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-pi4ioe5v6408.workspace = true
+barracuda-driver-sx126x.workspace = true
+barracuda-peripheral.workspace = true
+embassy-time.workspace = true
+embedded-hal.workspace = true
+embedded-hal-async.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

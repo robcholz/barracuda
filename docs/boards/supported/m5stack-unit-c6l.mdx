@@ -32,6 +32,11 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `buttons` | Button (PI4IOE5V6408 P0) | — |
 | `led-strip` | RGB LED (WS2812, GPIO2) | [`light`](/plugins/vm-led-strip) |
 | `buzzer` | Passive buzzer (GPIO11) | [`buzzer`](/plugins/vm-buzzer) |
+| `lora` | LoRa radio (SX1262, 850-930 MHz; CS GPIO23, BUSY GPIO19, DIO1 GPIO7) | [`lora`](/plugins/vm-lora) |
+
+The SX1262 shares the OLED's SPI bus through its own chip select. Its reset,
+RF switch, and LNA enable are P7, P6, and P5 of the PI4IOE5V6408 the button
+also uses; each implementation configures only its own pins.
 
 ## Exposed pins
 

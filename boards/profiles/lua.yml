@@ -6,6 +6,8 @@ enable:
   - audio
   - buzzer
   - camera
+  - can
+  - digital-io
   - display
   - eeprom
   - environment-sensor
@@ -16,7 +18,9 @@ enable:
   - infrared
   - keyboard
   - led-strip
+  - lora
   - message-queue
+  - nfc
   - power-monitor
   - pwm
   - rotary-encoder

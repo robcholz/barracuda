@@ -36,12 +36,18 @@ cargo image deploy
 | `micro-sd` | microSD 卡槽（FAT，SPI） | — |
 | `led-strip` | RGB LED（WS2812，GPIO21） | [`light`](/zh/plugins/vm-led-strip) |
 | `buzzer` | 无源蜂鸣器（GPIO44） | [`buzzer`](/zh/plugins/vm-buzzer) |
+| `can` | CAN 总线（TWAI，SIT1044 收发器，TX GPIO42，RX GPIO43） | [`can`](/zh/plugins/vm-can) |
+| `plc-io` | 继电器 1-4 和隔离输入 1-8（`59h` 的 AW9523B） | [`digital_io`](/zh/plugins/vm-digital-io) |
 
 Stamp-S3A 用 GPIO38 控制 RGB LED 的供电；LED 在启动时将其打开。
 
 按键与显示屏背光共用 `43h` 的 PI4IOE5V6408；每个实现只配置自己的引脚。
 
 microSD 卡通过自己的片选与显示屏共用 SPI 总线。
+
+继电器接在 AW9523B 的 P0_0 到 P0_3，光耦输入接在 P0_4 到 P0_7 和 P1_4 到 P1_7。该扩展芯片的复位线就是显示屏的复位线（GPIO3），因此继电器和输入在显示屏之后初始化。
+
+在脚本按总线的位速率启动之前，CAN 控制器不会接入总线。
 
 ## 可用引脚
 
@@ -57,7 +63,13 @@ Lua 脚本按名称打开这些引脚。
 | `rs485-rx` | `GPIO39` |
 | `rs485-dir` | `GPIO46` |
 
-`rs485-tx`、`rs485-rx` 和 `rs485-dir` 是板载 RS485 收发器的 UART 和方向引脚。
+`rs485-tx`、`rs485-rx` 和 `rs485-dir` 是板载 RS485 收发器的 UART 和方向引脚。把它们作为一个 RS485 接口打开，以 `rs485-dir` 作为驱动使能引脚，端口就只在写入时驱动总线：
+
+```lua
+local uart = require("uart")
+local bus <close> = uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")
+bus:write("\x01\x03\x00\x00\x00\x01\x84\x0a")
+```
 
 ```lua
 local gpio = require("gpio")

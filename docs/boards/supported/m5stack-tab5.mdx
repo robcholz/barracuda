@@ -85,7 +85,9 @@ Lua scripts open these pins by name.
 | `rs485-dir` | `GPIO34` |
 
 `rs485-tx`, `rs485-rx`, and `rs485-dir` are the UART and direction pins of the
-on-board RS485 transceiver.
+on-board RS485 transceiver. Open them as one RS485 port, with `rs485-dir` as
+the driver-enable pin, and the port drives the bus only while it writes:
+`uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")`.
 
 ```lua
 local gpio = require("gpio")

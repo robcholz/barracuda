@@ -298,6 +298,21 @@ pulse-counter:
     b: GPIO40
 ~~~
 
+A `twai` is the chip's own classic CAN controller (the ESP TWAI) and the pins
+of its transceiver: `tx` drives the transceiver's TXD input and `rx` reads its
+RXD output. The transceiver needs no driver. The implementation receives a
+`CanController`, which stays off the bus until the application chooses the
+bit rate, so a Board never disturbs a bus whose rate it does not know. The
+M5Stack StamPLC's CAN port:
+
+~~~yaml
+twai:
+  can-bus:
+    peripheral: TWAI0
+    tx: GPIO42
+    rx: GPIO43
+~~~
+
 A `pdm-i2s-stream` is a PDM microphone and an I2S amplifier on one I2S
 controller, one direction at a time: `clk` is the microphone's clock and the
 amplifier's word select, `din` the microphone's data, and `bclk` with `dout`

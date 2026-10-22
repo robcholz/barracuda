@@ -1,0 +1,6 @@
+id = "digital-io"
+depends-on = ["vm"]
+description = "Registers the built-in relays and digital inputs Lua package."
+
+[peripherals.digital-io]
+device = { fill = "primary", optional = true }

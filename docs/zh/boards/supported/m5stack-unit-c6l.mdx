@@ -32,6 +32,9 @@ cargo image deploy
 | `buttons` | 按键（PI4IOE5V6408 P0） | — |
 | `led-strip` | RGB LED（WS2812，GPIO2） | [`light`](/zh/plugins/vm-led-strip) |
 | `buzzer` | 无源蜂鸣器（GPIO11） | [`buzzer`](/zh/plugins/vm-buzzer) |
+| `lora` | LoRa 射频（SX1262，850-930 MHz；CS GPIO23、BUSY GPIO19、DIO1 GPIO7） | [`lora`](/zh/plugins/vm-lora) |
+
+SX1262 通过自己的片选与 OLED 共用 SPI 总线。它的复位、射频开关和 LNA 使能分别接在按键也在使用的 PI4IOE5V6408 的 P7、P6 和 P5；每个实现只配置自己的引脚。
 
 ## 可用引脚
 

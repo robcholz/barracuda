@@ -7,6 +7,7 @@ mod parallel_output;
 mod pdm_stream;
 mod pulse_counter;
 mod sdmmc;
+mod twai;
 
 pub use camera::{
     camera_capture, camera_capture_without_master_clock, camera_dma_buffer_from_bulk_memory,
@@ -18,6 +19,7 @@ pub use i2s_stream::{
 };
 pub use pdm_stream::{pdm_i2s_stream, PdmDmaChannel, PdmI2sStream};
 pub use pulse_counter::{quadrature_counter, QuadratureCounter};
+pub use twai::{twai_controller, TwaiController, TwaiError};
 
 /// The SD host slot a Board's microSD card uses; both slots reach any pin
 /// through the GPIO matrix.

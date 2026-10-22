@@ -71,6 +71,8 @@ The [Plugin API](/architecture/plugin-api) defines what a Plugin may own and how
 | [Buzzer](/plugins/vm-buzzer) | Installs the `buzzer` Lua package over the Board's primary buzzer. |
 | [Audio](/plugins/vm-audio) | The Audio Plugin exposes playback and recording on the Board's audio codec, which the `sound` Plugin owns, to Lua code as the `audio` Lua package. |
 | [Camera](/plugins/vm-camera) | The Camera Plugin owns the Board's primary camera and exposes frame capture to Lua code as the `camera` Lua package. |
+| [CAN](/plugins/vm-can) | Installs the `can` Lua package over the Board's primary CAN bus. |
+| [Digital I/O](/plugins/vm-digital-io) | Installs the `digital_io` Lua package over the Board's primary relays and isolated digital inputs. |
 | [Display](/plugins/vm-display) | The Display Plugin owns every Board display no other Plugin claims and exposes drawing and panel control to Lua code as the `display` Lua package. |
 | [VM Filesystem](/plugins/vm-filesystem) | The VM Filesystem Plugin exposes its Plugin-scoped VFS to Lua code through Lua's standard `io` and `os` file APIs. |
 | [GPIO](/plugins/vm-gpio) | The GPIO Plugin exposes digital input and output on the Board's exposed pins to Lua code as the `gpio` Lua package. |
@@ -83,7 +85,9 @@ The [Plugin API](/architecture/plugin-api) defines what a Plugin may own and how
 | [Infrared](/plugins/vm-infrared) | Installs the `infrared` Lua package over the Board's primary infrared transmitter and receiver. |
 | [Keyboard](/plugins/vm-keyboard) | Installs the `keyboard` Lua package over the Board's primary keyboard. |
 | [LED Strip](/plugins/vm-led-strip) | Installs the `light` Lua package over the Board's primary LED strip. |
+| [LoRa](/plugins/vm-lora) | Installs the `lora` Lua package over the Board's primary LoRa radio. |
 | [Message Queue](/plugins/vm-message-queue) | Installs the require-only `message_queue` Lua package: bounded, shared FIFO queues that independent Lua executions use to exchange messages. |
+| [NFC](/plugins/vm-nfc) | Installs the `nfc` Lua package over the Board's primary NFC card reader. |
 | [Power Monitor](/plugins/vm-power-monitor) | Installs the `power_monitor` Lua package over the Board's power monitor, which the `power` Plugin owns. |
 | [Rotary Encoder](/plugins/vm-rotary-encoder) | Installs the `encoder` Lua package over the Board's primary rotary encoder. |
 | [Secure Element](/plugins/vm-secure-element) | Installs the `secure_element` Lua package over the Board's primary secure element. |

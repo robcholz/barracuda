@@ -23,6 +23,8 @@ pub const PERIPHERAL_APIS: &[&str] = &[
     "buttons",
     "buzzer",
     "camera",
+    "can",
+    "digital-io",
     "display",
     "eeprom",
     "environment-sensor",
@@ -31,6 +33,8 @@ pub const PERIPHERAL_APIS: &[&str] = &[
     "infrared",
     "keyboard",
     "led-strip",
+    "lora",
+    "nfc-reader",
     "power-monitor",
     "real-time-clock",
     "removable-storage",
@@ -242,6 +246,8 @@ pub enum BindingKind {
     PdmI2sStream,
     /// One pulse-counter unit decoding a quadrature encoder.
     PulseCounter,
+    /// One on-chip CAN controller and its transceiver's pins.
+    Twai,
     /// One pulse-train output channel of a shared remote-control transceiver.
     RmtOutput,
     /// One pulse-train input channel of a shared remote-control transceiver.
@@ -1018,6 +1024,8 @@ pub fn resolve_board<'a>(
                         && board.peripheral_io().pdm_i2s_stream(resource).is_none())
                     || (schema.kind() == BindingKind::PulseCounter
                         && board.peripheral_io().pulse_counter(resource).is_none())
+                    || (schema.kind() == BindingKind::Twai
+                        && board.peripheral_io().twai(resource).is_none())
                     || (schema.kind() == BindingKind::RmtOutput
                         && board.peripheral_io().rmt_output(resource).is_none())
                     || (schema.kind() == BindingKind::RmtInput
@@ -1315,6 +1323,7 @@ const fn hal_binding(kind: BindingKind) -> Option<HalBinding> {
         BindingKind::AnalogInput => Some(HalBinding::AnalogInput),
         BindingKind::PdmI2sStream => Some(HalBinding::PdmI2sStream),
         BindingKind::PulseCounter => Some(HalBinding::PulseCounter),
+        BindingKind::Twai => Some(HalBinding::Twai),
         BindingKind::RmtOutput => Some(HalBinding::RmtOutput),
         BindingKind::RmtInput => Some(HalBinding::RmtInput),
         BindingKind::PwmOutput => Some(HalBinding::PwmOutput),
@@ -1421,6 +1430,26 @@ fn claimable_peripheral(
             "::barracuda_board_hal::secure_element::SecureElementPeripheral",
             "take_secure_element",
             "SecureElement",
+        ),
+        "nfc-reader" => (
+            "::barracuda_board_hal::nfc_reader::NfcReaderPeripheral",
+            "take_nfc_reader",
+            "NfcReader",
+        ),
+        "lora" => (
+            "::barracuda_board_hal::lora::LoraPeripheral",
+            "take_lora",
+            "Lora",
+        ),
+        "can" => (
+            "::barracuda_board_hal::can::CanPeripheral",
+            "take_can",
+            "Can",
+        ),
+        "digital-io" => (
+            "::barracuda_board_hal::digital_io::DigitalIoPeripheral",
+            "take_digital_io",
+            "DigitalIo",
         ),
         _ => return None,
     })
@@ -2011,6 +2040,34 @@ fn render_generic_hal(
                 "take_secure_element",
                 "SecureElement",
                 "UnavailableSecureElement",
+            ),
+            (
+                "nfc-reader",
+                "nfc_reader::NfcReaderPeripheral",
+                "take_nfc_reader",
+                "NfcReader",
+                "UnavailableNfcReader",
+            ),
+            (
+                "lora",
+                "lora::LoraPeripheral",
+                "take_lora",
+                "Lora",
+                "UnavailableLora",
+            ),
+            (
+                "can",
+                "can::CanPeripheral",
+                "take_can",
+                "Can",
+                "UnavailableCan",
+            ),
+            (
+                "digital-io",
+                "digital_io::DigitalIoPeripheral",
+                "take_digital_io",
+                "DigitalIo",
+                "UnavailableDigitalIo",
             ),
         ] {
             if !primary_peripherals.contains(peripheral_api) {
@@ -3377,6 +3434,51 @@ fn render_binding(
                 ),
                 format!(
                     "::barracuda_platform_selected::__platform::hal::capacitive_touch_buttons(bindings.{controller}, bindings.{rtc_control}, bindings.{rtc_io}, bindings.{pin0}, bindings.{pin1})"
+                ),
+            ))
+        }
+        BindingKind::Twai => {
+            let controller = board.peripheral_io().twai(resource).ok_or_else(|| {
+                GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                }
+            })?;
+            validate_hardware_identifier(controller.peripheral())?;
+            validate_hardware_identifier(controller.tx())?;
+            validate_hardware_identifier(controller.rx())?;
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let field =
+                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            let tx = checked_identifier(&format!("{prefix}_tx"), &mut state.identifiers)?;
+            let rx = checked_identifier(&format!("{prefix}_rx"), &mut state.identifiers)?;
+            state.raw_fields.extend([
+                (
+                    field.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                        controller.peripheral()
+                    ),
+                ),
+                (
+                    tx.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+                        controller.tx()
+                    ),
+                ),
+                (
+                    rx.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+                        controller.rx()
+                    ),
+                ),
+            ]);
+            Ok((
+                String::from("::barracuda_platform_selected::__platform::hal::TwaiController"),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::twai_controller(bindings.{field}, bindings.{tx}, bindings.{rx})"
                 ),
             ))
         }

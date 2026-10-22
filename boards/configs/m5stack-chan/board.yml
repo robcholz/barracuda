@@ -110,6 +110,14 @@ peripherals:
     real-time-clock:
       implementation: bm8563-rtc
       bindings: { i2c: internal-i2c }
+    # The body's ST25R3916 NFC reader at 50h on the internal bus (UIFlow
+    # `hardware/nfc.py`: StackChan on I2C1, SCL G11 / SDA G12). Its interrupt
+    # is not wired to a known pin; the implementation polls.
+    nfc-reader:
+      implementation: st25r3916-nfc-reader
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 80
     # The battery behind the AXP2101 the display also uses.
     power-monitor:
       implementation: axp192-axp2101-power-monitor
