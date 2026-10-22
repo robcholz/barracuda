@@ -959,6 +959,7 @@ dependencies = [
  "barracuda-es8388-es7210-audio-codec",
  "barracuda-es8389-audio-codec",
  "barracuda-ft5x06-touch",
+ "barracuda-gc0308-camera",
  "barracuda-gpio-buttons",
  "barracuda-gt911-touch",
  "barracuda-gt911-tt21100-touch",
@@ -1434,6 +1435,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-gc0308"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-gt911"
 version = "0.1.0"
 dependencies = [
@@ -1750,6 +1758,19 @@ dependencies = [
  "barracuda-driver-aw9523",
  "barracuda-driver-ft5x06",
  "barracuda-peripheral",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-gc0308-camera"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-aw9523",
+ "barracuda-driver-axp2101",
+ "barracuda-driver-gc0308",
+ "barracuda-driver-ov3660",
+ "barracuda-peripheral",
+ "embassy-futures",
  "embedded-hal 1.0.0",
 ]
 

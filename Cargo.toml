@@ -81,6 +81,7 @@ barracuda-es8311-es7210-audio-codec = { path = "peripherals/impl/audio-codec/es8
 barracuda-es8388-es7210-audio-codec = { path = "peripherals/impl/audio-codec/es8388-es7210-audio-codec" }
 barracuda-es8389-audio-codec = { path = "peripherals/impl/audio-codec/es8389-audio-codec" }
 barracuda-ft5x06-touch = { path = "peripherals/impl/touch/ft5x06-touch" }
+barracuda-gc0308-camera = { path = "peripherals/impl/camera/gc0308-camera" }
 barracuda-gpio-buttons = { path = "peripherals/impl/buttons/gpio-buttons" }
 barracuda-gt911-touch = { path = "peripherals/impl/touch/gt911-touch" }
 barracuda-gt911-tt21100-touch = { path = "peripherals/impl/touch/gt911-tt21100-touch" }
@@ -217,6 +218,7 @@ barracuda-driver-es8389 = { path = "drivers/chips/es8389" }
 barracuda-driver-ed047tc1 = { path = "drivers/chips/ed047tc1" }
 barracuda-driver-ed2208 = { path = "drivers/chips/ed2208" }
 barracuda-driver-ft5x06 = { path = "drivers/chips/ft5x06" }
+barracuda-driver-gc0308 = { path = "drivers/chips/gc0308" }
 barracuda-driver-gt911 = { path = "drivers/chips/gt911" }
 barracuda-driver-icm42607 = { path = "drivers/chips/icm42607" }
 barracuda-driver-ili9881c = { path = "drivers/chips/ili9881c" }
