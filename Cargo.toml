@@ -58,6 +58,8 @@ barracuda-platform-stm32 = { path = "platforms/stm32" }
 barracuda-adc-battery-power-monitor = { path = "peripherals/impl/power-monitor/adc-battery-power-monitor" }
 barracuda-adc-ladder-buttons = { path = "peripherals/impl/buttons/adc-ladder-buttons" }
 barracuda-apa102-led-strip = { path = "peripherals/impl/led-strip/apa102-led-strip" }
+barracuda-at24c-eeprom = { path = "peripherals/impl/eeprom/at24c-eeprom" }
+barracuda-atecc608-secure-element = { path = "peripherals/impl/secure-element/atecc608-secure-element" }
 barracuda-atom-s3-display = { path = "peripherals/impl/display/atom-s3-display" }
 barracuda-atom-s3r-display = { path = "peripherals/impl/display/atom-s3r-display" }
 barracuda-aw88298-es7210-audio-codec = { path = "peripherals/impl/audio-codec/aw88298-es7210-audio-codec" }
@@ -106,6 +108,10 @@ barracuda-paper-diy-display = { path = "peripherals/impl/display/paper-diy-displ
 barracuda-paper-mono-display = { path = "peripherals/impl/display/paper-mono-display" }
 barracuda-pdm-i2s-audio-codec = { path = "peripherals/impl/audio-codec/pdm-i2s-audio-codec" }
 barracuda-pi4ioe5v6408-buttons = { path = "peripherals/impl/buttons/pi4ioe5v6408-buttons" }
+barracuda-powerhub-buttons = { path = "peripherals/impl/buttons/powerhub-buttons" }
+barracuda-powerhub-led-strip = { path = "peripherals/impl/led-strip/powerhub-led-strip" }
+barracuda-powerhub-power-monitor = { path = "peripherals/impl/power-monitor/powerhub-power-monitor" }
+barracuda-powerhub-rtc = { path = "peripherals/impl/real-time-clock/powerhub-rtc" }
 barracuda-pwm-buzzer = { path = "peripherals/impl/buzzer/pwm-buzzer" }
 barracuda-quadrature-rotary-encoder = { path = "peripherals/impl/rotary-encoder/quadrature-rotary-encoder" }
 barracuda-rmt-infrared = { path = "peripherals/impl/infrared/rmt-infrared" }
@@ -162,6 +168,7 @@ barracuda-audio-plugin = { path = "plugins/vm-audio/crates/plugin" }
 barracuda-buzzer-plugin = { path = "plugins/vm-buzzer/crates/plugin" }
 barracuda-camera-plugin = { path = "plugins/vm-camera/crates/plugin" }
 barracuda-display-plugin = { path = "plugins/vm-display/crates/plugin" }
+barracuda-eeprom-plugin = { path = "plugins/vm-eeprom/crates/plugin" }
 barracuda-environment-sensor-plugin = { path = "plugins/vm-environment-sensor/crates/plugin" }
 barracuda-vm-filesystem-plugin = { path = "plugins/vm-filesystem/crates/plugin" }
 barracuda-gpio-plugin = { path = "plugins/vm-gpio/crates/plugin" }
@@ -176,6 +183,7 @@ barracuda-message-queue-plugin = { path = "plugins/vm-message-queue/crates/plugi
 barracuda-power-monitor-plugin = { path = "plugins/vm-power-monitor/crates/plugin" }
 barracuda-pwm-plugin = { path = "plugins/vm-pwm/crates/plugin" }
 barracuda-rotary-encoder-plugin = { path = "plugins/vm-rotary-encoder/crates/plugin" }
+barracuda-secure-element-plugin = { path = "plugins/vm-secure-element/crates/plugin" }
 barracuda-spi-plugin = { path = "plugins/vm-spi/crates/plugin" }
 barracuda-vm-systeminfo-plugin = { path = "plugins/vm-systeminfo/crates/plugin" }
 barracuda-vm-time-plugin = { path = "plugins/vm-time/crates/plugin" }
@@ -198,6 +206,8 @@ barracuda-json-writer = { path = "shared/json-writer" }
 barracuda-peripheral = { path = "peripherals/api" }
 barracuda-peripheral-config = { path = "peripherals/config" }
 barracuda-driver-apa102 = { path = "drivers/chips/apa102" }
+barracuda-driver-at24c = { path = "drivers/chips/at24c" }
+barracuda-driver-atecc608 = { path = "drivers/chips/atecc608" }
 barracuda-driver-aw88298 = { path = "drivers/chips/aw88298" }
 barracuda-driver-aw9523 = { path = "drivers/chips/aw9523" }
 barracuda-driver-axp192 = { path = "drivers/chips/axp192" }
@@ -232,6 +242,7 @@ barracuda-driver-it8951 = { path = "drivers/chips/it8951" }
 barracuda-driver-jd79653a = { path = "drivers/chips/jd79653a" }
 barracuda-driver-m5ioe1 = { path = "drivers/chips/m5ioe1" }
 barracuda-driver-m5pm1 = { path = "drivers/chips/m5pm1" }
+barracuda-driver-m5powerhub = { path = "drivers/chips/m5powerhub" }
 barracuda-driver-mpu6886 = { path = "drivers/chips/mpu6886" }
 barracuda-driver-ov2640 = { path = "drivers/chips/ov2640" }
 barracuda-driver-ov3660 = { path = "drivers/chips/ov3660" }

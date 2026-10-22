@@ -789,6 +789,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-at24c-eeprom"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-at24c",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-atecc608-secure-element"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-atecc608",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-atom-s3-display"
 version = "0.1.0"
 dependencies = [
@@ -936,6 +958,8 @@ dependencies = [
  "barracuda-adc-battery-power-monitor",
  "barracuda-adc-ladder-buttons",
  "barracuda-apa102-led-strip",
+ "barracuda-at24c-eeprom",
+ "barracuda-atecc608-secure-element",
  "barracuda-atom-s3-display",
  "barracuda-atom-s3r-display",
  "barracuda-aw88298-es7210-audio-codec",
@@ -984,6 +1008,10 @@ dependencies = [
  "barracuda-paper-mono-display",
  "barracuda-pdm-i2s-audio-codec",
  "barracuda-pi4ioe5v6408-buttons",
+ "barracuda-powerhub-buttons",
+ "barracuda-powerhub-led-strip",
+ "barracuda-powerhub-power-monitor",
+ "barracuda-powerhub-rtc",
  "barracuda-pwm-buzzer",
  "barracuda-quadrature-rotary-encoder",
  "barracuda-rmt-infrared",
@@ -1280,6 +1308,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-at24c"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-atecc608"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-aw88298"
 version = "0.1.0"
 dependencies = [
@@ -1530,6 +1572,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-m5powerhub"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-mpu6886"
 version = "0.1.0"
 dependencies = [
@@ -1646,6 +1695,21 @@ dependencies = [
  "barracuda-peripheral",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-eeprom-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2973,6 +3037,7 @@ dependencies = [
  "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",
  "barracuda-display-plugin",
+ "barracuda-eeprom-plugin",
  "barracuda-environment-sensor-plugin",
  "barracuda-files-plugin",
  "barracuda-gpio-plugin",
@@ -2996,6 +3061,7 @@ dependencies = [
  "barracuda-pwm-plugin",
  "barracuda-rotary-encoder-plugin",
  "barracuda-scheduler-plugin",
+ "barracuda-secure-element-plugin",
  "barracuda-sound-plugin",
  "barracuda-spi-plugin",
  "barracuda-system-fonts-plugin",
@@ -3056,6 +3122,48 @@ dependencies = [
  "barracuda-plugin-build",
  "critical-section",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-powerhub-buttons"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-driver-m5powerhub",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-powerhub-led-strip"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-m5powerhub",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-powerhub-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-m5powerhub",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-powerhub-rtc"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-m5powerhub",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -3201,6 +3309,21 @@ dependencies = [
  "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-secure-element-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "futures-lite",
  "portable-atomic",
  "portable-atomic-util",
 ]

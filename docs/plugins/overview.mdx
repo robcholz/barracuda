@@ -77,6 +77,7 @@ The [Plugin API](/architecture/plugin-api) defines what a Plugin may own and how
 | [VM HTTP](/plugins/vm-http) | The VM HTTP Plugin exposes the HTTP Plugin's bounded outbound requests to Lua code as the require-only `http` Lua package. |
 | [I2C](/plugins/vm-i2c) | The I2C Plugin exposes I2C bus transfers on the Board's exposed pins to Lua code as the `i2c` Lua package. |
 | [I2S](/plugins/vm-i2s) | The I2S Plugin exposes I2S PCM streaming on the Board's exposed pins to Lua code as the `i2s` Lua package. |
+| [EEPROM](/plugins/vm-eeprom) | Installs the `eeprom` Lua package over the Board's primary EEPROM. |
 | [Environment Sensor](/plugins/vm-environment-sensor) | Installs the `environment` Lua package over the Board's primary environment sensor. |
 | [IMU](/plugins/vm-imu) | Installs the `motion` Lua package over the Board's primary IMU. |
 | [Infrared](/plugins/vm-infrared) | Installs the `infrared` Lua package over the Board's primary infrared transmitter and receiver. |
@@ -85,6 +86,7 @@ The [Plugin API](/architecture/plugin-api) defines what a Plugin may own and how
 | [Message Queue](/plugins/vm-message-queue) | Installs the require-only `message_queue` Lua package: bounded, shared FIFO queues that independent Lua executions use to exchange messages. |
 | [Power Monitor](/plugins/vm-power-monitor) | Installs the `power_monitor` Lua package over the Board's power monitor, which the `power` Plugin owns. |
 | [Rotary Encoder](/plugins/vm-rotary-encoder) | Installs the `encoder` Lua package over the Board's primary rotary encoder. |
+| [Secure Element](/plugins/vm-secure-element) | Installs the `secure_element` Lua package over the Board's primary secure element. |
 | [PWM](/plugins/vm-pwm) | Installs the `pwm` Lua package over the Board's exposed I/O pins. |
 | [SPI](/plugins/vm-spi) | Installs the require-only `spi` Lua package over the Board's exposed I/O pins. |
 | [VM System Info](/plugins/vm-systeminfo) | Exposes the selected Platform and Board identity to Lua as the require-only `systeminfo` package. |

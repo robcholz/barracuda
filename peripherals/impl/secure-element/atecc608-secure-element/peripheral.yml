@@ -1,0 +1,21 @@
+id: atecc608-secure-element
+api-version: 1
+peripheral: secure-element
+implementation:
+  package: barracuda-atecc608-secure-element
+  crate: barracuda_atecc608_secure_element
+  factory: "::{{crate}}::Atecc608SecureElementImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "{{binding.i2c.value}}"
+  config-expression: "::{{crate}}::Atecc608Config::new({{parameter.address}})"
+# A Microchip ATECC608A or ATECC608B. The chip wakes on a 60 µs low pulse on
+# SDA, which a zero byte to address 00h makes only at 100 kHz or slower, so
+# its bus must run at 100 kHz (Microchip's guidance, and CryptoAuthLib's
+# `hal_i2c_wake`).
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  # Trust&GO (TNGTLS) parts answer at 35h; the factory default is 60h.
+  address:
+    type: integer
+    default: 53
