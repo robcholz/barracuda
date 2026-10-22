@@ -93,6 +93,7 @@ barracuda-ip5306-power-monitor = { path = "peripherals/impl/power-monitor/ip5306
 barracuda-it8951-display = { path = "peripherals/impl/display/it8951-display" }
 barracuda-lm75b-environment-sensor = { path = "peripherals/impl/environment-sensor/lm75b-environment-sensor" }
 barracuda-ltr553-environment-sensor = { path = "peripherals/impl/environment-sensor/ltr553-environment-sensor" }
+barracuda-m5hdmi-display = { path = "peripherals/impl/display/m5hdmi-display" }
 barracuda-m5ioe1-vibration = { path = "peripherals/impl/vibration/m5ioe1-vibration" }
 barracuda-m5pm1-power-monitor = { path = "peripherals/impl/power-monitor/m5pm1-power-monitor" }
 barracuda-m5stack-pmic-display = { path = "peripherals/impl/display/m5stack-pmic-display" }
@@ -237,10 +238,12 @@ barracuda-driver-ir-nec = { path = "drivers/chips/ir-nec" }
 barracuda-driver-jd9853 = { path = "drivers/chips/jd9853" }
 barracuda-driver-lp5562 = { path = "drivers/chips/lp5562" }
 barracuda-driver-lm75b = { path = "drivers/chips/lm75b" }
+barracuda-driver-lt8618sx = { path = "drivers/chips/lt8618sx" }
 barracuda-driver-ltr553 = { path = "drivers/chips/ltr553" }
 barracuda-driver-it8951 = { path = "drivers/chips/it8951" }
 barracuda-driver-jd79653a = { path = "drivers/chips/jd79653a" }
 barracuda-driver-m5ioe1 = { path = "drivers/chips/m5ioe1" }
+barracuda-driver-m5hdmi = { path = "drivers/chips/m5hdmi" }
 barracuda-driver-m5pm1 = { path = "drivers/chips/m5pm1" }
 barracuda-driver-m5powerhub = { path = "drivers/chips/m5powerhub" }
 barracuda-driver-mpu6886 = { path = "drivers/chips/mpu6886" }

@@ -127,6 +127,18 @@ spi-device:
 
 SPI 上的 microSD 卡（`spi-sd-fat-removable-storage`）还会修改其设备的时钟，并在释放片选的情况下输出时钟，这是 SD 规范在识别存储卡时的要求；平台的 SPI 设备类型通过 `SpiDeviceControl` 提供这些操作。
 
+`spi-bus` 是没有片选的 SPI 控制器：实现自己把设备的片选线作为 `digital-output` 来驱动。ESP 平台的总线还实现了 `SpiBusControl`，用于设置时钟和模式，并通过控制器的命令阶段输出不足 8 位的时钟。ATOM Display 的 `m5hdmi-display` 用它在同样的四根线上（TCK 接 SCK，TDI 接 MOSI，TDO 接 MISO，TMS 接片选线）通过 JTAG 加载 FPGA，然后再用 SPI 与之通信：
+
+~~~yaml
+spi-bus:
+  fpga-spi:
+    peripheral: SPI3
+    sck: GPIO5
+    mosi: GPIO19
+    miso: GPIO22
+    frequency-hz: 40000000
+~~~
+
 `spi-output` 是由 SPI 控制器输出的 LED 灯带数据线，它独占一个任何 `spi-device` 都没有使用的控制器。因此，除了 `spi-device` 使用的总线之外，开发板还需要为每个 `spi-output` 留出一个空闲的控制器。
 
 `rmt-output` 是遥控收发器（ESP RMT）的一个发送通道及其引脚，`rmt-input` 是一个接收通道。多个通道可以使用同一个收发器：组合只构建一次收发器，并把各自的通道以 `PulseOutput` 或 `PulseInput` 交给每个实现，它们自行输出或记录电平与时长组成的符号。因此，接在 `rmt-output` 上的 LED 灯带（`rmt-led-strip`）不占用 SPI 控制器，红外 LED 和接收器也使用这些通道的载波和毛刺滤波。每个平台列出可以发送和接收的通道（`platform.yml` 中的 `hal.rmt-channels`），`cargo board select` 会拒绝范围之外的通道。M5Stack StickS3 的红外发射器和接收器：

@@ -993,6 +993,7 @@ dependencies = [
  "barracuda-it8951-display",
  "barracuda-lm75b-environment-sensor",
  "barracuda-ltr553-environment-sensor",
+ "barracuda-m5hdmi-display",
  "barracuda-m5ioe1-vibration",
  "barracuda-m5pm1-power-monitor",
  "barracuda-m5stack-pmic-display",
@@ -1551,11 +1552,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-lt8618sx"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-ltr553"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
 ]
+
+[[package]]
+name = "barracuda-driver-m5hdmi"
+version = "0.1.0"
 
 [[package]]
 name = "barracuda-driver-m5ioe1"
@@ -2305,6 +2317,19 @@ dependencies = [
  "getset",
  "libm",
  "portable-atomic",
+]
+
+[[package]]
+name = "barracuda-m5hdmi-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-driver-lt8618sx",
+ "barracuda-driver-m5hdmi",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

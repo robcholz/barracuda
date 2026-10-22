@@ -182,6 +182,24 @@ device's clock and clocks it with the chip select released, which the SD
 specification asks for while it identifies the card; the Platform's SPI device
 types provide that through `SpiDeviceControl`.
 
+An `spi-bus` is an SPI controller with no chip select: the implementation
+drives its device's select line itself, as a `digital-output`. The ESP
+Platforms' bus also implements `SpiBusControl`, which sets the clock and mode
+and clocks out fewer than eight bits through the controller's command phase.
+The ATOM Display's `m5hdmi-display` uses it to load its FPGA over JTAG on the
+same four lines (TCK on SCK, TDI on MOSI, TDO on MISO, TMS on the select line)
+before talking SPI to it:
+
+~~~yaml
+spi-bus:
+  fpga-spi:
+    peripheral: SPI3
+    sck: GPIO5
+    mosi: GPIO19
+    miso: GPIO22
+    frequency-hz: 40000000
+~~~
+
 An `spi-output`, the data line of an LED strip clocked out of an SPI
 controller, takes a whole controller of its own: one that no `spi-device`
 names. A Board therefore needs a free controller for each `spi-output` beside
