@@ -245,6 +245,27 @@ pub trait SpiDeviceControl: embedded_hal::spi::ErrorType {
     fn write_deselected(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
 }
 
+/// Bus control a bit-oriented protocol on an SPI controller needs beyond
+/// `embedded-hal`'s `SpiBus`: the clock and mode, and transfers shorter than
+/// a byte.
+///
+/// A JTAG test-access port driven through an SPI controller (TCK on SCK, TDI
+/// on MOSI, TDO on MISO, TMS on a GPIO the implementation owns) moves between
+/// states one clock at a time, which a byte-oriented `SpiBus` cannot clock.
+/// A Platform's `spi-bus` type implements this where its controller can.
+pub trait SpiBusControl: embedded_hal::spi::ErrorType {
+    /// Applies `frequency_hz` and `mode` to the following transfers.
+    fn configure(
+        &mut self,
+        frequency_hz: u32,
+        mode: embedded_hal::spi::Mode,
+    ) -> Result<(), Self::Error>;
+
+    /// Clocks out the low `bits` bits of `value`, 1 through 8, most
+    /// significant first, and returns once the last has been clocked.
+    fn write_bits(&mut self, value: u8, bits: u8) -> Result<(), Self::Error>;
+}
+
 /// One half of a pulse symbol: an output level held for a number of ticks.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PulseLevel {
