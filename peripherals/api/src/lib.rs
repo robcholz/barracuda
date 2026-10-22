@@ -2520,3 +2520,229 @@ pub mod environment {
         ) -> Option<Self::EnvironmentSensor>;
     }
 }
+
+/// Stable byte-addressed EEPROM peripheral API.
+pub mod eeprom {
+    use core::future::Future;
+
+    /// Size and write granularity of one EEPROM.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct EepromGeometry {
+        capacity: u32,
+        page_size: u16,
+    }
+
+    impl EepromGeometry {
+        /// Creates a geometry of `capacity` bytes programmed in pages of
+        /// `page_size` bytes.
+        #[must_use]
+        pub const fn new(capacity: u32, page_size: u16) -> Self {
+            Self {
+                capacity,
+                page_size,
+            }
+        }
+
+        /// Returns the number of addressable bytes.
+        #[must_use]
+        pub const fn capacity(self) -> u32 {
+            self.capacity
+        }
+
+        /// Returns the most bytes one internal write cycle programs; one
+        /// cycle never crosses a page boundary.
+        #[must_use]
+        pub const fn page_size(self) -> u16 {
+            self.page_size
+        }
+
+        /// Returns whether `length` bytes starting at `offset` lie within
+        /// the memory.
+        #[must_use]
+        pub fn contains(self, offset: u32, length: usize) -> bool {
+            u64::try_from(length)
+                .ok()
+                .and_then(|length| u64::from(offset).checked_add(length))
+                .is_some_and(|end| end <= u64::from(self.capacity))
+        }
+    }
+
+    /// Semantic byte-addressed non-volatile memory.
+    ///
+    /// Offsets count bytes from the start of the memory. A read or write
+    /// whose range does not lie within [`EepromGeometry::capacity`] fails
+    /// without touching the memory. A write splits its data at page
+    /// boundaries and completes once the memory has programmed the last
+    /// page; dropping the future between pages leaves the earlier pages
+    /// written.
+    pub trait Eeprom {
+        /// Concrete range, transport, or programming failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns the memory's size and page size.
+        fn geometry(&self) -> EepromGeometry;
+
+        /// Reads `buffer.len()` bytes starting at `offset`.
+        fn read<'a>(
+            &'a mut self,
+            offset: u32,
+            buffer: &'a mut [u8],
+        ) -> impl Future<Output = Result<(), Self::Error>> + 'a;
+
+        /// Writes `data` starting at `offset`.
+        fn write<'a>(
+            &'a mut self,
+            offset: u32,
+            data: &'a [u8],
+        ) -> impl Future<Output = Result<(), Self::Error>> + 'a;
+    }
+
+    /// Move-only access to the Board's attached EEPROM.
+    pub trait EepromPeripheral {
+        /// Concrete, statically dispatched EEPROM peripheral.
+        type Eeprom: Eeprom;
+
+        /// Transfers the claimed EEPROM `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_eeprom(&mut self, instance: crate::Instance) -> Option<Self::Eeprom>;
+    }
+}
+
+/// Stable secure-element (hardware key store) peripheral API.
+pub mod secure_element {
+    use core::future::Future;
+
+    /// Most bytes a secure element's serial number holds.
+    pub const MAX_SERIAL_NUMBER_BYTES: usize = 16;
+
+    /// A secure element's factory-unique serial number.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct SerialNumber {
+        bytes: [u8; MAX_SERIAL_NUMBER_BYTES],
+        len: u8,
+    }
+
+    impl SerialNumber {
+        /// Creates a serial number from its bytes; `None` when they exceed
+        /// [`MAX_SERIAL_NUMBER_BYTES`].
+        #[must_use]
+        pub fn new(bytes: &[u8]) -> Option<Self> {
+            let len = u8::try_from(bytes.len())
+                .ok()
+                .filter(|len| usize::from(*len) <= MAX_SERIAL_NUMBER_BYTES)?;
+            let mut serial = Self {
+                bytes: [0; MAX_SERIAL_NUMBER_BYTES],
+                len,
+            };
+            serial.bytes.get_mut(..bytes.len())?.copy_from_slice(bytes);
+            Some(serial)
+        }
+
+        /// Returns the serial number's bytes.
+        #[must_use]
+        pub fn as_bytes(&self) -> &[u8] {
+            self.bytes.get(..usize::from(self.len)).unwrap_or_default()
+        }
+    }
+
+    /// One key slot of a secure element.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+    pub struct KeySlot(u8);
+
+    impl KeySlot {
+        /// Names slot `index`.
+        #[must_use]
+        pub const fn new(index: u8) -> Self {
+            Self(index)
+        }
+
+        /// Returns the slot's index.
+        #[must_use]
+        pub const fn index(self) -> u8 {
+            self.0
+        }
+    }
+
+    /// A NIST P-256 public key: the affine X then Y coordinate, each 32
+    /// bytes big-endian.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct P256PublicKey([u8; 64]);
+
+    impl P256PublicKey {
+        /// Wraps the 64 coordinate bytes.
+        #[must_use]
+        pub const fn new(bytes: [u8; 64]) -> Self {
+            Self(bytes)
+        }
+
+        /// Returns X then Y.
+        #[must_use]
+        pub const fn as_bytes(&self) -> &[u8; 64] {
+            &self.0
+        }
+    }
+
+    /// A NIST P-256 ECDSA signature: R then S, each 32 bytes big-endian.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct P256Signature([u8; 64]);
+
+    impl P256Signature {
+        /// Wraps the 64 signature bytes.
+        #[must_use]
+        pub const fn new(bytes: [u8; 64]) -> Self {
+            Self(bytes)
+        }
+
+        /// Returns R then S.
+        #[must_use]
+        pub const fn as_bytes(&self) -> &[u8; 64] {
+            &self.0
+        }
+    }
+
+    /// Semantic secure element: a chip that holds private keys it never
+    /// reveals, signs with them, and generates random numbers.
+    ///
+    /// Which slots hold P-256 private keys is fixed by the element's
+    /// provisioning; a slot without one fails. Random bytes come from the
+    /// element's own generator; they are not the Board's entropy source.
+    pub trait SecureElement {
+        /// Concrete transport, protocol, or element failure.
+        type Error: core::fmt::Debug;
+
+        /// Reads the element's factory-unique serial number.
+        fn serial_number(&mut self) -> impl Future<Output = Result<SerialNumber, Self::Error>>;
+
+        /// Fills `buffer` with random bytes from the element's generator.
+        fn fill_random<'a>(
+            &'a mut self,
+            buffer: &'a mut [u8],
+        ) -> impl Future<Output = Result<(), Self::Error>> + 'a;
+
+        /// Computes the public key of the P-256 private key in `slot`.
+        fn public_key(
+            &mut self,
+            slot: KeySlot,
+        ) -> impl Future<Output = Result<P256PublicKey, Self::Error>>;
+
+        /// Signs a 32-byte message digest, such as a SHA-256 hash, with the
+        /// P-256 private key in `slot`.
+        fn sign_digest<'a>(
+            &'a mut self,
+            slot: KeySlot,
+            digest: &'a [u8; 32],
+        ) -> impl Future<Output = Result<P256Signature, Self::Error>> + 'a;
+    }
+
+    /// Move-only access to the Board's attached secure element.
+    pub trait SecureElementPeripheral {
+        /// Concrete, statically dispatched secure element.
+        type SecureElement: SecureElement;
+
+        /// Transfers the claimed secure element `instance` to its Plugin
+        /// once; `None` when the Board has no such device or it was already
+        /// taken.
+        fn take_secure_element(&mut self, instance: crate::Instance)
+        -> Option<Self::SecureElement>;
+    }
+}
