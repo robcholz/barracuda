@@ -21,7 +21,7 @@ capture to Lua code as the `camera` Lua package.
 - Storage: none
 
 This Plugin takes the Board's primary `Camera` capability exactly
-once and installs the `camera` Lua package. OV2640/OV3660 control buses,
+once and installs the `camera` Lua package. OV2640/OV3660/GC0308 control buses,
 parallel capture, and DMA remain owned by the implementation and Platform HAL.
 
 Lua API:
@@ -29,7 +29,7 @@ Lua API:
 - `camera.available() -> boolean`
 - `camera.open() -> handle`
 - `camera.snap([capacity]) -> bytes, pixel_format` takes one frame, with room
-  for 128 KiB unless given
+  for 128 KiB of JPEG, or exactly one uncompressed frame, unless given
 - `handle:descriptor() -> width, height, pixel_format`
 - `handle:capture(capacity) -> bytes`
 - `handle:is_open() -> boolean`
