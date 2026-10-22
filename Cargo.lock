@@ -2909,6 +2909,7 @@ dependencies = [
  "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",
  "barracuda-display-plugin",
+ "barracuda-environment-sensor-plugin",
  "barracuda-files-plugin",
  "barracuda-gpio-plugin",
  "barracuda-http-plugin",
