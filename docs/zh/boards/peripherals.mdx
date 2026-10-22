@@ -87,6 +87,20 @@ parallel-output:
 
 直接驱动的电子墨水屏源极驱动器使用同一种绑定，但不带 `dc`：每个字节都是数据，源极时钟接 `wr`，源极起始脉冲接 `chip-select`。它的显示实现把栅极和锁存线作为普通数字输出驱动，并让每一行都在一次突发之内发出。
 
+并行摄像头传感器是一个 `camera-capture`：摄像头控制器及其 DMA 通道、像素时钟、VSYNC、HREF、按位序排列的八根数据线、主时钟及其频率，以及容纳一帧的 DMA 存储。平台把它作为 `FrameReceiver` 交给摄像头实现，每次调用接收完整的一帧。自带振荡器的传感器模组不需要主时钟：开发板省略 `xclk` 和 `xclk-frequency-hz`。M5Stack CoreS3 的 GC0308，一帧 320x240 RGB565：
+
+~~~yaml
+camera-capture:
+  camera-data:
+    peripheral: LCD_CAM
+    dma: DMA_CH0
+    pclk: GPIO45
+    vsync: GPIO46
+    href: GPIO38
+    data: [GPIO39, GPIO40, GPIO41, GPIO42, GPIO15, GPIO16, GPIO48, GPIO47]
+    dma-buffer-bytes: 153600
+~~~
+
 microSD 卡是一个 `sdmmc-device`：SD 主机、卡所接的主机 `slot`（省略时为 0）、按顺序排列的时钟、命令和数据引脚、`bus-width`（1 或 4）、卡识别后运行的时钟（`frequency-hz`，省略时为 25 MHz），以及芯片用片上稳压器为该槽位引脚供电时，该稳压器的 `power-channel` 和 `power-millivolts`。每个平台列出它交给开发板的 SD 主机槽位及各自需要的供电（`platform.yml` 中的 `hal.sdmmc-slots`），`cargo board select` 会拒绝位于其他槽位、声明其他供电，或位于 Wi-Fi 协处理器所用槽位上的存储卡。ESP32-P4 的存储卡：
 
 ~~~yaml

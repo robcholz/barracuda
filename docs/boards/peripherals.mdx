@@ -123,6 +123,26 @@ A directly driven e-paper panel's source driver uses the same binding without
 is `chip-select`. Its display implementation drives the gate and latch lines
 as ordinary digital outputs and keeps each line within one burst.
 
+A parallel camera sensor is a `camera-capture`: the camera controller and
+its DMA channel, the pixel clock, VSYNC, HREF, eight data lines in bit order,
+the master clock and its frequency, and the DMA storage for one frame. The
+Platform hands it to the camera implementation as a `FrameReceiver`, which
+receives one whole frame per call. A sensor module with its own oscillator
+takes no master clock: the Board leaves out `xclk` and `xclk-frequency-hz`.
+The M5Stack CoreS3's GC0308, one 320x240 RGB565 frame:
+
+~~~yaml
+camera-capture:
+  camera-data:
+    peripheral: LCD_CAM
+    dma: DMA_CH0
+    pclk: GPIO45
+    vsync: GPIO46
+    href: GPIO38
+    data: [GPIO39, GPIO40, GPIO41, GPIO42, GPIO15, GPIO16, GPIO48, GPIO47]
+    dma-buffer-bytes: 153600
+~~~
+
 A microSD card is an `sdmmc-device`: the SD host, the `slot` of it the card
 is wired to (0 when left out), the clock, command and data pins in order, the
 `bus-width` (1 or 4), the clock the card runs at once identified

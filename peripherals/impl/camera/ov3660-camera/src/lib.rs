@@ -154,10 +154,17 @@ impl<CAPTURE: FrameReceiver> Camera for Ov3660Camera<CAPTURE> {
         let frame = buffer
             .get(..bytes_used)
             .ok_or(Ov3660Error::IncompleteJpeg)?;
-        if !frame.starts_with(&[0xff, 0xd8]) || !frame.ends_with(&[0xff, 0xd9]) {
+        if !frame.starts_with(&[0xff, 0xd8]) {
             return Err(Ov3660Error::IncompleteJpeg);
         }
-        Ok(CapturedFrame::new(bytes_used, DESCRIPTOR))
+        // A frame the receiver ends at VSYNC carries the sensor's padding
+        // after the image's end marker.
+        let image_bytes = frame
+            .windows(2)
+            .rposition(|marker| marker == [0xff, 0xd9])
+            .and_then(|position| position.checked_add(2))
+            .ok_or(Ov3660Error::IncompleteJpeg)?;
+        Ok(CapturedFrame::new(image_bytes, DESCRIPTOR))
     }
 }
 

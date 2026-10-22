@@ -1276,13 +1276,17 @@ impl ParallelOutputDefinition {
 pub struct CameraCaptureDefinition {
     peripheral: String,
     dma: String,
-    xclk: String,
+    /// The master clock the chip drives; absent when the sensor module has
+    /// its own oscillator.
+    #[serde(default)]
+    xclk: Option<String>,
     pclk: String,
     vsync: String,
     href: String,
     data: [String; 8],
-    #[serde(rename = "xclk-frequency-hz")]
-    xclk_frequency_hz: u32,
+    /// The master-clock frequency; given exactly when `xclk` is.
+    #[serde(default, rename = "xclk-frequency-hz")]
+    xclk_frequency_hz: Option<u32>,
     #[serde(rename = "dma-buffer-bytes")]
     dma_buffer_bytes: usize,
 }
@@ -1298,10 +1302,11 @@ impl CameraCaptureDefinition {
     pub fn dma(&self) -> &str {
         &self.dma
     }
-    /// Returns the sensor master-clock pin.
+    /// Returns the sensor master-clock pin, or `None` when the sensor module
+    /// has its own oscillator.
     #[must_use]
-    pub fn xclk(&self) -> &str {
-        &self.xclk
+    pub fn xclk(&self) -> Option<&str> {
+        self.xclk.as_deref()
     }
     /// Returns the sensor pixel-clock pin.
     #[must_use]
@@ -1323,9 +1328,10 @@ impl CameraCaptureDefinition {
     pub fn data(&self) -> &[String; 8] {
         &self.data
     }
-    /// Returns the sensor master-clock frequency.
+    /// Returns the sensor master-clock frequency, present exactly when
+    /// [`Self::xclk`] is.
     #[must_use]
-    pub const fn xclk_frequency_hz(&self) -> u32 {
+    pub const fn xclk_frequency_hz(&self) -> Option<u32> {
         self.xclk_frequency_hz
     }
     /// Returns the statically allocated DMA frame-buffer capacity.
@@ -1338,7 +1344,6 @@ impl CameraCaptureDefinition {
         for (field, value) in [
             ("peripheral", self.peripheral.as_str()),
             ("dma", self.dma.as_str()),
-            ("xclk", self.xclk.as_str()),
             ("pclk", self.pclk.as_str()),
             ("vsync", self.vsync.as_str()),
             ("href", self.href.as_str()),
@@ -1348,7 +1353,18 @@ impl CameraCaptureDefinition {
         for pin in &self.data {
             validate_identifier(name, "data", pin)?;
         }
-        validate_frequency(name, self.xclk_frequency_hz)?;
+        match (&self.xclk, self.xclk_frequency_hz) {
+            (Some(xclk), Some(frequency_hz)) => {
+                validate_identifier(name, "xclk", xclk)?;
+                validate_frequency(name, frequency_hz)?;
+            }
+            (None, None) => {}
+            _ => {
+                return Err(ConfigError::InvalidCameraClock {
+                    resource: name.to_owned(),
+                });
+            }
+        }
         if self.dma_buffer_bytes == 0 {
             return Err(ConfigError::ZeroDmaBuffer {
                 resource: name.to_owned(),
@@ -2786,6 +2802,15 @@ pub enum ConfigError {
     )]
     InvalidPdmI2sStream {
         /// Board-level stream resource name.
+        resource: String,
+    },
+    /// A camera receiver names a master clock without its frequency, or the
+    /// reverse.
+    #[error(
+        "Board camera-capture `{resource}` must declare `xclk` and `xclk-frequency-hz` together"
+    )]
+    InvalidCameraClock {
+        /// Board-level camera resource name.
         resource: String,
     },
     /// A DMA-backed media resource requested no storage.

@@ -454,6 +454,45 @@ peripherals:
 }
 
 #[test]
+fn parses_a_camera_receiver_without_a_master_clock() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    camera-capture:
+      camera:
+        peripheral: LCD_CAM
+        dma: DMA_CH0
+        pclk: GPIO45
+        vsync: GPIO46
+        href: GPIO38
+        data: [GPIO39, GPIO40, GPIO41, GPIO42, GPIO15, GPIO16, GPIO48, GPIO47]
+        dma-buffer-bytes: 153600
+"#;
+    let board = parse(yaml).expect("camera with its own oscillator");
+    let camera = board
+        .peripheral_io()
+        .camera_capture("camera")
+        .expect("camera receiver");
+    assert_eq!((camera.xclk(), camera.xclk_frequency_hz()), (None, None));
+
+    let half_clock = yaml.replace(
+        "        pclk: GPIO45",
+        "        xclk: GPIO21\n        pclk: GPIO45",
+    );
+    assert_eq!(
+        parse(&half_clock).unwrap_err(),
+        ConfigError::InvalidCameraClock {
+            resource: String::from("camera"),
+        }
+    );
+}
+
+#[test]
 fn parses_a_parallel_output_with_and_without_data_command() {
     let yaml = r#"
 name: product-a

@@ -136,17 +136,31 @@ for each write; either side may be absent.
 ESP32 adds I2S audio streams (`i2s-stream`, without an MCLK pin: the chip
 routes its master clock only to fixed pins) and SD/MMC cards on slot 1 of its
 SD host, whose fixed pins are CLK `GPIO14`, CMD `GPIO15`, and D0 `GPIO2`.
-esp-hal has no camera receiver for the ESP32, so it has no `camera-capture`.
+It has no `camera-capture`: esp-hal has no camera receiver for the ESP32, whose
+I2S0 camera mode widens every sensor byte to a 32-bit DMA word in internal RAM
+only, so a frame has to be streamed through small buffers and compacted under
+an interrupt deadline the Platform does not have.
 
 ESP32-S3 adds quad SPI devices, SD/MMC cards, camera capture, an 8-bit
 parallel output (`parallel-output`, the LCD_CAM controller in i8080 mode, with
 or without a data/command line), I2S audio streams, and capacitive touch.
 
+Camera capture (`camera-capture`) is the LCD_CAM controller receiving an
+eight-bit DVP sensor. One capture is one frame: the receiver waits for the end
+of a VSYNC pulse, which it takes as active high, and stops when the
+destination is full or at the next pulse. Its DMA storage, `dma-buffer-bytes`,
+comes from bulk memory, which is PSRAM on a Board that has it. A Board whose
+camera module has its own oscillator leaves out `xclk` and
+`xclk-frequency-hz`, and the controller drives no master clock. The receiver
+busy-waits for at most one frame period at each step, so a capture holds the
+executor for up to two frames.
+
 ESP32-P4 adds I2S audio streams (`i2s-stream`, through the same adapter as
 the ESP32-S3) and the MIPI DSI host (`dsi-host`): the link, the RGB565
 framebuffer in PSRAM that VDMA scans out, DCS commands before and during
 video, and the backlight pin, which it switches on and off because esp-hal has
-no LEDC driver for the ESP32-P4.
+no LEDC driver for the ESP32-P4. It has no `mipi-csi` camera host: esp-hal has
+no CSI receiver, CSI bridge, or ISP driver for the ESP32-P4.
 
 The ESP32-P4 also drives a microSD card (`sdmmc-device`) on slot 0 of its one
 SD host. That slot's fixed pads are `GPIO39` to `GPIO44`, powered from the
