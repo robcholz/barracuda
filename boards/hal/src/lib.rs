@@ -30,6 +30,8 @@ pub use runtime::{LeaseError, ResourceKind};
 pub use barracuda_peripheral::audio;
 /// Stable attached-button peripheral API.
 pub use barracuda_peripheral::buttons;
+/// Stable attached buzzer peripheral API.
+pub use barracuda_peripheral::buzzer;
 /// Stable attached camera peripheral API.
 pub use barracuda_peripheral::camera;
 /// Stable attached display peripheral API.
@@ -38,6 +40,8 @@ pub use barracuda_peripheral::display;
 pub use barracuda_peripheral::imu;
 /// Stable attached indicator peripheral API.
 pub use barracuda_peripheral::indicator;
+/// Stable attached infrared remote-control API.
+pub use barracuda_peripheral::infrared;
 /// Stable attached LED-strip peripheral API.
 pub use barracuda_peripheral::led_strip;
 /// Stable attached electrical-power monitoring API.
@@ -48,6 +52,8 @@ pub use barracuda_peripheral::real_time_clock;
 pub use barracuda_peripheral::removable_storage;
 /// Stable touch-input API.
 pub use barracuda_peripheral::touch;
+/// Stable attached vibration-motor API.
+pub use barracuda_peripheral::vibration;
 /// Stable factory contract implemented by every peripheral implementation.
 pub use barracuda_peripheral::{display_set, Instance, PeripheralImplementation};
 
@@ -213,6 +219,143 @@ pub trait SpiDeviceControl: embedded_hal::spi::ErrorType {
 
     /// Clocks `bytes` out with this device's chip select released.
     fn write_deselected(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
+}
+
+/// One half of a pulse symbol: an output level held for a number of ticks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PulseLevel {
+    /// Whether the line is high.
+    pub high: bool,
+    /// How long the level lasts, in ticks of the channel's resolution.
+    pub ticks: u16,
+}
+
+impl PulseLevel {
+    /// Longest level one symbol half holds.
+    pub const MAX_TICKS: u16 = 0x7fff;
+
+    /// Creates one level; `ticks` above [`Self::MAX_TICKS`] mean the maximum.
+    #[must_use]
+    pub const fn new(high: bool, ticks: u16) -> Self {
+        Self {
+            high,
+            ticks: if ticks > Self::MAX_TICKS {
+                Self::MAX_TICKS
+            } else {
+                ticks
+            },
+        }
+    }
+}
+
+/// Carrier a pulse output modulates onto its active level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PulseCarrier {
+    /// Carrier frequency in hertz.
+    pub frequency_hz: u32,
+    /// Share of each carrier period the line is active, 1 through 99 percent.
+    pub duty_percent: u8,
+}
+
+/// Timing and line configuration of one pulse output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PulseOutputConfig {
+    /// Tick frequency symbol lengths count in.
+    pub tick_hz: u32,
+    /// Level the line rests at between transmissions; its opposite is the
+    /// active level.
+    pub idle_high: bool,
+    /// Carrier modulated onto the active level, if any.
+    pub carrier: Option<PulseCarrier>,
+}
+
+/// Timing configuration of one pulse input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PulseInputConfig {
+    /// Tick frequency received symbol lengths count in.
+    pub tick_hz: u32,
+    /// A level lasting this many ticks ends a reception.
+    pub idle_ticks: u16,
+    /// Pulses shorter than this many nanoseconds are ignored as glitches.
+    pub filter_ns: u32,
+}
+
+/// A hardware pulse-train generator: one output channel that clocks out
+/// level and duration pairs on its own, as WS2812 LED chains and infrared
+/// transmitters need. `embedded-hal` has no such contract.
+///
+/// Symbols are the Platform's own representation, so a sequence built once
+/// is handed to the hardware without conversion. A sequence ends with
+/// [`PulseOutput::end_marker`].
+pub trait PulseOutput {
+    /// One hardware symbol: two levels in order.
+    type Symbol: Copy;
+    /// Configuration or transfer failure.
+    type Error: core::fmt::Debug;
+
+    /// Builds one symbol. A zero-tick second level ends the transmission
+    /// after the first.
+    fn symbol(first: PulseLevel, second: PulseLevel) -> Self::Symbol;
+
+    /// Returns the symbol that ends a sequence.
+    fn end_marker() -> Self::Symbol;
+
+    /// Applies the tick resolution, idle level, and carrier for the following
+    /// transmissions.
+    fn configure(&mut self, config: PulseOutputConfig) -> Result<(), Self::Error>;
+
+    /// Transmits `symbols` and returns when the last has been sent, keeping
+    /// the CPU busy so the hardware is refilled without delay.
+    fn transmit_blocking(&mut self, symbols: &[Self::Symbol]) -> Result<(), Self::Error>;
+
+    /// Transmits `symbols`, waiting for the end without blocking the
+    /// executor.
+    fn transmit(
+        &mut self,
+        symbols: &[Self::Symbol],
+    ) -> impl Future<Output = Result<(), Self::Error>>;
+}
+
+/// A hardware pulse-train recorder: one input channel that measures the
+/// level and duration pairs of a signal, such as an infrared receiver's.
+pub trait PulseInput {
+    /// One hardware symbol: two levels in order.
+    type Symbol: Copy;
+    /// Configuration or transfer failure.
+    type Error: core::fmt::Debug;
+
+    /// Returns a cleared symbol to fill a receive buffer with.
+    fn empty_symbol() -> Self::Symbol;
+
+    /// Splits one received symbol into its two levels; a zero-tick level
+    /// ends the reception.
+    fn levels(symbol: Self::Symbol) -> (PulseLevel, PulseLevel);
+
+    /// Returns the most symbols one reception records; a receive buffer
+    /// longer than this is used only up to it.
+    fn capacity(&self) -> usize;
+
+    /// Applies the tick resolution, idle threshold, and glitch filter for the
+    /// following receptions.
+    fn configure(&mut self, config: PulseInputConfig) -> Result<(), Self::Error>;
+
+    /// Waits for one signal and records it into `symbols`, returning how many
+    /// symbols it filled. Dropping the future stops the reception.
+    fn receive(
+        &mut self,
+        symbols: &mut [Self::Symbol],
+    ) -> impl Future<Output = Result<usize, Self::Error>>;
+}
+
+/// Frequency control a tone output needs beyond `embedded-hal`'s
+/// `SetDutyCycle`, whose frequency is fixed: a buzzer changes pitch by
+/// retuning its PWM timer. The duty cycle keeps its share of the period.
+pub trait PwmFrequencyControl: embedded_hal::pwm::SetDutyCycle {
+    /// Returns the lowest and highest frequency the output reaches, in hertz.
+    fn frequency_range(&self) -> (u32, u32);
+
+    /// Retunes the output to `frequency_hz`.
+    fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error>;
 }
 
 /// One Board-exposed analog output channel.
@@ -578,6 +721,116 @@ impl buttons::ButtonsPeripheral for NoPeripherals {
     type Buttons = UnavailableButtons;
 
     fn take_buttons(&mut self, _instance: Instance) -> Option<Self::Buttons> {
+        None
+    }
+}
+
+/// Uninhabited buzzer used when a Board has no attached buzzer.
+pub struct UnavailableBuzzer {
+    never: Infallible,
+}
+
+impl buzzer::Buzzer for UnavailableBuzzer {
+    type Error = Infallible;
+
+    fn frequency_range(&self) -> (u32, u32) {
+        match self.never {}
+    }
+
+    fn start(&mut self, _frequency_hz: u32, _volume: buzzer::Volume) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn stop(&mut self) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn play_note(
+        &mut self,
+        _note: buzzer::Note,
+        _volume: buzzer::Volume,
+    ) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl buzzer::BuzzerPeripheral for NoPeripherals {
+    type Buzzer = UnavailableBuzzer;
+
+    fn take_buzzer(&mut self, _instance: Instance) -> Option<Self::Buzzer> {
+        None
+    }
+}
+
+/// Uninhabited vibration motor used when a Board has no attached motor.
+pub struct UnavailableVibration {
+    never: Infallible,
+}
+
+impl vibration::Vibration for UnavailableVibration {
+    type Error = Infallible;
+
+    fn has_variable_strength(&self) -> bool {
+        match self.never {}
+    }
+
+    fn set(&mut self, _strength: vibration::Strength) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn pulse(
+        &mut self,
+        _pattern: &[vibration::Pulse],
+        _strength: vibration::Strength,
+    ) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl vibration::VibrationPeripheral for NoPeripherals {
+    type Vibration = UnavailableVibration;
+
+    fn take_vibration(&mut self, _instance: Instance) -> Option<Self::Vibration> {
+        None
+    }
+}
+
+/// Uninhabited infrared transceiver used when a Board has none.
+pub struct UnavailableInfrared {
+    never: Infallible,
+}
+
+impl infrared::Infrared for UnavailableInfrared {
+    type Error = Infallible;
+
+    fn can_receive(&self) -> bool {
+        match self.never {}
+    }
+
+    async fn send_nec(&mut self, _command: infrared::NecCommand) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn send_raw(
+        &mut self,
+        _carrier: infrared::Carrier,
+        _timings_us: &[u16],
+    ) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn receive(
+        &mut self,
+        _timings_us: &mut [u16],
+    ) -> Result<infrared::Received, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl infrared::InfraredPeripheral for NoPeripherals {
+    type Infrared = UnavailableInfrared;
+
+    fn take_infrared(&mut self, _instance: Instance) -> Option<Self::Infrared> {
         None
     }
 }
