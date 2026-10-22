@@ -154,7 +154,7 @@ main = { fill = "primary", optional = true }   # starts without touch
 | `"any"` | 该类型中没有被其他槽位取走的唯一设备 |
 | `"*"` | 该类型中所有没有被其他槽位取走的设备，以列表形式 |
 
-除非写明 `optional = true`，槽位都是必需的；`"*"` 槽位总是可选的。插件可以为一种类型声明多个槽位。类型就是 `peripherals/impl/` 中的 `peripheral:` 名称：`display`、`touch`、`buttons`、`indicator`、`led-strip`、`camera`、`audio-codec`、`inertial-measurement`、`power-monitor` 和 `real-time-clock`。可移动存储由 System 拥有，永远不会被认领。
+除非写明 `optional = true`，槽位都是必需的；`"*"` 槽位总是可选的。插件可以为一种类型声明多个槽位。类型就是 `peripherals/impl/` 中的 `peripheral:` 名称：`display`、`touch`、`buttons`、`indicator`、`led-strip`、`buzzer`、`vibration`、`infrared`、`camera`、`audio-codec`、`inertial-measurement`、`power-monitor` 和 `real-time-clock`。可移动存储由 System 拥有，永远不会被认领。
 
 开发板在 `peripherals.devices` 下提供具名设备，当某种类型有多个设备时把其中一个标记为 `primary: true`，并且只在需要覆盖默认值或消除歧义时才为槽位接线：
 

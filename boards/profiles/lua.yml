@@ -4,18 +4,21 @@ extends: minimal
 enable:
   - analog
   - audio
+  - buzzer
   - camera
   - display
   - gpio
   - i2c
   - i2s
   - imu
+  - infrared
   - led-strip
   - message-queue
   - power-monitor
   - pwm
   - spi
   - uart
+  - vibration
   - vm
   - vm-filesystem
   - vm-systeminfo

@@ -19,14 +19,17 @@ use core::pin::Pin;
 
 use barracuda_board_hal::{
     audio::AudioCodecPeripheral,
+    buzzer::BuzzerPeripheral,
     camera::CameraPeripheral,
     display::DisplayPeripheral,
     imu::ImuPeripheral,
+    infrared::InfraredPeripheral,
     led_strip::LedStripPeripheral,
     power::PowerMonitorPeripheral,
     real_time_clock::RealTimeClockPeripheral,
     removable_storage::{RemovableStorage, RemovableStorageEvent, RemovableStoragePeripheral},
     touch::TouchPeripheral,
+    vibration::VibrationPeripheral,
     AnalogProvider, BoardResources, DigitalProvider, ExposedIo, I2cProvider, I2sProvider,
     PwmProvider, SpiProvider, UartProvider,
 };
@@ -211,14 +214,17 @@ where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
     Peripherals: AudioCodecPeripheral
+        + BuzzerPeripheral
         + CameraPeripheral
         + DisplayPeripheral
         + ImuPeripheral
+        + InfraredPeripheral
         + LedStripPeripheral
         + PowerMonitorPeripheral
         + RealTimeClockPeripheral
         + RemovableStoragePeripheral
         + TouchPeripheral
+        + VibrationPeripheral
         + Unpin,
     Peripherals::AudioCodec: Send + 'static,
     <Peripherals::AudioCodec as barracuda_board_hal::audio::AudioCodec>::Error: core::fmt::Debug,
@@ -227,6 +233,12 @@ where
     <Peripherals::Display as barracuda_board_hal::display::Display>::RenderError: core::fmt::Debug,
     Peripherals::Camera: Send + 'static,
     <Peripherals::Camera as barracuda_board_hal::camera::Camera>::Error: core::fmt::Debug,
+    Peripherals::Buzzer: Send + 'static,
+    <Peripherals::Buzzer as barracuda_board_hal::buzzer::Buzzer>::Error: core::fmt::Debug,
+    Peripherals::Infrared: Send + 'static,
+    <Peripherals::Infrared as barracuda_board_hal::infrared::Infrared>::Error: core::fmt::Debug,
+    Peripherals::Vibration: Send + 'static,
+    <Peripherals::Vibration as barracuda_board_hal::vibration::Vibration>::Error: core::fmt::Debug,
     Peripherals::LedStrip: Send + 'static,
     <Peripherals::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
     Peripherals::Imu: Send + 'static,
