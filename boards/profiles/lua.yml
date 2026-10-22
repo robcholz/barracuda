@@ -6,6 +6,8 @@ enable:
   - audio
   - buzzer
   - camera
+  - can
+  - digital-io
   - display
   - environment-sensor
   - gpio
@@ -15,7 +17,9 @@ enable:
   - infrared
   - keyboard
   - led-strip
+  - lora
   - message-queue
+  - nfc
   - power-monitor
   - pwm
   - rotary-encoder

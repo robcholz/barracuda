@@ -1,0 +1,15 @@
+id: twai-can
+api-version: 1
+peripheral: can
+implementation:
+  package: barracuda-twai-can
+  crate: barracuda_twai_can
+  factory: "::{{crate}}::TwaiCanImplementation<{{binding.controller.type}}>"
+  bindings-expression: "{{binding.controller.value}}"
+  config-expression: "::{{crate}}::TwaiCanConfig::new()"
+# A classic CAN bus on the chip's own CAN controller (the ESP TWAI) and a
+# transceiver that needs no driver. The controller stays off the bus until an
+# application chooses the bit rate.
+bindings:
+  controller:
+    kind: twai

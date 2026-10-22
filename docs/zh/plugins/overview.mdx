@@ -71,6 +71,8 @@ Barracuda 设备上的每项能力都是一个插件。每个插件页面都会�
 | [Buzzer](/zh/plugins/vm-buzzer) | 基于开发板的主蜂鸣器安装 `buzzer` Lua 包。 |
 | [Audio](/zh/plugins/vm-audio) | Audio 插件把开发板音频编解码器（由 `sound` 插件拥有）上的播放和录音作为 `audio` Lua 包暴露给 Lua 代码。 |
 | [Camera](/zh/plugins/vm-camera) | Camera 插件拥有开发板的主摄像头，并把帧采集作为 `camera` Lua 包暴露给 Lua 代码。 |
+| [CAN](/zh/plugins/vm-can) | 基于开发板的主 CAN 总线安装 `can` Lua 包。 |
+| [Digital I/O](/zh/plugins/vm-digital-io) | 基于开发板的主继电器和隔离数字输入安装 `digital_io` Lua 包。 |
 | [Display](/zh/plugins/vm-display) | Display 插件拥有所有未被其他插件占用的开发板显示屏，并把绘制和面板控制作为 `display` Lua 包暴露给 Lua 代码。 |
 | [VM Filesystem](/zh/plugins/vm-filesystem) | VM Filesystem 插件通过 Lua 标准的 `io` 和 `os` 文件 API，把它的插件作用域 VFS 暴露给 Lua 代码。 |
 | [GPIO](/zh/plugins/vm-gpio) | GPIO 插件把开发板可用引脚上的数字输入和输出作为 `gpio` Lua 包暴露给 Lua 代码。 |
@@ -83,7 +85,9 @@ Barracuda 设备上的每项能力都是一个插件。每个插件页面都会�
 | [Keyboard](/zh/plugins/vm-keyboard) | 基于开发板的主键盘安装 `keyboard` Lua 包。 |
 | [Rotary Encoder](/zh/plugins/vm-rotary-encoder) | 基于开发板的主旋转编码器安装 `encoder` Lua 包。 |
 | [LED Strip](/zh/plugins/vm-led-strip) | 基于开发板的主 LED 灯带安装 `light` Lua 包。 |
+| [LoRa](/zh/plugins/vm-lora) | 基于开发板的主 LoRa 射频模块安装 `lora` Lua 包。 |
 | [Message Queue](/zh/plugins/vm-message-queue) | 安装只能 require 的 `message_queue` Lua 包：一组有界的共享 FIFO 队列，相互独立的 Lua 执行用它们交换消息。 |
+| [NFC](/zh/plugins/vm-nfc) | 基于开发板的主 NFC 读卡器安装 `nfc` Lua 包。 |
 | [Power Monitor](/zh/plugins/vm-power-monitor) | 基于开发板的电源监测器（由 `power` 插件拥有）安装 `power_monitor` Lua 包。 |
 | [PWM](/zh/plugins/vm-pwm) | 基于开发板的可用 I/O 引脚安装 `pwm` Lua 包。 |
 | [SPI](/zh/plugins/vm-spi) | 基于开发板的可用 I/O 引脚安装只能 require 的 `spi` Lua 包。 |

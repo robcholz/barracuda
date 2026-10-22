@@ -1,0 +1,41 @@
+---
+title: "LoRa 插件"
+sidebarTitle: "LoRa"
+description: "用 `lora` Lua 包在 Lua 中收发 LoRa 数据包。"
+---
+
+基于开发板的主 LoRa 射频模块安装 `lora` Lua 包。
+
+- 插件 ID：`lora`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `lora.device`（`primary`，可选）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`lora`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件只获取一次开发板的主 `Lora` 能力，并安装 `lora` Lua 包。它使用的是语义层面的外设能力，从不直接操作收发芯片、它的 SPI 设备或背后的扩展芯片。
+
+Lua API：
+
+- `lora.available() -> boolean`
+- `lora.limits() -> table` 返回 `\{min_frequency_hz, max_frequency_hz, min_power_dbm, max_power_dbm\}`，即开发板射频前端允许的频段和芯片的功率范围
+- `lora.configure(settings) -> true` 应用 `\{frequency_hz = ..., spreading_factor = 8, bandwidth_hz = 250000, coding_rate = 8, power_dbm = 10, preamble = 12, sync_word = 0x12, crc = true\}`；只有 `frequency_hz` 必填，其余默认取上面列出的值（M5Stack UIFlow 的默认值）。`bandwidth_hz` 是 7800 到 500000 之间的 LoRa 带宽，`coding_rate` 取 5 到 8，表示 4/5 到 4/8
+- `lora.send(bytes) -> true` 发送一个 1 到 255 字节的数据包，发送完成后返回
+- `lora.receive([timeout_ms]) -> bytes, rssi_dbm, snr_db` 等待一个包头和 CRC 都正确的数据包；超过 `timeout_ms` 时返回 `nil, "timeout"`
+
+第一次 `send` 或 `receive` 之前先配置射频；同一网络中的每个节点使用相同的设置，频率必须是当地法规允许的。设置超出范围，或在另一次调用进行期间调用，都会返回 `nil, error`。取消 `receive` 后射频会保持接收，直到下一次调用。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 1。没有 LoRa 射频的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
+
+```lua
+local lora = require("lora")
+lora.configure({ frequency_hz = 868100000, spreading_factor = 9, bandwidth_hz = 125000 })
+lora.send("hello")
+local data, rssi, snr = lora.receive(5000)
+```

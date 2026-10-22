@@ -1,0 +1,56 @@
+---
+title: "Digital I/O Plugin"
+sidebarTitle: "Digital I/O"
+description: "Switch the Board's relays and read its isolated inputs from Lua with the `digital_io` package."
+---
+
+Installs the `digital_io` Lua package over the Board's primary digital I/O
+bank: the relay or transistor outputs and isolated inputs of a controller
+such as the M5Stack StamPLC.
+
+- Plugin ID: `digital-io`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `digital-io.device` (`primary`, optional)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `digital_io`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes the Board's primary `DigitalIo` capability exactly once and
+installs the `digital_io` Lua package. It consumes the semantic peripheral
+and never reaches the expander or pins behind it. For the Board's
+uncommitted pins, use the [GPIO](/plugins/vm-gpio) package instead.
+
+Outputs and inputs are numbered from 1 in the order the product labels them:
+relay 1 is output 1, input 1 is input 1. An output is on while its relay or
+transistor conducts; an input is on while its terminals are energized.
+
+Lua API:
+
+- `digital_io.available() -> boolean`
+- `digital_io.counts() -> outputs, inputs`
+- `digital_io.set(output, on) -> true` switches one output
+- `digital_io.get(output) -> boolean` returns the state the output was last
+  switched to
+- `digital_io.outputs() -> table` returns every output's state, `\{true,
+  false, ...\}`
+- `digital_io.read(input) -> boolean` reads one input
+- `digital_io.inputs() -> table` reads every input
+
+A channel that does not exist returns `nil, error`. Outputs start off.
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 1. Boards without one still install
+the package; `available` returns false and every other call returns
+`nil, error`. Plugin revocation prevents every further call.
+
+```lua
+local io = require("digital_io")
+io.set(1, true)
+if io.read(3) then io.set(2, true) end
+```

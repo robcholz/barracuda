@@ -1,0 +1,20 @@
+id: mfrc522-nfc-reader
+api-version: 1
+peripheral: nfc-reader
+implementation:
+  package: barracuda-mfrc522-nfc-reader
+  crate: barracuda_mfrc522_nfc_reader
+  factory: "::{{crate}}::Mfrc522NfcReaderImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "{{binding.i2c.value}}"
+  config-expression: "::{{crate}}::Mfrc522NfcReaderConfig::new({{parameter.address}})"
+# An NXP MFRC522 or a compatible reader such as the WS1850S on I2C. A soft
+# reset starts it, so it needs neither a reset nor an interrupt line; each
+# poll waits for the card in the chip's 25 ms frame timer.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 28h: the M5Stack Dial's WS1850S (M5Dial `RC522_I2C_ADDRESS`).
+    default: 40
