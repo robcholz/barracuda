@@ -106,6 +106,11 @@ one controller share its converter, and implementations read calibrated
 millivolts at 11 dB attenuation, up to about 3.1 V. A battery behind a
 resistor divider and a resistor-ladder button array use it.
 
+ESP32, ESP32-S3, and ESP32-C6 decode a quadrature encoder on unit 0 of their
+pulse counter (`pulse-counter`), counting every edge of both signals. The
+ESP32-C3 has no pulse counter, and esp-hal has no PCNT driver for the
+ESP32-P4 yet.
+
 ESP32 and ESP32-S3 drive a PDM microphone and an I2S amplifier on one I2S0
 controller (`pdm-i2s-stream`). M5Stack wires the microphone's clock and the
 amplifier's word select to one pin, so the controller switches to PDM receive,

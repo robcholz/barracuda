@@ -66,6 +66,8 @@ barracuda-bm8563-rtc = { path = "peripherals/impl/real-time-clock/bm8563-rtc" }
 barracuda-bmi270-imu = { path = "peripherals/impl/inertial-measurement/bmi270-imu" }
 barracuda-bq27220-power-monitor = { path = "peripherals/impl/power-monitor/bq27220-power-monitor" }
 barracuda-capacitive-touch-buttons = { path = "peripherals/impl/buttons/capacitive-touch-buttons" }
+barracuda-cardputer-adv-keyboard = { path = "peripherals/impl/keyboard/cardputer-adv-keyboard" }
+barracuda-cardputer-keyboard = { path = "peripherals/impl/keyboard/cardputer-keyboard" }
 barracuda-chain-captain-display = { path = "peripherals/impl/display/chain-captain-display" }
 barracuda-chsc6540-touch = { path = "peripherals/impl/touch/chsc6540-touch" }
 barracuda-corep4x-dsi-display = { path = "peripherals/impl/display/corep4x-dsi-display" }
@@ -102,6 +104,7 @@ barracuda-paper-diy-display = { path = "peripherals/impl/display/paper-diy-displ
 barracuda-paper-mono-display = { path = "peripherals/impl/display/paper-mono-display" }
 barracuda-pdm-i2s-audio-codec = { path = "peripherals/impl/audio-codec/pdm-i2s-audio-codec" }
 barracuda-pi4ioe5v6408-buttons = { path = "peripherals/impl/buttons/pi4ioe5v6408-buttons" }
+barracuda-quadrature-rotary-encoder = { path = "peripherals/impl/rotary-encoder/quadrature-rotary-encoder" }
 barracuda-rx8130ce-rtc = { path = "peripherals/impl/real-time-clock/rx8130ce-rtc" }
 barracuda-scd4x-sen5x-environment-sensor = { path = "peripherals/impl/environment-sensor/scd4x-sen5x-environment-sensor" }
 barracuda-sdmmc-fat-removable-storage = { path = "peripherals/impl/removable-storage/sdmmc-fat-removable-storage" }
@@ -160,10 +163,12 @@ barracuda-vm-http-plugin = { path = "plugins/vm-http/crates/plugin" }
 barracuda-i2c-plugin = { path = "plugins/vm-i2c/crates/plugin" }
 barracuda-i2s-plugin = { path = "plugins/vm-i2s/crates/plugin" }
 barracuda-imu-plugin = { path = "plugins/vm-imu/crates/plugin" }
+barracuda-keyboard-plugin = { path = "plugins/vm-keyboard/crates/plugin" }
 barracuda-led-strip-plugin = { path = "plugins/vm-led-strip/crates/plugin" }
 barracuda-message-queue-plugin = { path = "plugins/vm-message-queue/crates/plugin" }
 barracuda-power-monitor-plugin = { path = "plugins/vm-power-monitor/crates/plugin" }
 barracuda-pwm-plugin = { path = "plugins/vm-pwm/crates/plugin" }
+barracuda-rotary-encoder-plugin = { path = "plugins/vm-rotary-encoder/crates/plugin" }
 barracuda-spi-plugin = { path = "plugins/vm-spi/crates/plugin" }
 barracuda-vm-systeminfo-plugin = { path = "plugins/vm-systeminfo/crates/plugin" }
 barracuda-vm-time-plugin = { path = "plugins/vm-time/crates/plugin" }
@@ -190,6 +195,7 @@ barracuda-driver-aw9523 = { path = "drivers/chips/aw9523" }
 barracuda-driver-axp192 = { path = "drivers/chips/axp192" }
 barracuda-driver-axp2101 = { path = "drivers/chips/axp2101" }
 barracuda-driver-bm8563 = { path = "drivers/chips/bm8563" }
+barracuda-driver-bmm150 = { path = "drivers/chips/bmm150" }
 barracuda-driver-bq27220 = { path = "drivers/chips/bq27220" }
 barracuda-driver-co5300 = { path = "drivers/chips/co5300" }
 barracuda-driver-chsc6540 = { path = "drivers/chips/chsc6540" }
@@ -230,6 +236,7 @@ barracuda-driver-ssd1306 = { path = "drivers/chips/ssd1306" }
 barracuda-driver-ssd1677 = { path = "drivers/chips/ssd1677" }
 barracuda-driver-st712x = { path = "drivers/chips/st712x" }
 barracuda-driver-st77916 = { path = "drivers/chips/st77916" }
+barracuda-driver-tca8418 = { path = "drivers/chips/tca8418" }
 barracuda-driver-tt21100 = { path = "drivers/chips/tt21100" }
 barracuda-driver-ws2812-spi = { path = "drivers/chips/ws2812-spi" }
 barracuda-kv = { path = "shared/kv" }

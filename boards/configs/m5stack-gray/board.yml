@@ -55,6 +55,14 @@ peripherals:
     inertial-measurement:
       implementation: mpu6886-imu
       bindings: { i2c: internal-i2c }
+      # The BMM150 at 10h beside the MPU6886 (docs.m5stack.com; M5Unified
+      # `BMM150_Class` on the internal bus), absent on the MPU9250 units, so
+      # it is read where it answers. M5Unified `IMU_Class::begin` (M5Stack
+      # MPU6886 + BMM150): its X and Z inverted.
+      parameters:
+        magnetometer: bmm150-if-present
+        magnetometer-axis-x: "-x"
+        magnetometer-axis-z: "-z"
     # Buttons A, B, C on GPIO39, GPIO38, GPIO37, active low with the Board's
     # pull-ups (M5Unified `M5Unified::update`); GPIO34-39 have no internal bias.
     buttons:

@@ -865,6 +865,7 @@ dependencies = [
 name = "barracuda-bmi270-imu"
 version = "0.1.0"
 dependencies = [
+ "barracuda-driver-bmm150",
  "barracuda-peripheral",
  "bmi2",
  "embassy-futures",
@@ -931,6 +932,8 @@ dependencies = [
  "barracuda-bmi270-imu",
  "barracuda-bq27220-power-monitor",
  "barracuda-capacitive-touch-buttons",
+ "barracuda-cardputer-adv-keyboard",
+ "barracuda-cardputer-keyboard",
  "barracuda-chain-captain-display",
  "barracuda-chsc6540-touch",
  "barracuda-corep4x-dsi-display",
@@ -967,6 +970,7 @@ dependencies = [
  "barracuda-paper-mono-display",
  "barracuda-pdm-i2s-audio-codec",
  "barracuda-pi4ioe5v6408-buttons",
+ "barracuda-quadrature-rotary-encoder",
  "barracuda-rx8130ce-rtc",
  "barracuda-scd4x-sen5x-environment-sensor",
  "barracuda-sdmmc-fat-removable-storage",
@@ -1116,6 +1120,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-cardputer-adv-keyboard"
+version = "0.1.0"
+dependencies = [
+ "barracuda-cardputer-keyboard",
+ "barracuda-driver-tca8418",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-cardputer-keyboard"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-chain-captain-display"
 version = "0.1.0"
 dependencies = [
@@ -1252,6 +1277,13 @@ dependencies = [
 
 [[package]]
 name = "barracuda-driver-bm8563"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-bmm150"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
@@ -1548,6 +1580,13 @@ dependencies = [
 [[package]]
 name = "barracuda-driver-st77916"
 version = "0.1.0"
+
+[[package]]
+name = "barracuda-driver-tca8418"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
 
 [[package]]
 name = "barracuda-driver-tt21100"
@@ -2076,6 +2115,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-keyboard-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "embassy-time",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
 name = "barracuda-kv"
 version = "0.1.0"
 dependencies = [
@@ -2261,6 +2316,7 @@ dependencies = [
 name = "barracuda-mpu6886-imu"
 version = "0.1.0"
 dependencies = [
+ "barracuda-driver-bmm150",
  "barracuda-driver-mpu6886",
  "barracuda-peripheral",
  "embassy-futures",
@@ -2866,11 +2922,13 @@ dependencies = [
  "barracuda-imessage-web-plugin",
  "barracuda-imessage-wechat-plugin",
  "barracuda-imu-plugin",
+ "barracuda-keyboard-plugin",
  "barracuda-led-strip-plugin",
  "barracuda-message-queue-plugin",
  "barracuda-power-monitor-plugin",
  "barracuda-power-plugin",
  "barracuda-pwm-plugin",
+ "barracuda-rotary-encoder-plugin",
  "barracuda-scheduler-plugin",
  "barracuda-sound-plugin",
  "barracuda-spi-plugin",
@@ -2950,6 +3008,30 @@ dependencies = [
  "barracuda-vm-runtime",
  "critical-section",
  "embedded-hal 1.0.0",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-quadrature-rotary-encoder"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-peripheral",
+ "embassy-futures",
+]
+
+[[package]]
+name = "barracuda-rotary-encoder-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "futures-lite",
  "portable-atomic",
  "portable-atomic-util",
 ]

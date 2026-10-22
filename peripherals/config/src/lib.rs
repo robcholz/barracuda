@@ -26,10 +26,12 @@ pub const PERIPHERAL_APIS: &[&str] = &[
     "environment-sensor",
     "indicator",
     "inertial-measurement",
+    "keyboard",
     "led-strip",
     "power-monitor",
     "real-time-clock",
     "removable-storage",
+    "rotary-encoder",
     "touch",
 ];
 
@@ -233,6 +235,8 @@ pub enum BindingKind {
     AnalogInput,
     /// One PDM microphone and I2S amplifier stream on one controller.
     PdmI2sStream,
+    /// One pulse-counter unit decoding a quadrature encoder.
+    PulseCounter,
     /// A semantic power-control binding.
     PowerControl,
     /// A semantic brightness-control binding.
@@ -978,7 +982,9 @@ pub fn resolve_board<'a>(
                     || (schema.kind() == BindingKind::AnalogInput
                         && board.peripheral_io().analog_input(resource).is_none())
                     || (schema.kind() == BindingKind::PdmI2sStream
-                        && board.peripheral_io().pdm_i2s_stream(resource).is_none()))
+                        && board.peripheral_io().pdm_i2s_stream(resource).is_none())
+                    || (schema.kind() == BindingKind::PulseCounter
+                        && board.peripheral_io().pulse_counter(resource).is_none()))
             {
                 return Err(ResolveError::UnknownInternalResource {
                     peripheral: name.to_owned(),
@@ -1226,6 +1232,7 @@ const fn hal_binding(kind: BindingKind) -> Option<HalBinding> {
         BindingKind::CapacitiveTouch => Some(HalBinding::CapacitiveTouch),
         BindingKind::AnalogInput => Some(HalBinding::AnalogInput),
         BindingKind::PdmI2sStream => Some(HalBinding::PdmI2sStream),
+        BindingKind::PulseCounter => Some(HalBinding::PulseCounter),
         _ => None,
     }
 }
@@ -1294,6 +1301,16 @@ fn claimable_peripheral(
             "::barracuda_board_hal::environment::EnvironmentSensorPeripheral",
             "take_environment_sensor",
             "EnvironmentSensor",
+        ),
+        "keyboard" => (
+            "::barracuda_board_hal::keyboard::KeyboardPeripheral",
+            "take_keyboard",
+            "Keyboard",
+        ),
+        "rotary-encoder" => (
+            "::barracuda_board_hal::rotary_encoder::RotaryEncoderPeripheral",
+            "take_rotary_encoder",
+            "RotaryEncoder",
         ),
         _ => return None,
     })
@@ -1834,6 +1851,16 @@ fn render_generic_hal(
         if !primary_peripherals.contains("environment-sensor") {
             source.push_str(
                 "impl ::barracuda_board_hal::environment::EnvironmentSensorPeripheral for GeneratedPeripherals {\n    type EnvironmentSensor = ::barracuda_board_hal::UnavailableEnvironmentSensor;\n    fn take_environment_sensor(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::EnvironmentSensor> { None }\n}\n\n",
+            );
+        }
+        if !primary_peripherals.contains("keyboard") {
+            source.push_str(
+                "impl ::barracuda_board_hal::keyboard::KeyboardPeripheral for GeneratedPeripherals {\n    type Keyboard = ::barracuda_board_hal::UnavailableKeyboard;\n    fn take_keyboard(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::Keyboard> { None }\n}\n\n",
+            );
+        }
+        if !primary_peripherals.contains("rotary-encoder") {
+            source.push_str(
+                "impl ::barracuda_board_hal::rotary_encoder::RotaryEncoderPeripheral for GeneratedPeripherals {\n    type RotaryEncoder = ::barracuda_board_hal::UnavailableRotaryEncoder;\n    fn take_rotary_encoder(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::RotaryEncoder> { None }\n}\n\n",
             );
         }
     }
@@ -3146,6 +3173,52 @@ fn render_binding(
                 ),
                 format!(
                     "::barracuda_platform_selected::__platform::hal::capacitive_touch_buttons(bindings.{controller}, bindings.{rtc_control}, bindings.{rtc_io}, bindings.{pin0}, bindings.{pin1})"
+                ),
+            ))
+        }
+        BindingKind::PulseCounter => {
+            let counter = board
+                .peripheral_io()
+                .pulse_counter(resource)
+                .ok_or_else(|| GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                })?;
+            validate_hardware_identifier(counter.peripheral())?;
+            validate_hardware_identifier(counter.a())?;
+            validate_hardware_identifier(counter.b())?;
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let controller =
+                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            let a = checked_identifier(&format!("{prefix}_a"), &mut state.identifiers)?;
+            let b = checked_identifier(&format!("{prefix}_b"), &mut state.identifiers)?;
+            state.raw_fields.extend([
+                (
+                    controller.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                        counter.peripheral()
+                    ),
+                ),
+                (
+                    a.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+                        counter.a()
+                    ),
+                ),
+                (
+                    b.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+                        counter.b()
+                    ),
+                ),
+            ]);
+            Ok((
+                String::from("::barracuda_platform_selected::__platform::hal::QuadratureCounter"),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::quadrature_counter(bindings.{controller}, bindings.{a}, bindings.{b})"
                 ),
             ))
         }

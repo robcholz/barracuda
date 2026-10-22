@@ -72,11 +72,26 @@ peripherals:
         invert-colors: true
         orientation: deg90
     # The G0 button, active low with the Board's pull-up (M5Unified
-    # `M5Unified::update`). The keyboard is not declared.
+    # `M5Unified::update`).
     buttons:
       implementation: gpio-buttons
       bindings:
         button-1: GPIO0
+    # The 56-key matrix (M5Cardputer `IOMatrixKeyboardReader`): a 74HC138
+    # addressed by GPIO8, GPIO9, GPIO11 (A0-A2) and seven inputs, pulled up.
+    keyboard:
+      implementation: cardputer-keyboard
+      bindings:
+        address-0: GPIO8
+        address-1: GPIO9
+        address-2: GPIO11
+        input-1: GPIO13
+        input-2: GPIO15
+        input-3: GPIO3
+        input-4: GPIO4
+        input-5: GPIO5
+        input-6: GPIO6
+        input-7: GPIO7
 exposed-io:
   pins:
     # Grove (PORT.CUSTOM) G1/G2: M5Stack Cardputer pin map.

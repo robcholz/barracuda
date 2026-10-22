@@ -1,0 +1,25 @@
+id: cardputer-adv-keyboard
+api-version: 1
+peripheral: keyboard
+implementation:
+  package: barracuda-cardputer-adv-keyboard
+  crate: barracuda_cardputer_adv_keyboard
+  factory: "::{{crate}}::CardputerAdvKeyboardImplementation<{{binding.i2c.type}}, {{binding.interrupt.type}}>"
+  bindings-expression: "::{{crate}}::CardputerAdvKeyboardBindings::new({{binding.i2c.value}}, {{binding.interrupt.value}})"
+  config-expression: "::{{crate}}::CardputerAdvKeyboardConfig::new({{parameter.address}})"
+# M5Stack Cardputer-ADV's keyboard: a TCA8418 scans a 7-row, 8-column
+# matrix and queues its events (M5Cardputer `TCA8418KeyboardReader`); the
+# keymap is the Cardputer's.
+bindings:
+  i2c:
+    kind: i2c-device
+  # The TCA8418's active-low interrupt line. Without it, every poll reads
+  # the event FIFO over I2C.
+  interrupt:
+    kind: digital-input
+    required: false
+parameters:
+  address:
+    type: integer
+    # 34h: the TCA8418's fixed address (Adafruit `TCA8418_DEFAULT_ADDR`).
+    default: 52

@@ -40,6 +40,8 @@ pub use barracuda_peripheral::environment;
 pub use barracuda_peripheral::imu;
 /// Stable attached indicator peripheral API.
 pub use barracuda_peripheral::indicator;
+/// Stable attached keyboard peripheral API.
+pub use barracuda_peripheral::keyboard;
 /// Stable attached LED-strip peripheral API.
 pub use barracuda_peripheral::led_strip;
 /// Stable attached electrical-power monitoring API.
@@ -48,6 +50,8 @@ pub use barracuda_peripheral::power;
 pub use barracuda_peripheral::real_time_clock;
 /// Stable attached removable-filesystem peripheral API.
 pub use barracuda_peripheral::removable_storage;
+/// Stable attached rotary-encoder peripheral API.
+pub use barracuda_peripheral::rotary_encoder;
 /// Stable touch-input API.
 pub use barracuda_peripheral::touch;
 /// Stable factory contract implemented by every peripheral implementation.
@@ -170,6 +174,20 @@ pub trait CapacitiveTouchChannels {
 
     /// Reads the two hardware capacitance counters together.
     fn read(&mut self) -> Result<[u32; 2], Self::Error>;
+}
+
+/// Quadrature edge count supplied by a Platform's pulse-counter unit.
+///
+/// `embedded-hal` has no encoder contract. The Platform counts every edge of
+/// both encoder signals, up while B leads A and down while A leads B, and
+/// widens the hardware counter in software: a reader that looks at least
+/// once every 16 384 edges sees every one.
+pub trait QuadratureDecoder {
+    /// Counter failure returned by the Platform adapter.
+    type Error: core::fmt::Debug;
+
+    /// Returns the signed number of edges counted since construction.
+    fn count(&mut self) -> Result<i64, Self::Error>;
 }
 
 /// Error family shared by one exposed analog peripheral.
@@ -605,6 +623,56 @@ impl environment::EnvironmentSensorPeripheral for NoPeripherals {
     type EnvironmentSensor = UnavailableEnvironmentSensor;
 
     fn take_environment_sensor(&mut self, _instance: Instance) -> Option<Self::EnvironmentSensor> {
+        None
+    }
+}
+
+/// Uninhabited keyboard used when a Board declares no keyboard.
+pub struct UnavailableKeyboard {
+    never: Infallible,
+}
+
+impl keyboard::Keyboard for UnavailableKeyboard {
+    type Error = Infallible;
+
+    fn poll_event(&mut self) -> Result<Option<keyboard::KeyEvent>, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl keyboard::KeyboardPeripheral for NoPeripherals {
+    type Keyboard = UnavailableKeyboard;
+
+    fn take_keyboard(&mut self, _instance: Instance) -> Option<Self::Keyboard> {
+        None
+    }
+}
+
+/// Uninhabited rotary encoder used when a Board declares no encoder.
+pub struct UnavailableRotaryEncoder {
+    never: Infallible,
+}
+
+impl rotary_encoder::RotaryEncoder for UnavailableRotaryEncoder {
+    type Error = Infallible;
+
+    fn position(&mut self) -> Result<i64, Self::Error> {
+        match self.never {}
+    }
+
+    fn delta(&mut self) -> Result<i64, Self::Error> {
+        match self.never {}
+    }
+
+    fn reset(&mut self) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl rotary_encoder::RotaryEncoderPeripheral for NoPeripherals {
+    type RotaryEncoder = UnavailableRotaryEncoder;
+
+    fn take_rotary_encoder(&mut self, _instance: Instance) -> Option<Self::RotaryEncoder> {
         None
     }
 }

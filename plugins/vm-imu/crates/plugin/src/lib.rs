@@ -126,7 +126,7 @@ where
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         self.present
             .then_some(barracuda_vm_plugin::PackageInterface::Stable {
-                version: 1,
+                version: 2,
                 purpose: "读取动作传感器",
             })
     }
@@ -217,19 +217,36 @@ where
         .map_err(|error| Error::runtime(alloc::format!("IMU read failed: {error:?}")))
 }
 
-fn descriptor_values(descriptor: ImuDescriptor) -> (i64, i64, i64, i64, bool) {
+type DescriptorValues = (i64, i64, i64, i64, bool, Option<i64>);
+
+fn descriptor_values(descriptor: ImuDescriptor) -> DescriptorValues {
     (
         i64::from(descriptor.accelerometer_rate_hz()),
         i64::from(descriptor.gyroscope_rate_hz()),
         i64::from(descriptor.accelerometer_range_mg()),
         i64::from(descriptor.gyroscope_range_mdps()),
         descriptor.has_temperature(),
+        descriptor.magnetometer_rate_hz().map(i64::from),
     )
 }
 
-fn sample_values(sample: ImuSample) -> (i64, i64, i64, i64, i64, i64, Option<i64>) {
+type SampleValues = (
+    i64,
+    i64,
+    i64,
+    i64,
+    i64,
+    i64,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+);
+
+fn sample_values(sample: ImuSample) -> SampleValues {
     let acceleration = sample.acceleration_mg();
     let angular_velocity = sample.angular_velocity_mdps();
+    let field = sample.magnetic_field_nt();
     (
         i64::from(acceleration.x),
         i64::from(acceleration.y),
@@ -238,6 +255,9 @@ fn sample_values(sample: ImuSample) -> (i64, i64, i64, i64, i64, i64, Option<i64
         i64::from(angular_velocity.y),
         i64::from(angular_velocity.z),
         sample.temperature_mc().map(i64::from),
+        field.map(|field| i64::from(field.x)),
+        field.map(|field| i64::from(field.y)),
+        field.map(|field| i64::from(field.z)),
     )
 }
 
@@ -266,15 +286,14 @@ mod tests {
         type Error = Infallible;
 
         fn descriptor(&self) -> ImuDescriptor {
-            ImuDescriptor::new(100, 100, 4_000, 500_000, true)
+            ImuDescriptor::new(100, 100, 4_000, 500_000, true).with_magnetometer(25)
         }
 
         async fn read_sample(&mut self) -> core::result::Result<ImuSample, Self::Error> {
-            Ok(ImuSample::new(
-                Vector3::new(1, 2, 3),
-                Vector3::new(4, 5, 6),
-                Some(25_000),
-            ))
+            Ok(
+                ImuSample::new(Vector3::new(1, 2, 3), Vector3::new(4, 5, 6), Some(25_000))
+                    .with_magnetic_field(Vector3::new(20_000, -5_000, 40_000)),
+            )
         }
     }
 
@@ -285,7 +304,7 @@ mod tests {
         package.install(&mut lua).expect("install package");
 
         let result: bool = futures_lite::future::block_on(
-            lua.load("local imus = require('motion')\nlocal device <close> = imus.open()\nlocal ar, gr, afs, gfs, temp = device:descriptor()\nlocal ax, ay, az, gx, gy, gz, t = device:read()\nreturn ar == 100 and gr == 100 and afs == 4000 and gfs == 500000 and temp and ax == 1 and ay == 2 and az == 3 and gx == 4 and gy == 5 and gz == 6 and t == 25000")
+            lua.load("local imus = require('motion')\nlocal device <close> = imus.open()\nlocal ar, gr, afs, gfs, temp, mr = device:descriptor()\nlocal ax, ay, az, gx, gy, gz, t, mx, my, mz = device:read()\nreturn ar == 100 and gr == 100 and afs == 4000 and gfs == 500000 and temp and mr == 25 and ax == 1 and ay == 2 and az == 3 and gx == 4 and gy == 5 and gz == 6 and t == 25000 and mx == 20000 and my == -5000 and mz == 40000")
                 .eval_async(),
         )
         .expect("read IMU sample");

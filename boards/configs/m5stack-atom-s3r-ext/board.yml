@@ -27,6 +27,14 @@ peripherals:
       parameters:
         # BMI270 at 68h (M5Stack pin map).
         address: 104
+        # M5Unified `IMU_Class::begin` (AtomS3R, -CAM, -Ext): the BMI270's X and Y
+        # swapped and the new Y inverted; the BMM150 at 10h on its auxiliary
+        # bus (`BMI270_Class::begin`), X and Z inverted, in the same Board axes.
+        axis-x: "+y"
+        axis-y: "-x"
+        magnetometer: bmm150
+        magnetometer-axis-x: "-x"
+        magnetometer-axis-z: "-z"
 exposed-io:
   pins:
     # Grove (PORT.CUSTOM) G1/G2: M5Stack AtomS3R-Ext pin map.

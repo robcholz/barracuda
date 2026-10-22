@@ -6,11 +6,20 @@
 //! implementation identifies the part by `WHO_AM_I` when it starts, as
 //! M5Unified `IMU_Class::begin` does, and converts its temperature with that
 //! part's own scale. The MPU9250's AK8963 magnetometer is not used.
+//!
+//! M5Stack fitted a BMM150 magnetometer at 10h on the same bus beside the
+//! MPU6886, and none beside the older MPU9250. With
+//! [`Magnetometer::Bmm150IfPresent`] the implementation looks for it as
+//! M5Unified `IMU_Class::begin` does and reads its field with each sample
+//! when it answers; a unit without it starts without a magnetometer.
 
 #![no_std]
 
 use core::marker::PhantomData;
 
+use barracuda_driver_bmm150::{
+    Bmm150, DataRate as Bmm150DataRate, Error as Bmm150Error, I2cRegisters, Preset as Bmm150Preset,
+};
 use barracuda_driver_mpu6886::{
     AccelRange, Error as ChipError, GyroRange, Mpu6886, RawSample, Variant,
 };
@@ -19,6 +28,42 @@ use barracuda_peripheral::{
     imu::{AxisTransform, Imu, ImuDescriptor, ImuSample, Vector3},
 };
 use embedded_hal::{delay::DelayNs, i2c::I2c};
+
+/// The BMM150's address on M5Stack's internal bus (M5Unified
+/// `BMM150_Class`).
+const BMM150_ADDRESS: u8 = 0x10;
+/// The BMM150 measures at 30 Hz, as M5Unified sets it (4Ch = 38h).
+const BMM150_RATE: Bmm150DataRate = Bmm150DataRate::Hz30;
+
+/// A magnetometer read beside the IMU on its bus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Magnetometer {
+    /// None.
+    None,
+    /// A BMM150 at 10h when one answers, its axes mapped to the Board's by
+    /// the transform; nothing otherwise.
+    Bmm150IfPresent(AxisTransform),
+}
+
+/// The magnetometer part, as a Board names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MagnetometerPart {
+    /// None.
+    None,
+    /// A BMM150 at 10h on the units that have one.
+    Bmm150IfPresent,
+}
+
+impl MagnetometerPart {
+    /// Places the part with its Board mounting.
+    #[must_use]
+    pub const fn mounted(self, axes: AxisTransform) -> Magnetometer {
+        match self {
+            Self::None => Magnetometer::None,
+            Self::Bmm150IfPresent => Magnetometer::Bmm150IfPresent(axes),
+        }
+    }
+}
 
 pub use barracuda_driver_mpu6886::Variant as Mpu6886Variant;
 
@@ -137,6 +182,7 @@ pub struct Mpu6886Config {
     gyroscope_range: GyroscopeRange,
     sample_rate: SampleRate,
     axes: AxisTransform,
+    magnetometer: Magnetometer,
 }
 
 impl Mpu6886Config {
@@ -155,6 +201,16 @@ impl Mpu6886Config {
             gyroscope_range,
             sample_rate,
             axes,
+            magnetometer: Magnetometer::None,
+        }
+    }
+
+    /// Adds the magnetometer read beside the IMU.
+    #[must_use]
+    pub const fn with_magnetometer(self, magnetometer: Magnetometer) -> Self {
+        Self {
+            magnetometer,
+            ..self
         }
     }
 
@@ -194,6 +250,8 @@ pub enum Mpu6886InitError<BusError> {
     InvalidAxes,
     /// The chip rejected identification or configuration.
     Chip(ChipError<BusError>),
+    /// The BMM150 answered but did not set up.
+    Magnetometer(Bmm150Error<BusError>),
 }
 
 /// Initialized MPU6886-family IMU.
@@ -203,6 +261,7 @@ pub struct Mpu6886Imu<I2C> {
     variant: Variant,
     config: Mpu6886Config,
     descriptor: ImuDescriptor,
+    magnetometer: Option<(Bmm150, AxisTransform)>,
 }
 
 impl<I2C: I2c> Mpu6886Imu<I2C> {
@@ -216,7 +275,9 @@ impl<I2C: I2c> Mpu6886Imu<I2C> {
         delay: &mut DELAY,
         config: Mpu6886Config,
     ) -> Result<Self, Mpu6886InitError<I2C::Error>> {
-        if !config.axes.is_permutation() {
+        if !config.axes.is_permutation()
+            || matches!(config.magnetometer, Magnetometer::Bmm150IfPresent(axes) if !axes.is_permutation())
+        {
             return Err(Mpu6886InitError::InvalidAxes);
         }
         let chip =
@@ -230,19 +291,30 @@ impl<I2C: I2c> Mpu6886Imu<I2C> {
                 config.sample_rate.divider(),
             )
             .map_err(Mpu6886InitError::Chip)?;
+        let magnetometer = match config.magnetometer {
+            Magnetometer::None => None,
+            Magnetometer::Bmm150IfPresent(axes) => {
+                start_bmm150(&mut i2c, delay)?.map(|bmm150| (bmm150, axes))
+            }
+        };
         let rate = config.sample_rate.hertz();
+        let descriptor = ImuDescriptor::new(
+            rate,
+            rate,
+            full_scale_milli(config.accelerometer_range.full_scale_g()),
+            full_scale_milli(config.gyroscope_range.full_scale_dps()),
+            true,
+        );
         Ok(Self {
             i2c,
             chip,
             variant,
             config,
-            descriptor: ImuDescriptor::new(
-                rate,
-                rate,
-                full_scale_milli(config.accelerometer_range.full_scale_g()),
-                full_scale_milli(config.gyroscope_range.full_scale_dps()),
-                true,
-            ),
+            descriptor: match magnetometer {
+                Some((bmm150, _)) => descriptor.with_magnetometer(bmm150.rate().hertz()),
+                None => descriptor,
+            },
+            magnetometer,
         })
     }
 
@@ -304,8 +376,33 @@ impl<I2C: I2c> Imu for Mpu6886Imu<I2C> {
 
     async fn read_sample(&mut self) -> Result<ImuSample, Self::Error> {
         let raw = self.chip.read_raw(&mut self.i2c)?;
-        Ok(self.convert(raw))
+        let sample = self.convert(raw);
+        let Some((bmm150, axes)) = self.magnetometer else {
+            return Ok(sample);
+        };
+        match bmm150.read(&mut I2cRegisters::new(&mut self.i2c, BMM150_ADDRESS)) {
+            Ok(Some([x, y, z])) => {
+                Ok(sample.with_magnetic_field(axes.apply(Vector3::new(x, y, z))))
+            }
+            Ok(None) | Err(Bmm150Error::ChipId(_)) => Ok(sample),
+            Err(Bmm150Error::Bus(error)) => Err(error),
+        }
     }
+}
+
+/// Looks for the BMM150 and sets it up when it answers as one; a bus
+/// failure while looking means no chip answers its address.
+fn start_bmm150<I2C: I2c, DELAY: DelayNs>(
+    i2c: &mut I2C,
+    delay: &mut DELAY,
+) -> Result<Option<Bmm150>, Mpu6886InitError<I2C::Error>> {
+    let mut registers = I2cRegisters::new(i2c, BMM150_ADDRESS);
+    if !Bmm150::probe(&mut registers, delay).unwrap_or(false) {
+        return Ok(None);
+    }
+    Bmm150::initialize(&mut registers, delay, Bmm150Preset::Regular, BMM150_RATE)
+        .map(Some)
+        .map_err(Mpu6886InitError::Magnetometer)
 }
 
 fn full_scale_milli(full_scale: i32) -> u32 {
@@ -467,5 +564,105 @@ mod tests {
             )),
             Err(Mpu6886InitError::Chip(_))
         ));
+    }
+
+    /// The MPU6886, and a BMM150 at 10h on units that have one; an absent
+    /// chip does not acknowledge its address.
+    struct Bus {
+        mpu: Sensor,
+        bmm150: Option<[u8; 0x80]>,
+    }
+
+    impl Bus {
+        fn new(with_bmm150: bool) -> Self {
+            let mut bmm150 = [0; 0x80];
+            bmm150[0x40] = 0x32;
+            // Trim that makes X and Y read (raw + DIG_X1) / 2 uT and Z raw uT.
+            bmm150[0x64] = 96;
+            bmm150[0x65] = 96;
+            [bmm150[0x68], bmm150[0x69]] = (-6_144_i16).to_le_bytes();
+            [bmm150[0x6A], bmm150[0x6B]] = 32_768_u16.to_le_bytes();
+            [bmm150[0x6C], bmm150[0x6D]] = 8_192_u16.to_le_bytes();
+            // X 100, Y -60, Z -40, hall 8192.
+            bmm150[0x42..0x4A].copy_from_slice(&[0x20, 0x03, 0x20, 0xFE, 0xB0, 0xFF, 0x01, 0x80]);
+            Self {
+                mpu: Sensor::new(0x19),
+                bmm150: with_bmm150.then_some(bmm150),
+            }
+        }
+    }
+
+    impl embedded_hal::i2c::ErrorType for Bus {
+        type Error = embedded_hal::i2c::ErrorKind;
+    }
+
+    impl I2c for Bus {
+        fn transaction(
+            &mut self,
+            address: u8,
+            operations: &mut [Operation<'_>],
+        ) -> Result<(), Self::Error> {
+            if address != 0x10 {
+                return self
+                    .mpu
+                    .transaction(address, operations)
+                    .map_err(|never| match never {});
+            }
+            let Some(registers) = &mut self.bmm150 else {
+                return Err(embedded_hal::i2c::ErrorKind::NoAcknowledge(
+                    embedded_hal::i2c::NoAcknowledgeSource::Address,
+                ));
+            };
+            let mut pointer = 0;
+            for operation in operations {
+                match operation {
+                    Operation::Write([register]) => pointer = usize::from(*register),
+                    Operation::Write([register, value]) => {
+                        registers[usize::from(*register)] = *value;
+                    }
+                    Operation::Read(bytes) => {
+                        for (offset, value) in bytes.iter_mut().enumerate() {
+                            *value = registers[pointer + offset];
+                        }
+                    }
+                    Operation::Write(_) => {}
+                }
+            }
+            Ok(())
+        }
+    }
+
+    fn with_bmm150(present: bool) -> super::Mpu6886Imu<Bus> {
+        // M5Unified M5Stack MPU6886 + BMM150: the magnetometer's X and Z inverted.
+        let mounting = AxisTransform::new(
+            SignedAxis::NegativeX,
+            SignedAxis::PositiveY,
+            SignedAxis::NegativeZ,
+        );
+        block_on(Mpu6886ImuImplementation::initialize(
+            Mpu6886Bindings::new(Bus::new(present), Delay),
+            config(AxisTransform::IDENTITY)
+                .with_magnetometer(super::MagnetometerPart::Bmm150IfPresent.mounted(mounting)),
+        ))
+        .expect("initialize")
+    }
+
+    #[test]
+    fn reads_the_bmm150_beside_the_mpu6886() {
+        let mut imu = with_bmm150(true);
+        assert_eq!(imu.descriptor().magnetometer_rate_hz(), Some(30));
+        let sample = block_on(imu.read_sample()).expect("sample");
+        let field = sample.magnetic_field_nt().expect("field");
+        assert_eq!((field.x, field.y, field.z), (-50_000, -30_000, 40_000));
+        assert_eq!(imu.i2c.bmm150.expect("bmm150")[0x4C], 0x38);
+    }
+
+    #[test]
+    fn starts_without_a_bmm150_that_does_not_answer() {
+        let mut imu = with_bmm150(false);
+        assert!(!imu.descriptor().has_magnetometer());
+        let sample = block_on(imu.read_sample()).expect("sample");
+        assert_eq!(sample.magnetic_field_nt(), None);
+        assert_eq!(sample.acceleration_mg().x, 1_000);
     }
 }

@@ -1343,6 +1343,253 @@ pub mod audio {
     }
 }
 
+/// Stable keyboard peripheral API.
+pub mod keyboard {
+    use core::ops::BitOr;
+
+    /// One key, named by what it does rather than where it sits.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    #[non_exhaustive]
+    pub enum Key {
+        /// A key whose legend is a printable character, named by its
+        /// unshifted legend: `'a'`, `'1'`, `';'`, or `' '` for the space bar.
+        Character(char),
+        /// Enter or Return.
+        Enter,
+        /// Backspace, deleting before the cursor.
+        Backspace,
+        /// Delete, deleting after the cursor.
+        Delete,
+        /// Tab.
+        Tab,
+        /// Escape.
+        Escape,
+        /// Shift, or a key that shifts the next letters, such as `Aa`.
+        Shift,
+        /// Control.
+        Control,
+        /// Alt.
+        Alt,
+        /// Option, or a vendor's equivalent second modifier.
+        Option,
+        /// Function, the modifier that selects a keyboard's second layer.
+        Function,
+        /// Cursor up.
+        Up,
+        /// Cursor down.
+        Down,
+        /// Cursor left.
+        Left,
+        /// Cursor right.
+        Right,
+        /// Function key `F1` through `F24`, by number.
+        F(u8),
+    }
+
+    /// Modifier keys held when an event happened.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+    pub struct Modifiers(u8);
+
+    impl Modifiers {
+        /// Shift.
+        pub const SHIFT: Self = Self(1 << 0);
+        /// Control.
+        pub const CONTROL: Self = Self(1 << 1);
+        /// Alt.
+        pub const ALT: Self = Self(1 << 2);
+        /// Option.
+        pub const OPTION: Self = Self(1 << 3);
+        /// Function.
+        pub const FUNCTION: Self = Self(1 << 4);
+
+        /// Returns no modifiers.
+        #[must_use]
+        pub const fn empty() -> Self {
+            Self(0)
+        }
+
+        /// Returns whether every modifier in `other` is held.
+        #[must_use]
+        pub const fn contains(self, other: Self) -> bool {
+            self.0 & other.0 == other.0
+        }
+
+        /// Returns the modifiers held in either set.
+        #[must_use]
+        pub const fn union(self, other: Self) -> Self {
+            Self(self.0 | other.0)
+        }
+
+        /// Returns these modifiers without those in `other`.
+        #[must_use]
+        pub const fn difference(self, other: Self) -> Self {
+            Self(self.0 & !other.0)
+        }
+
+        /// Returns the modifier a modifier key holds, or `None` for any
+        /// other key.
+        #[must_use]
+        pub const fn of(key: Key) -> Option<Self> {
+            match key {
+                Key::Shift => Some(Self::SHIFT),
+                Key::Control => Some(Self::CONTROL),
+                Key::Alt => Some(Self::ALT),
+                Key::Option => Some(Self::OPTION),
+                Key::Function => Some(Self::FUNCTION),
+                _ => None,
+            }
+        }
+    }
+
+    impl BitOr for Modifiers {
+        type Output = Self;
+
+        fn bitor(self, rhs: Self) -> Self::Output {
+            self.union(rhs)
+        }
+    }
+
+    /// Whether a key went down or came up.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum KeyState {
+        /// The key went down.
+        Pressed,
+        /// The key came up.
+        Released,
+    }
+
+    /// One key going down or coming up, translated by the keyboard's keymap.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct KeyEvent {
+        key: Key,
+        state: KeyState,
+        modifiers: Modifiers,
+        text: Option<char>,
+        code: u16,
+    }
+
+    impl KeyEvent {
+        /// Creates one event.
+        #[must_use]
+        pub const fn new(
+            key: Key,
+            state: KeyState,
+            modifiers: Modifiers,
+            text: Option<char>,
+            code: u16,
+        ) -> Self {
+            Self {
+                key,
+                state,
+                modifiers,
+                text,
+                code,
+            }
+        }
+
+        /// Returns what the key does on the layer the held modifiers select.
+        #[must_use]
+        pub const fn key(self) -> Key {
+            self.key
+        }
+
+        /// Returns whether the key went down or came up.
+        #[must_use]
+        pub const fn state(self) -> KeyState {
+            self.state
+        }
+
+        /// Returns whether the key went down.
+        #[must_use]
+        pub const fn is_pressed(self) -> bool {
+            matches!(self.state, KeyState::Pressed)
+        }
+
+        /// Returns the modifiers held after this event.
+        #[must_use]
+        pub const fn modifiers(self) -> Modifiers {
+            self.modifiers
+        }
+
+        /// Returns the character a press types under the keyboard's keymap
+        /// and the held modifiers; `None` for a release and for keys that
+        /// type nothing, such as modifiers, arrows, Enter, and Backspace.
+        #[must_use]
+        pub const fn text(self) -> Option<char> {
+            self.text
+        }
+
+        /// Returns the key's position on this keyboard, stable for one
+        /// Board and meaningless across Boards.
+        #[must_use]
+        pub const fn code(self) -> u16 {
+            self.code
+        }
+    }
+
+    /// Semantic keyboard peripheral.
+    ///
+    /// The implementation owns the key matrix or controller, its keymap, and
+    /// the modifier state. A keyboard scanned by the SoC samples its matrix
+    /// when polled; one behind a controller with an event queue reads that
+    /// queue, using the controller's interrupt line, when the Board wires it,
+    /// to skip the bus while nothing happened.
+    pub trait Keyboard {
+        /// Concrete scanning or bus failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns the oldest key event not yet returned, without waiting;
+        /// `None` when no key changed.
+        fn poll_event(&mut self) -> Result<Option<KeyEvent>, Self::Error>;
+    }
+
+    /// Move-only access to the Board's attached keyboard.
+    pub trait KeyboardPeripheral {
+        /// Concrete, statically dispatched keyboard implementation.
+        type Keyboard: Keyboard;
+
+        /// Transfers the claimed keyboard `instance` to its Plugin once; `None`
+        /// when the Board has no such device or it was already taken.
+        fn take_keyboard(&mut self, instance: crate::Instance) -> Option<Self::Keyboard>;
+    }
+}
+
+/// Stable rotary-encoder peripheral API.
+pub mod rotary_encoder {
+    /// Semantic incremental rotary encoder.
+    ///
+    /// The position counts the encoder's quadrature edges, signed by the
+    /// direction of turn; the Board page says how many make one detent when
+    /// the vendor documents it. A push button on the knob is a button of the
+    /// Board's `buttons` peripheral, not part of this one.
+    pub trait RotaryEncoder {
+        /// Concrete counter failure.
+        type Error: core::fmt::Debug;
+
+        /// Returns the signed position in edges since start or the last
+        /// [`RotaryEncoder::reset`].
+        fn position(&mut self) -> Result<i64, Self::Error>;
+
+        /// Returns the edges turned since the previous call, or since start
+        /// or the last [`RotaryEncoder::reset`] for the first.
+        fn delta(&mut self) -> Result<i64, Self::Error>;
+
+        /// Makes the current position zero.
+        fn reset(&mut self) -> Result<(), Self::Error>;
+    }
+
+    /// Move-only access to the Board's attached rotary encoder.
+    pub trait RotaryEncoderPeripheral {
+        /// Concrete, statically dispatched rotary-encoder implementation.
+        type RotaryEncoder: RotaryEncoder;
+
+        /// Transfers the claimed rotary encoder `instance` to its Plugin once;
+        /// `None` when the Board has no such device or it was already taken.
+        fn take_rotary_encoder(&mut self, instance: crate::Instance)
+        -> Option<Self::RotaryEncoder>;
+    }
+}
+
 /// Stable inertial-measurement peripheral API.
 pub mod imu {
     use core::future::Future;
@@ -1451,7 +1698,8 @@ pub mod imu {
         }
     }
 
-    /// Stable description of one configured six-axis IMU.
+    /// Stable description of one configured six-axis IMU, and of the
+    /// magnetometer read with it when the Board has one.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct ImuDescriptor {
         accelerometer_rate_hz: u32,
@@ -1459,6 +1707,7 @@ pub mod imu {
         accelerometer_range_mg: u32,
         gyroscope_range_mdps: u32,
         has_temperature: bool,
+        magnetometer_rate_hz: Option<u32>,
     }
 
     impl ImuDescriptor {
@@ -1477,6 +1726,17 @@ pub mod imu {
                 accelerometer_range_mg,
                 gyroscope_range_mdps,
                 has_temperature,
+                magnetometer_rate_hz: None,
+            }
+        }
+
+        /// Adds a magnetometer that measures `rate_hz` times a second; its
+        /// field reaches each sample through [`ImuSample::magnetic_field_nt`].
+        #[must_use]
+        pub const fn with_magnetometer(self, rate_hz: u32) -> Self {
+            Self {
+                magnetometer_rate_hz: Some(rate_hz),
+                ..self
             }
         }
 
@@ -1509,6 +1769,19 @@ pub mod imu {
         pub const fn has_temperature(self) -> bool {
             self.has_temperature
         }
+
+        /// Returns the magnetometer's measurement rate in hertz, or `None`
+        /// when the IMU has no magnetometer.
+        #[must_use]
+        pub const fn magnetometer_rate_hz(self) -> Option<u32> {
+            self.magnetometer_rate_hz
+        }
+
+        /// Returns whether samples include the magnetic field.
+        #[must_use]
+        pub const fn has_magnetometer(self) -> bool {
+            self.magnetometer_rate_hz.is_some()
+        }
     }
 
     /// One coherent inertial sample converted into portable integer units.
@@ -1517,6 +1790,7 @@ pub mod imu {
         acceleration_mg: Vector3,
         angular_velocity_mdps: Vector3,
         temperature_mc: Option<i32>,
+        magnetic_field_nt: Option<Vector3>,
     }
 
     impl ImuSample {
@@ -1531,6 +1805,17 @@ pub mod imu {
                 acceleration_mg,
                 angular_velocity_mdps,
                 temperature_mc,
+                magnetic_field_nt: None,
+            }
+        }
+
+        /// Adds the Board-relative magnetic field in nanotesla, in the same
+        /// axes as acceleration and angular velocity.
+        #[must_use]
+        pub const fn with_magnetic_field(self, magnetic_field_nt: Vector3) -> Self {
+            Self {
+                magnetic_field_nt: Some(magnetic_field_nt),
+                ..self
             }
         }
 
@@ -1551,9 +1836,23 @@ pub mod imu {
         pub const fn temperature_mc(self) -> Option<i32> {
             self.temperature_mc
         }
+
+        /// Returns the Board-relative magnetic field in nanotesla: `None`
+        /// when the IMU has no magnetometer, or when the field saturated the
+        /// magnetometer for this sample.
+        #[must_use]
+        pub const fn magnetic_field_nt(self) -> Option<Vector3> {
+            self.magnetic_field_nt
+        }
     }
 
-    /// Semantic six-axis inertial sensor peripheral.
+    /// Semantic six-axis inertial sensor peripheral, with the three-axis
+    /// magnetometer its implementation reads beside it when the Board has one.
+    ///
+    /// The magnetometer is a channel of the IMU rather than a peripheral of
+    /// its own: M5Stack fits the BMM150 behind the BMI270's auxiliary bus,
+    /// where only the IMU's implementation can reach it, and its field is
+    /// useful only in the IMU's axes.
     pub trait Imu {
         /// Concrete register or sampling failure.
         type Error: core::fmt::Debug;
@@ -1561,7 +1860,8 @@ pub mod imu {
         /// Returns the configured sensor profile.
         fn descriptor(&self) -> ImuDescriptor;
 
-        /// Reads one coherent accelerometer, gyroscope, and temperature sample.
+        /// Reads one coherent accelerometer, gyroscope, temperature, and,
+        /// when present, magnetic-field sample.
         fn read_sample(&mut self) -> impl Future<Output = Result<ImuSample, Self::Error>> + '_;
     }
 

@@ -10,11 +10,15 @@
 mod i2s_stream;
 #[path = "../../esp32s3/src/hal/pdm_stream.rs"]
 mod pdm_stream;
+// esp-hal's PCNT driver is the same on the ESP32, ESP32-S3, and ESP32-C6.
+#[path = "../../esp32s3/src/hal/pulse_counter.rs"]
+mod pulse_counter;
 #[path = "../../esp32s3/src/hal/sdmmc.rs"]
 mod sdmmc;
 
 pub use i2s_stream::{i2s_stream, I2sConfigError, I2sDevice, I2sTransferError};
 pub use pdm_stream::{pdm_i2s_stream, PdmDmaChannel, PdmI2sStream};
+pub use pulse_counter::{quadrature_counter, QuadratureCounter};
 pub use sdmmc::{sdmmc_device_1bit, SdmmcConfigError, SdmmcDevice};
 
 /// The SD host slot a Board's microSD card uses. Slot 0 is the eight-bit

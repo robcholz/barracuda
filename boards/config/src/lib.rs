@@ -376,6 +376,8 @@ pub struct PeripheralIoDefinition {
     analog_inputs: BTreeMap<String, AnalogInputDefinition>,
     #[serde(default, rename = "pdm-i2s-stream")]
     pdm_i2s_streams: BTreeMap<String, PdmI2sStreamDefinition>,
+    #[serde(default, rename = "pulse-counter")]
+    pulse_counters: BTreeMap<String, PulseCounterDefinition>,
 }
 
 impl PeripheralIoDefinition {
@@ -396,6 +398,7 @@ impl PeripheralIoDefinition {
             && self.capacitive_touch.is_empty()
             && self.analog_inputs.is_empty()
             && self.pdm_i2s_streams.is_empty()
+            && self.pulse_counters.is_empty()
     }
 
     /// Finds one MIPI DSI host reserved by a display implementation.
@@ -498,6 +501,13 @@ impl PeripheralIoDefinition {
         self.pdm_i2s_streams.get(name)
     }
 
+    /// Finds one quadrature pulse counter reserved by a peripheral
+    /// implementation.
+    #[must_use]
+    pub fn pulse_counter(&self, name: &str) -> Option<&PulseCounterDefinition> {
+        self.pulse_counters.get(name)
+    }
+
     /// Returns how many `spi-device` declarations share the SPI controller
     /// `peripheral`. Devices on one controller share its clock and data
     /// lines, each with its own chip select and clock rate.
@@ -564,6 +574,10 @@ impl PeripheralIoDefinition {
                 .any(|binding| binding.peripheral == peripheral)
             || self
                 .pdm_i2s_streams
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .pulse_counters
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
     }
@@ -706,6 +720,12 @@ impl PeripheralIoDefinition {
         for (name, stream) in &self.pdm_i2s_streams {
             validate_resource_name("internal pdm-i2s-stream", name)?;
             stream.validate(name)?;
+        }
+        for (name, counter) in &self.pulse_counters {
+            validate_resource_name("internal pulse-counter", name)?;
+            validate_identifier(name, "peripheral", &counter.peripheral)?;
+            validate_identifier(name, "a", &counter.a)?;
+            validate_identifier(name, "b", &counter.b)?;
         }
         Ok(())
     }
@@ -1296,6 +1316,38 @@ impl AnalogInputDefinition {
     #[must_use]
     pub fn pin(&self) -> &str {
         &self.pin
+    }
+}
+
+/// One pulse-counter unit decoding a quadrature encoder's two signals.
+///
+/// The Platform counts every edge of both signals, up while `b` leads `a` and
+/// down while `a` leads `b`, and biases both pins with its internal pull-up.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PulseCounterDefinition {
+    peripheral: String,
+    a: String,
+    b: String,
+}
+
+impl PulseCounterDefinition {
+    /// Returns the chip-native pulse-counter controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the pin carrying the encoder's A signal.
+    #[must_use]
+    pub fn a(&self) -> &str {
+        &self.a
+    }
+
+    /// Returns the pin carrying the encoder's B signal.
+    #[must_use]
+    pub fn b(&self) -> &str {
+        &self.b
     }
 }
 

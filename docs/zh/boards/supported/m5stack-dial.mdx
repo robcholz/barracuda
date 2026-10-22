@@ -33,6 +33,7 @@ cargo image deploy
 | `touch` | 触摸控制器（FT3267） | — |
 | `real-time-clock` | 实时时钟（BM8563） | — |
 | `buttons` | 按键 A（旋钮按下）和 B（GPIO42、GPIO0） | — |
+| `rotary-encoder` | 旋钮编码器（A GPIO41、B GPIO40，脉冲计数器） | [`encoder`](/zh/plugins/vm-rotary-encoder) |
 
 此 Board 描述搭载 StampS3 的 Dial。Dial v1.1 搭载 Stamp-S3A，其 RGB LED 经 GPIO38 供电；此 Board 不驱动 GPIO38，因此 v1.1 上该 LED 不亮。
 

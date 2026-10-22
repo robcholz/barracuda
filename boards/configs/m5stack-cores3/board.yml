@@ -100,6 +100,12 @@ peripherals:
         # BMI270 at 69h, with the BMM150 behind its auxiliary bus (M5Stack CoreS3 pin
         # map; M5Unified IMU_Class).
         address: 105
+        # The BMM150 at 10h on the BMI270's auxiliary bus (M5Unified
+        # `BMI270_Class::begin`), its Y and Z inverted against the BMI270
+        # (M5Unified `IMU_Class::begin`, CoreS3 and StackChan at 69h).
+        magnetometer: bmm150
+        magnetometer-axis-y: "-y"
+        magnetometer-axis-z: "-z"
 exposed-io:
   pins:
     # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:
