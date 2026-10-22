@@ -595,6 +595,67 @@ fn queued_plugin_cycle_is_rejected() {
     assert!(matches!(error, PluginRegisterError::DependencyCycle(ids) if ids.len() == 2));
 }
 
+/// A Plugin whose required display failed to initialize.
+struct MissingDevicePlugin;
+
+declare_plugin!(MissingDevicePlugin, "missing-device");
+
+impl Plugin for MissingDevicePlugin {
+    fn register<Storage>(
+        &mut self,
+        _context: &mut PluginRegisterContext<'_, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        Err(PluginError::PeripheralUnavailable {
+            kind: "display",
+            slot: "main",
+        })
+    }
+}
+
+struct MissingDeviceDependent;
+
+declare_plugin!(
+    MissingDeviceDependent,
+    "missing-device-dependent",
+    ["missing-device"]
+);
+
+impl Plugin for MissingDeviceDependent {}
+
+struct MissingDeviceIndirect;
+
+declare_plugin!(
+    MissingDeviceIndirect,
+    "missing-device-indirect",
+    ["missing-device-dependent"]
+);
+
+impl Plugin for MissingDeviceIndirect {}
+
+#[test]
+fn a_plugin_without_its_required_device_is_left_out_with_its_dependents() {
+    let mut manager = manager();
+    manager.add(MissingDeviceIndirect).unwrap();
+    manager.add(MissingDeviceDependent).unwrap();
+    manager.add(MissingDevicePlugin).unwrap();
+    manager.add(IdentifiedPlugin).unwrap();
+
+    manager.register_all().unwrap();
+    manager.start().unwrap();
+
+    assert!(manager.is_loaded(&PluginId::try_from("identified").unwrap()));
+    for id in [
+        "missing-device",
+        "missing-device-dependent",
+        "missing-device-indirect",
+    ] {
+        assert!(!manager.is_loaded(&PluginId::try_from(id).unwrap()), "{id}");
+    }
+}
+
 #[test]
 fn declared_dependency_must_be_registered_before_consumer() {
     let mut manager = manager();
