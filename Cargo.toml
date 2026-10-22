@@ -62,6 +62,7 @@ barracuda-atom-s3-display = { path = "peripherals/impl/display/atom-s3-display" 
 barracuda-atom-s3r-display = { path = "peripherals/impl/display/atom-s3r-display" }
 barracuda-aw88298-es7210-audio-codec = { path = "peripherals/impl/audio-codec/aw88298-es7210-audio-codec" }
 barracuda-axp192-axp2101-power-monitor = { path = "peripherals/impl/power-monitor/axp192-axp2101-power-monitor" }
+barracuda-axp192-axp2101-vibration = { path = "peripherals/impl/vibration/axp192-axp2101-vibration" }
 barracuda-bm8563-rtc = { path = "peripherals/impl/real-time-clock/bm8563-rtc" }
 barracuda-bmi270-imu = { path = "peripherals/impl/inertial-measurement/bmi270-imu" }
 barracuda-bq27220-power-monitor = { path = "peripherals/impl/power-monitor/bq27220-power-monitor" }
@@ -86,6 +87,7 @@ barracuda-ina226-power-monitor = { path = "peripherals/impl/power-monitor/ina226
 barracuda-indicator-led = { path = "peripherals/impl/indicator/indicator-led" }
 barracuda-ip5306-power-monitor = { path = "peripherals/impl/power-monitor/ip5306-power-monitor" }
 barracuda-it8951-display = { path = "peripherals/impl/display/it8951-display" }
+barracuda-m5ioe1-vibration = { path = "peripherals/impl/vibration/m5ioe1-vibration" }
 barracuda-m5pm1-power-monitor = { path = "peripherals/impl/power-monitor/m5pm1-power-monitor" }
 barracuda-m5stack-pmic-display = { path = "peripherals/impl/display/m5stack-pmic-display" }
 barracuda-mipi-dbi-display = { path = "peripherals/impl/display/mipi-dbi-display" }
@@ -100,6 +102,9 @@ barracuda-paper-diy-display = { path = "peripherals/impl/display/paper-diy-displ
 barracuda-paper-mono-display = { path = "peripherals/impl/display/paper-mono-display" }
 barracuda-pdm-i2s-audio-codec = { path = "peripherals/impl/audio-codec/pdm-i2s-audio-codec" }
 barracuda-pi4ioe5v6408-buttons = { path = "peripherals/impl/buttons/pi4ioe5v6408-buttons" }
+barracuda-pwm-buzzer = { path = "peripherals/impl/buzzer/pwm-buzzer" }
+barracuda-rmt-infrared = { path = "peripherals/impl/infrared/rmt-infrared" }
+barracuda-rmt-led-strip = { path = "peripherals/impl/led-strip/rmt-led-strip" }
 barracuda-rx8130ce-rtc = { path = "peripherals/impl/real-time-clock/rx8130ce-rtc" }
 barracuda-sdmmc-fat-removable-storage = { path = "peripherals/impl/removable-storage/sdmmc-fat-removable-storage" }
 barracuda-spi-sd-fat-removable-storage = { path = "peripherals/impl/removable-storage/spi-sd-fat-removable-storage" }
@@ -146,6 +151,7 @@ barracuda-vm-plugin = { path = "plugins/vm/crates/plugin" }
 barracuda-vm-agent-plugin = { path = "plugins/vm-agent/crates/plugin" }
 barracuda-analog-plugin = { path = "plugins/vm-analog/crates/plugin" }
 barracuda-audio-plugin = { path = "plugins/vm-audio/crates/plugin" }
+barracuda-buzzer-plugin = { path = "plugins/vm-buzzer/crates/plugin" }
 barracuda-camera-plugin = { path = "plugins/vm-camera/crates/plugin" }
 barracuda-display-plugin = { path = "plugins/vm-display/crates/plugin" }
 barracuda-vm-filesystem-plugin = { path = "plugins/vm-filesystem/crates/plugin" }
@@ -154,6 +160,7 @@ barracuda-vm-http-plugin = { path = "plugins/vm-http/crates/plugin" }
 barracuda-i2c-plugin = { path = "plugins/vm-i2c/crates/plugin" }
 barracuda-i2s-plugin = { path = "plugins/vm-i2s/crates/plugin" }
 barracuda-imu-plugin = { path = "plugins/vm-imu/crates/plugin" }
+barracuda-infrared-plugin = { path = "plugins/vm-infrared/crates/plugin" }
 barracuda-led-strip-plugin = { path = "plugins/vm-led-strip/crates/plugin" }
 barracuda-message-queue-plugin = { path = "plugins/vm-message-queue/crates/plugin" }
 barracuda-power-monitor-plugin = { path = "plugins/vm-power-monitor/crates/plugin" }
@@ -162,6 +169,7 @@ barracuda-spi-plugin = { path = "plugins/vm-spi/crates/plugin" }
 barracuda-vm-systeminfo-plugin = { path = "plugins/vm-systeminfo/crates/plugin" }
 barracuda-vm-time-plugin = { path = "plugins/vm-time/crates/plugin" }
 barracuda-uart-plugin = { path = "plugins/vm-uart/crates/plugin" }
+barracuda-vibration-plugin = { path = "plugins/vm-vibration/crates/plugin" }
 barracuda-vm-webserver-plugin = { path = "plugins/vm-webserver/crates/plugin" }
 barracuda-webserver-plugin = { path = "plugins/webserver/crates/plugin" }
 barracuda-wifi-plugin = { path = "plugins/wifi/crates/plugin" }
@@ -203,6 +211,7 @@ barracuda-driver-ili9881c = { path = "drivers/chips/ili9881c" }
 barracuda-driver-ina226 = { path = "drivers/chips/ina226" }
 barracuda-driver-ina3221 = { path = "drivers/chips/ina3221" }
 barracuda-driver-ip5306 = { path = "drivers/chips/ip5306" }
+barracuda-driver-ir-nec = { path = "drivers/chips/ir-nec" }
 barracuda-driver-jd9853 = { path = "drivers/chips/jd9853" }
 barracuda-driver-lp5562 = { path = "drivers/chips/lp5562" }
 barracuda-driver-it8951 = { path = "drivers/chips/it8951" }

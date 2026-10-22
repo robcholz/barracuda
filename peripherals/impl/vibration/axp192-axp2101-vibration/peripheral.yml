@@ -1,0 +1,22 @@
+id: axp192-axp2101-vibration
+api-version: 1
+peripheral: vibration
+implementation:
+  package: barracuda-axp192-axp2101-vibration
+  crate: barracuda_axp192_axp2101_vibration
+  factory: "::{{crate}}::AxpVibrationImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "{{binding.i2c.value}}"
+  config-expression: "::{{crate}}::AxpVibrationConfig::new({{parameter.address}})"
+# The vibration motor of the M5Stack Core2, fed by a PMIC regulator: AXP192
+# LDO3 on the original Core2, AXP2101 DLDO1 on Core2 v1.1, identified at
+# start. The implementation owns only that regulator's voltage field and
+# enable bit; the display and battery monitor keep their own registers and
+# bits through their own views of the shared bus.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 34h, the address of both PMICs.
+    default: 52

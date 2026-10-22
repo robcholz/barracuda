@@ -1,0 +1,21 @@
+id: m5ioe1-vibration
+api-version: 1
+peripheral: vibration
+implementation:
+  package: barracuda-m5ioe1-vibration
+  crate: barracuda_m5ioe1_vibration
+  factory: "::{{crate}}::M5ioe1VibrationImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "{{binding.i2c.value}}"
+  config-expression: "::{{crate}}::M5ioe1VibrationConfig::new({{parameter.address}})"
+# A vibration motor on PWM channel 1 (IO9) of an M5Stack M5IOE1 expander, as
+# on the M5Stack StopWatch. The implementation owns that channel's duty
+# register, the expander's PWM frequency, and IO9's direction and drive
+# bits; the display and audio codec keep their own pins.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 4Fh, the M5IOE1's factory address.
+    default: 79
