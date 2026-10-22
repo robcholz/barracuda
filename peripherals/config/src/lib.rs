@@ -3061,12 +3061,13 @@ fn render_binding(
                 ),
             ));
             let mut pins = Vec::new();
-            for (name, pin) in [
-                ("xclk", camera.xclk()),
-                ("pclk", camera.pclk()),
-                ("vsync", camera.vsync()),
-                ("href", camera.href()),
-            ] {
+            let named = [
+                camera.xclk().map(|xclk| ("xclk", xclk)),
+                Some(("pclk", camera.pclk())),
+                Some(("vsync", camera.vsync())),
+                Some(("href", camera.href())),
+            ];
+            for (name, pin) in named.into_iter().flatten() {
                 validate_hardware_identifier(pin)?;
                 let field =
                     checked_identifier(&format!("{prefix}_{name}"), &mut state.identifiers)?;
@@ -3104,11 +3105,17 @@ fn render_binding(
                 .map(|field| format!("bindings.{field}"))
                 .collect::<Vec<_>>()
                 .join(", ");
+            // A sensor with its own oscillator takes no master clock and has
+            // its own constructor, as a parallel output without a data/command
+            // line does.
+            let (constructor, clock) = match camera.xclk_frequency_hz() {
+                Some(frequency_hz) => ("camera_capture", format!("{frequency_hz}, ")),
+                None => ("camera_capture_without_master_clock", String::new()),
+            };
             Ok((
                 String::from("::barracuda_platform_selected::__platform::hal::CameraReceiver"),
                 format!(
-                    "::barracuda_platform_selected::__platform::hal::camera_capture(bindings.{controller}, bindings.{dma}, {pin_values}, {}, ::barracuda_platform_selected::__platform::hal::camera_dma_buffer!({}).map_err(GeneratedBoardError::{variant})?).map_err(GeneratedBoardError::{variant})?",
-                    camera.xclk_frequency_hz(),
+                    "::barracuda_platform_selected::__platform::hal::{constructor}(bindings.{controller}, bindings.{dma}, {pin_values}, {clock}::barracuda_platform_selected::__platform::hal::camera_dma_buffer!({}).map_err(GeneratedBoardError::{variant})?).map_err(GeneratedBoardError::{variant})?",
                     camera.dma_buffer_bytes()
                 ),
             ))

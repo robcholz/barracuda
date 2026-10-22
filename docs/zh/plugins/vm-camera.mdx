@@ -19,13 +19,13 @@ Camera 插件拥有开发板的主摄像头，并把帧采集作为 `camera` Lua
 - 任务：无
 - 存储：无
 
-本插件只获取一次开发板的主 `Camera` 能力，并安装 `camera` Lua 包。OV2640/OV3660 的控制总线、并行采集和 DMA 仍由实现和平台 HAL 拥有。
+本插件只获取一次开发板的主 `Camera` 能力，并安装 `camera` Lua 包。OV2640/OV3660/GC0308 的控制总线、并行采集和 DMA 仍由实现和平台 HAL 拥有。
 
 Lua API：
 
 - `camera.available() -> boolean`
 - `camera.open() -> handle`
-- `camera.snap([capacity]) -> bytes, pixel_format` 采集一帧，未指定时预留 128 KiB 空间
+- `camera.snap([capacity]) -> bytes, pixel_format` 采集一帧，未指定时为 JPEG 预留 128 KiB 空间，为未压缩帧预留恰好一帧的空间
 - `handle:descriptor() -> width, height, pixel_format`
 - `handle:capture(capacity) -> bytes`
 - `handle:is_open() -> boolean`

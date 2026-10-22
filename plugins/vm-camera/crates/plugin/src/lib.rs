@@ -23,7 +23,8 @@ use portable_atomic_util::Arc;
 /// Largest frame returned to Lua; it must fit the 1 MiB per-run Lua heap with
 /// room to process it (an SVGA JPEG or a full QVGA RGB565 frame).
 const MAX_CAPTURE_BYTES: usize = 512 * 1024;
-/// The room `camera.snap()` gives a frame unless the app asks for more.
+/// The room `camera.snap()` gives a compressed frame unless the app asks for
+/// more; an uncompressed frame gets exactly its size.
 const SNAP_BYTES: i64 = 128 * 1024;
 
 /// The camera while no handle holds it; a handle gives it back when it closes.
@@ -105,7 +106,7 @@ where
             package.register_async("snap", move |args: Variadic<i64>| {
                 let camera = Arc::clone(&snap_camera);
                 let active = Arc::clone(&snap_active);
-                let capacity = args.first().copied().unwrap_or(SNAP_BYTES);
+                let capacity = args.first().copied();
                 async move { Some(snap(camera, active, capacity).await) }
             })?;
             package.register("available", move |(): ()| {
@@ -247,7 +248,7 @@ where
 async fn snap<Device>(
     camera: SharedCamera<Device>,
     active: Arc<AtomicBool>,
-    capacity: i64,
+    capacity: Option<i64>,
 ) -> Result<(Bytes, &'static str)>
 where
     Device: Camera,
@@ -258,6 +259,10 @@ where
         .ok_or_else(|| Error::runtime("built-in camera is unavailable or open in a handle"))?;
     // The handle gives the camera back however the capture ends.
     let mut handle = CameraHandle::new(device, camera, active);
+    let capacity = match capacity {
+        Some(capacity) => capacity,
+        None => snap_capacity(handle.descriptor()?),
+    };
     let frame = capture_into(&mut handle, capacity).await?;
     let (_, _, format) = descriptor_values(handle.descriptor()?);
     Ok((frame, format))
@@ -292,6 +297,17 @@ where
     }
     frame.truncate(captured.bytes_used());
     Ok(frame)
+}
+
+/// The room `camera.snap()` gives a frame: an uncompressed frame's exact
+/// size, or [`SNAP_BYTES`] for a compressed one.
+fn snap_capacity(descriptor: CameraDescriptor) -> i64 {
+    let bytes_per_pixel = match descriptor.pixel_format() {
+        CameraPixelFormat::Rgb565 | CameraPixelFormat::Yuv422 => 2,
+        CameraPixelFormat::Grayscale => 1,
+        _ => return SNAP_BYTES,
+    };
+    i64::from(descriptor.width()) * i64::from(descriptor.height()) * bytes_per_pixel
 }
 
 fn descriptor_values(descriptor: CameraDescriptor) -> (i64, i64, &'static str) {
@@ -374,6 +390,41 @@ mod tests {
                  held:close()\n\
                  local small = camera.snap(8)\n\
                  return #small == 3 and camera.available()",
+            )
+            .eval_async(),
+        )
+        .expect("snap");
+        assert!(result);
+    }
+
+    struct RawCamera;
+
+    impl Camera for RawCamera {
+        type Error = core::convert::Infallible;
+
+        fn descriptor(&self) -> CameraDescriptor {
+            CameraDescriptor::new(320, 240, CameraPixelFormat::Rgb565)
+        }
+
+        async fn capture<'a>(
+            &'a mut self,
+            buffer: &'a mut [u8],
+        ) -> core::result::Result<CapturedFrame, Self::Error> {
+            Ok(CapturedFrame::new(buffer.len(), self.descriptor()))
+        }
+    }
+
+    #[test]
+    fn snap_gives_an_uncompressed_frame_its_whole_size() {
+        let package = CameraPackage::new(Some(RawCamera));
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install package");
+
+        let result: bool = futures_lite::future::block_on(
+            lua.load(
+                "local camera = require('camera')\n\
+                 local frame, format = camera.snap()\n\
+                 return #frame == 320 * 240 * 2 and format == 'rgb565'",
             )
             .eval_async(),
         )
