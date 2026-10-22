@@ -12,7 +12,19 @@ toolchain:
 native-layout:
   artifact: partitions.csv
 peripherals:
+  io:
+    twai:
+      can-bus:
+        # CAN transceiver (SIT1044): MCU_CAN_TXD on module pin 32 (GPIO39),
+        # MCU_CAN_RXD on pin 33 (GPIO40) (PowerHub main schematic b0.3;
+        # docs.m5stack.com PowerHub pin map).
+        peripheral: TWAI0
+        tx: GPIO39
+        rx: GPIO40
   devices:
+    can:
+      implementation: twai-can
+      bindings: { controller: can-bus }
     # Button A on GPIO11, active low with the Board's pull-up (M5Unified
     # `M5Unified::update`). Button B is read through the STM32 co-processor
     # and is not declared.
@@ -38,7 +50,7 @@ exposed-io:
     header-g43: { pin: GPIO43 }
     header-g44: { pin: GPIO44 }
     # RS485 transceiver MCU_485_TXD, MCU_485_RXD, MCU_485_DIR (M5Stack PowerHub pin
-    # map).
+    # map; module pins 12, 10, and 11 in the PowerHub main schematic b0.3).
     rs485-tx: { pin: GPIO8 }
     rs485-rx: { pin: GPIO17 }
     rs485-dir: { pin: GPIO18 }

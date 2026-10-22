@@ -29,8 +29,10 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `buttons` | Button A (GPIO11) | — |
+| `can` | CAN bus (TWAI, SIT1044 transceiver, TX GPIO39, RX GPIO40) | [`can`](/plugins/vm-can) |
 
-Button B is read through the STM32 co-processor and is not declared.
+Button B is read through the STM32 co-processor and is not declared. The CAN
+controller stays off the bus until a script starts it at the bus's bit rate.
 
 ## Exposed pins
 
@@ -56,7 +58,9 @@ Lua scripts open these pins by name.
 
 The `header-*` pins are on the EXT 2.54-16P header. `rs485-tx`, `rs485-rx`,
 and `rs485-dir` are the UART and direction pins of the on-board RS485
-transceiver.
+transceiver. Open them as one RS485 port, with `rs485-dir` as the
+driver-enable pin, and the port drives the bus only while it writes:
+`uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")`.
 
 ```lua
 local gpio = require("gpio")

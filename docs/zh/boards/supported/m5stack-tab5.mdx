@@ -69,7 +69,7 @@ Lua 脚本按名称打开这些引脚。
 | `rs485-tx` | `GPIO20` |
 | `rs485-dir` | `GPIO34` |
 
-`rs485-tx`、`rs485-rx` 和 `rs485-dir` 是板载 RS485 收发器的 UART 和方向引脚。
+`rs485-tx`、`rs485-rx` 和 `rs485-dir` 是板载 RS485 收发器的 UART 和方向引脚。把它们作为一个 RS485 接口打开，以 `rs485-dir` 作为驱动使能引脚，端口就只在写入时驱动总线：`uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")`。
 
 ```lua
 local gpio = require("gpio")

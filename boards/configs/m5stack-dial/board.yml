@@ -94,6 +94,15 @@ peripherals:
     real-time-clock:
       implementation: bm8563-rtc
       bindings: { i2c: internal-i2c }
+    # WS1850S (MFRC522-compatible) RFID reader at 28h on the internal bus
+    # (M5Dial library `RC522_I2C_ADDRESS`, UIFlow `hardware/rfid.py` on
+    # SCL G12 / SDA G11). The M5Dial library starts it with a soft reset and
+    # drives no reset or interrupt pin, so neither is declared.
+    nfc-reader:
+      implementation: mfrc522-nfc-reader
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 40
     # Buttons A (the knob's press, GPIO42) and B (GPIO0), active low with
     # the Board's pull-ups (M5Unified `M5Unified::update`).
     buttons:

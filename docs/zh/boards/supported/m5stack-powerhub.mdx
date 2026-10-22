@@ -29,8 +29,9 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `buttons` | 按键 A（GPIO11） | — |
+| `can` | CAN 总线（TWAI，SIT1044 收发器，TX GPIO39，RX GPIO40） | [`can`](/zh/plugins/vm-can) |
 
-按键 B 经由 STM32 协处理器读取，没有声明。
+按键 B 经由 STM32 协处理器读取，没有声明。在脚本按总线的位速率启动之前，CAN 控制器不会接入总线。
 
 ## 可用引脚
 
@@ -54,7 +55,7 @@ Lua 脚本按名称打开这些引脚。
 | `rs485-rx` | `GPIO17` |
 | `rs485-dir` | `GPIO18` |
 
-`header-*` 引脚位于 EXT 2.54-16P 排针上。`rs485-tx`、`rs485-rx` 和 `rs485-dir` 是板载 RS485 收发器的 UART 和方向引脚。
+`header-*` 引脚位于 EXT 2.54-16P 排针上。`rs485-tx`、`rs485-rx` 和 `rs485-dir` 是板载 RS485 收发器的 UART 和方向引脚。把它们作为一个 RS485 接口打开，以 `rs485-dir` 作为驱动使能引脚，端口就只在写入时驱动总线：`uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")`。
 
 ```lua
 local gpio = require("gpio")

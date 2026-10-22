@@ -35,9 +35,13 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `buttons` | Buttons A (knob press) and B (GPIO42, GPIO0) | — |
 | `rotary-encoder` | Knob encoder (A GPIO41, B GPIO40, pulse counter) | [`encoder`](/plugins/vm-rotary-encoder) |
 | `buzzer` | Passive buzzer (GPIO3) | [`buzzer`](/plugins/vm-buzzer) |
+| `nfc-reader` | RFID / NFC card reader (WS1850S, MFRC522-compatible, `28h`) | [`nfc`](/plugins/vm-nfc) |
 
 Dial v1.1 carries a Stamp-S3A, whose RGB LED is powered through GPIO38; the
 LED switches GPIO38 on at start. On the StampS3 of v1.0 GPIO38 is unused.
+
+The card reader starts with a soft reset, as M5Stack's M5Dial library does,
+and is polled; its reset and interrupt lines are not used.
 
 ## Exposed pins
 

@@ -35,6 +35,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `power-monitor` | Battery gauge (AXP2101) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `audio-codec` | Audio codec (AW88298 amplifier, ES7210 microphone ADC) | [`audio`](/plugins/vm-audio) |
+| `nfc-reader` | NFC card reader in the body (ST25R3916, `50h`) | [`nfc`](/plugins/vm-nfc) |
 
 The touch implementation releases the controller's reset, P0_0 of the AW9523B
 expander at `58h`, which is not a device of its own.

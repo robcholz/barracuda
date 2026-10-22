@@ -35,6 +35,7 @@ cargo image deploy
 | `real-time-clock` | 实时时钟（BM8563） | — |
 | `power-monitor` | 电量计（AXP2101） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `audio-codec` | 音频编解码器（AW88298 功放、ES7210 麦克风 ADC） | [`audio`](/zh/plugins/vm-audio) |
+| `nfc-reader` | 机身中的 NFC 读卡器（ST25R3916，`50h`） | [`nfc`](/zh/plugins/vm-nfc) |
 
 触摸实现通过 `58h` 处 AW9523B 扩展芯片的 P0_0 释放控制器的复位，该扩展芯片本身不是设备。
 

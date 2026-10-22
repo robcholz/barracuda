@@ -52,6 +52,13 @@ peripherals:
         timer: Timer1
         channel: Channel1
         pin: GPIO44
+    twai:
+      can-bus:
+        # SIT1044 CAN transceiver: TX G42, RX G43 (M5StamPLC `pin_config.h`
+        # STAMPLC_PIN_CAN_TX/RX; StamPLC IO schematic G42_CAN_TX, G43_CAN_RX).
+        peripheral: TWAI0
+        tx: GPIO42
+        rx: GPIO43
   devices:
     micro-sd:
       implementation: spi-sd-fat-removable-storage
@@ -120,6 +127,25 @@ peripherals:
     buzzer:
       implementation: pwm-buzzer
       bindings: { output: buzzer-tone }
+    can:
+      implementation: twai-can
+      bindings: { controller: can-bus }
+    # Relays 1-4 on P0_0-P0_3 and isolated inputs 1-8 on P0_4-P0_7 and
+    # P1_4-P1_7 of the AW9523B at 59h (M5StamPLC `_out_pin_list`,
+    # `_in_pin_list`, and its AW9523 driver's default address; docs.m5stack.com
+    # StamPLC pin map). A relay driver turns a high output into a closed
+    # relay, and each EL3H4 optocoupler pulls its input high while energized
+    # (StamPLC IO schematic). The AW9523B's reset is G3_PHY_RST, the LCD's
+    # reset line, so the device's name sorts after `display` and it is set
+    # up after the display's reset pulse.
+    plc-io:
+      implementation: aw9523-digital-io
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 89
+        # P0_0-P0_3 (0x000f) and P0_4-P0_7 with P1_4-P1_7 (0xf0f0).
+        output-pins: 15
+        input-pins: 61680
 exposed-io:
   pins:
     # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Port C: M5Stack
