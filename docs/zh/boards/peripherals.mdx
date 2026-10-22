@@ -156,6 +156,8 @@ pdm-i2s-stream:
     dma-buffer-bytes: 4096
 ~~~
 
+除显示屏外，开发板的每种外设只有一个设备。产品上同一类型有多颗芯片时，由一个组合这些芯片驱动的实现来呈现：M5Stack AirQ 的 SEN55 颗粒物传感器和 SCD40 CO2 传感器是一个 `environment-sensor` 设备，即 `scd4x-sen5x-environment-sensor`，它的测量量是两颗芯片的并集。
+
 每个生成的语义槽位都是可选的。没有实时时钟的开发板就没有 `RealTimeClock` 值；有实时时钟的开发板则有 `Some(concrete_clock)`。缺席不需要伪造硬件，存在也不会暴露辅助芯片。
 
 ## 实现清单

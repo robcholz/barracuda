@@ -840,7 +840,7 @@ fn rejects_an_implementation_without_a_registered_peripheral_api() {
         r#"
 id: future-sensor
 api-version: 1
-peripheral: environment-sensor
+peripheral: radiation-counter
 implementation:
   package: future-sensor
   crate: future_sensor

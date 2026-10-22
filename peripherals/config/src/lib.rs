@@ -23,6 +23,7 @@ pub const PERIPHERAL_APIS: &[&str] = &[
     "buttons",
     "camera",
     "display",
+    "environment-sensor",
     "indicator",
     "inertial-measurement",
     "led-strip",
@@ -1289,6 +1290,11 @@ fn claimable_peripheral(
             "take_buttons",
             "Buttons",
         ),
+        "environment-sensor" => (
+            "::barracuda_board_hal::environment::EnvironmentSensorPeripheral",
+            "take_environment_sensor",
+            "EnvironmentSensor",
+        ),
         _ => return None,
     })
 }
@@ -1823,6 +1829,11 @@ fn render_generic_hal(
         if !primary_peripherals.contains("buttons") {
             source.push_str(
                 "impl ::barracuda_board_hal::buttons::ButtonsPeripheral for GeneratedPeripherals {\n    type Buttons = ::barracuda_board_hal::UnavailableButtons;\n    fn take_buttons(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::Buttons> { None }\n}\n\n",
+            );
+        }
+        if !primary_peripherals.contains("environment-sensor") {
+            source.push_str(
+                "impl ::barracuda_board_hal::environment::EnvironmentSensorPeripheral for GeneratedPeripherals {\n    type EnvironmentSensor = ::barracuda_board_hal::UnavailableEnvironmentSensor;\n    fn take_environment_sensor(&mut self, _instance: ::barracuda_board_hal::Instance) -> Option<Self::EnvironmentSensor> { None }\n}\n\n",
             );
         }
     }

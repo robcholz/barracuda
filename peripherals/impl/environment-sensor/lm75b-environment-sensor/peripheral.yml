@@ -1,0 +1,18 @@
+id: lm75b-environment-sensor
+api-version: 1
+peripheral: environment-sensor
+implementation:
+  package: barracuda-lm75b-environment-sensor
+  crate: barracuda_lm75b_environment_sensor
+  factory: "::{{crate}}::Lm75bEnvironmentSensorImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::Lm75bBindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::Lm75bConfig::new({{parameter.address}})"
+# An NXP LM75B: temperature.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 48h with A2, A1, and A0 low; up to 4Fh.
+    default: 72

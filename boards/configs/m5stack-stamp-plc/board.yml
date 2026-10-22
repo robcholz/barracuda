@@ -76,6 +76,13 @@ peripherals:
         # `shunt_res = 0.01f`, ESP32-S3 `Ina226 = { 0x40 }`).
         address: 64
         shunt-micro-ohms: 10000
+    # LM75B at 48h on the internal bus, SCL G15 / SDA G13 (M5Stack StamPLC
+    # sensor pin map: "LM75BDP (0x48)").
+    environment-sensor:
+      implementation: lm75b-environment-sensor
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 72
     real-time-clock:
       implementation: rx8130ce-rtc
       bindings: { i2c: internal-i2c }

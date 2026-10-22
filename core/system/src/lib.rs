@@ -21,6 +21,7 @@ use barracuda_board_hal::{
     audio::AudioCodecPeripheral,
     camera::CameraPeripheral,
     display::DisplayPeripheral,
+    environment::EnvironmentSensorPeripheral,
     imu::ImuPeripheral,
     led_strip::LedStripPeripheral,
     power::PowerMonitorPeripheral,
@@ -213,6 +214,7 @@ where
     Peripherals: AudioCodecPeripheral
         + CameraPeripheral
         + DisplayPeripheral
+        + EnvironmentSensorPeripheral
         + ImuPeripheral
         + LedStripPeripheral
         + PowerMonitorPeripheral
@@ -229,6 +231,9 @@ where
     <Peripherals::Camera as barracuda_board_hal::camera::Camera>::Error: core::fmt::Debug,
     Peripherals::LedStrip: Send + 'static,
     <Peripherals::LedStrip as barracuda_board_hal::led_strip::LedStrip>::Error: core::fmt::Debug,
+    Peripherals::EnvironmentSensor: Send + 'static,
+    <Peripherals::EnvironmentSensor as barracuda_board_hal::environment::EnvironmentSensor>::Error:
+        core::fmt::Debug,
     Peripherals::Imu: Send + 'static,
     <Peripherals::Imu as barracuda_board_hal::imu::Imu>::Error: core::fmt::Debug,
     Peripherals::PowerMonitor: Send + 'static,

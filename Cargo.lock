@@ -951,6 +951,8 @@ dependencies = [
  "barracuda-indicator-led",
  "barracuda-ip5306-power-monitor",
  "barracuda-it8951-display",
+ "barracuda-lm75b-environment-sensor",
+ "barracuda-ltr553-environment-sensor",
  "barracuda-m5pm1-power-monitor",
  "barracuda-m5stack-pmic-display",
  "barracuda-mipi-dbi-display",
@@ -966,7 +968,10 @@ dependencies = [
  "barracuda-pdm-i2s-audio-codec",
  "barracuda-pi4ioe5v6408-buttons",
  "barracuda-rx8130ce-rtc",
+ "barracuda-scd4x-sen5x-environment-sensor",
  "barracuda-sdmmc-fat-removable-storage",
+ "barracuda-sht3x-environment-sensor",
+ "barracuda-sht4x-environment-sensor",
  "barracuda-spi-sd-fat-removable-storage",
  "barracuda-ssd1306-spi-display",
  "barracuda-st77916-qspi-display",
@@ -1422,7 +1427,21 @@ name = "barracuda-driver-jd9853"
 version = "0.1.0"
 
 [[package]]
+name = "barracuda-driver-lm75b"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-lp5562"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-ltr553"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
@@ -1478,6 +1497,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-scd4x"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-sen5x"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-sht3x"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-sht4x"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-ssd1306"
 version = "0.1.0"
 dependencies = [
@@ -1524,6 +1571,21 @@ dependencies = [
  "barracuda-peripheral",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-environment-sensor-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2038,6 +2100,27 @@ dependencies = [
  "critical-section",
  "portable-atomic",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-lm75b-environment-sensor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-lm75b",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-ltr553-environment-sensor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-axp2101",
+ "barracuda-driver-ltr553",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -2770,6 +2853,7 @@ dependencies = [
  "barracuda-camera-plugin",
  "barracuda-captive-portal-plugin",
  "barracuda-display-plugin",
+ "barracuda-environment-sensor-plugin",
  "barracuda-files-plugin",
  "barracuda-gpio-plugin",
  "barracuda-http-plugin",
@@ -2896,6 +2980,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-scd4x-sen5x-environment-sensor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-scd4x",
+ "barracuda-driver-sen5x",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-scheduler-plugin"
 version = "0.1.0"
 dependencies = [
@@ -2930,6 +3025,26 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "portable-atomic",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-sht3x-environment-sensor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-sht3x",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-sht4x-environment-sensor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-sht4x",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

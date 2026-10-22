@@ -224,6 +224,12 @@ pdm-i2s-stream:
     dma-buffer-bytes: 4096
 ~~~
 
+A Board has one device of each kind except displays. A product with several
+chips of one kind presents them through one implementation that composes their
+drivers: the M5Stack AirQ's SEN55 particulate sensor and SCD40 CO2 sensor are
+one `environment-sensor` device, `scd4x-sen5x-environment-sensor`, whose
+quantities are the union of the two chips'.
+
 Every generated semantic slot is optional. A Board with no real-time clock has
 no `RealTimeClock` value; a Board with one has `Some(concrete_clock)`. Absence
 does not require fake hardware, and presence does not expose helper chips.
