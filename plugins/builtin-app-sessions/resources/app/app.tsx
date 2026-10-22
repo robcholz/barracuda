@@ -44,7 +44,7 @@ export default function Sessions() {
               <View class={message().mine ? "shrink-0 w-full flex-row justify-end pl-[40px]" : "shrink-0 w-full flex-col gap-[6px]"}>
                 <Show when={message().mine}>
                   <View class="min-w-0 px-[14px] py-[8px] rounded-lg bg-[#18181B] border border-[#27272A]">
-                    <Text class="text-base text-[#FAFAFA]">{message().text}</Text>
+                    <Text class="min-w-0 text-base text-[#FAFAFA]">{message().text}</Text>
                   </View>
                 </Show>
                 <Show when={!message().mine}>

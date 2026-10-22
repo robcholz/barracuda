@@ -31,7 +31,7 @@ export default function Files() {
         <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-hidden">
           <View class="shrink-0 w-full flex-row flex-wrap items-end justify-between gap-2 px-3 pb-[8px]">
             <Text class="shrink-0 text-lg font-bold text-[#FAFAFA]">{area()}</Text>
-            <Text class="shrink-0 text-sm text-[#A1A1AA]">{summary()}</Text>
+            <Text class="min-w-0 text-sm text-[#A1A1AA]">{summary()}</Text>
           </View>
           <View class="shrink-0 w-full h-[1px] bg-[#27272A]" />
           <For each={files()} by={(file) => file.id}>
