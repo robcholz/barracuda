@@ -10,10 +10,12 @@ enable:
   - i2c
   - i2s
   - imu
+  - keyboard
   - led-strip
   - message-queue
   - power-monitor
   - pwm
+  - rotary-encoder
   - spi
   - uart
   - vm

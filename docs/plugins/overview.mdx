@@ -77,9 +77,11 @@ The [Plugin API](/architecture/plugin-api) defines what a Plugin may own and how
 | [I2C](/plugins/vm-i2c) | The I2C Plugin exposes I2C bus transfers on the Board's exposed pins to Lua code as the `i2c` Lua package. |
 | [I2S](/plugins/vm-i2s) | The I2S Plugin exposes I2S PCM streaming on the Board's exposed pins to Lua code as the `i2s` Lua package. |
 | [IMU](/plugins/vm-imu) | Installs the `motion` Lua package over the Board's primary IMU. |
+| [Keyboard](/plugins/vm-keyboard) | Installs the `keyboard` Lua package over the Board's primary keyboard. |
 | [LED Strip](/plugins/vm-led-strip) | Installs the `light` Lua package over the Board's primary LED strip. |
 | [Message Queue](/plugins/vm-message-queue) | Installs the require-only `message_queue` Lua package: bounded, shared FIFO queues that independent Lua executions use to exchange messages. |
 | [Power Monitor](/plugins/vm-power-monitor) | Installs the `power_monitor` Lua package over the Board's power monitor, which the `power` Plugin owns. |
+| [Rotary Encoder](/plugins/vm-rotary-encoder) | Installs the `encoder` Lua package over the Board's primary rotary encoder. |
 | [PWM](/plugins/vm-pwm) | Installs the `pwm` Lua package over the Board's exposed I/O pins. |
 | [SPI](/plugins/vm-spi) | Installs the require-only `spi` Lua package over the Board's exposed I/O pins. |
 | [VM System Info](/plugins/vm-systeminfo) | Exposes the selected Platform and Board identity to Lua as the require-only `systeminfo` package. |

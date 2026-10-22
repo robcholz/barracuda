@@ -1,0 +1,6 @@
+id = "rotary-encoder"
+depends-on = ["vm"]
+description = "Registers the built-in rotary-encoder Lua package."
+
+[peripherals.rotary-encoder]
+device = { fill = "primary", optional = true }
