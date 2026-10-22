@@ -1,4 +1,5 @@
 name: m5stack-atom-display
+profile: screen
 hardware:
   chip: esp32
   # ESP32-PICO-V3-02.
@@ -11,3 +12,35 @@ toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      hdmi-i2c:
+        # The LT8618SX's control bus: M5GFX M5AtomDisplay.h (ESP32) `i2c_port
+        # 1`, SDA GPIO25, SCL GPIO21, 400 kHz; docs.m5stack.com ATOM Display
+        # "LT_CSDA / LT_CSCL G25 / G21".
+        peripheral: I2C1
+        scl: GPIO21
+        sda: GPIO25
+        frequency-hz: 400000
+    spi-bus:
+      fpga-spi:
+        # The GW1NR-9C's SPI: M5GFX M5AtomDisplay.h (ESP32) `SPI3_HOST`, MOSI
+        # GPIO19, MISO GPIO22, SCLK GPIO5 on this ESP32-PICO-V3-02 (GPIO23 on
+        # a PICO-D4 ATOM Lite). Its chip select, GPIO33, is the display's own
+        # line, because it is also the FPGA's JTAG TMS. The display
+        # implementation sets mode 3 and its own write, read, and JTAG clocks.
+        peripheral: SPI3
+        sck: GPIO5
+        mosi: GPIO19
+        miso: GPIO22
+        frequency-hz: 40000000
+  devices:
+    # HDMI out through the GW1NR-9C FPGA and the LT8618SX at 39h (M5GFX
+    # `Panel_M5HDMI`), 1280 x 720 at 60 Hz, M5GFX's M5AtomDisplay default.
+    display:
+      implementation: m5hdmi-display
+      bindings:
+        spi: fpga-spi
+        chip-select: GPIO33
+        i2c: hdmi-i2c

@@ -1,0 +1,20 @@
+id: powerhub-rtc
+api-version: 1
+peripheral: real-time-clock
+implementation:
+  package: barracuda-powerhub-rtc
+  crate: barracuda_powerhub_rtc
+  factory: "::{{crate}}::PowerHubRtcImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "{{binding.i2c.value}}"
+  config-expression: "::{{crate}}::PowerHubRtcConfig::new({{parameter.address}})"
+# The M5Stack PowerHub's RX8130CE, which sits on its power co-processor's own
+# bus; the co-processor relays its clock (M5Unified `RTC_PowerHub_Class`,
+# registers C0h-C6h). The implementation touches only those registers.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  # The co-processor's address (M5Unified `powerhub_i2c_addr`, 50h).
+  address:
+    type: integer
+    default: 80

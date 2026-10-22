@@ -37,6 +37,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `audio` | Audio (NS4168 amplifier, SPM1423 PDM microphone) | [`audio`](/plugins/vm-audio) |
 | `micro-sd` | microSD card slot (FAT, SPI) | — |
 | `vibration` | Vibration motor (AXP192 LDO3 or AXP2101 DLDO1) | [`vibration`](/plugins/vm-vibration) |
+| `secure-element` | Secure element (ATECC608B Trust&GO, `35h`) | [`secure_element`](/plugins/vm-secure-element) |
 
 The touch panel reports a 320x280 span: the strip below the screen holds the
 three touch keys. The display implementation's PMIC power-up resets the touch
@@ -49,6 +50,10 @@ On v1.1 units the AXP2101 measures no current; an INA3221 at `40h` senses the
 battery current instead.
 
 The microSD card shares the display's SPI bus through its own chip select.
+
+The internal I2C bus runs at 100 kHz: the ATECC608B wakes only on a low
+pulse on SDA longer than the one a 400 kHz bus makes. Its device key is in
+slot 0.
 
 ## Exposed pins
 

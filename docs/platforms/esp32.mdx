@@ -110,6 +110,10 @@ Every Platform but the ESP32-P4 drives a retunable PWM output for a buzzer
 controller is built once and shared with the runtime PWM pool, which keeps
 `Timer0` and `Channel0`; a Board's outputs take the others.
 
+An `spi-bus` also clocks out fewer than eight bits through the controller's
+command phase and changes its clock and mode (`SpiBusControl`), which the
+ATOM Display uses to load its FPGA over JTAG on its SPI lines.
+
 Several `spi-device` declarations may name one SPI controller, such as a
 display and a microSD card on one bus: the controller is built once, and each
 device keeps its chip select and runs at its own clock. A transaction takes

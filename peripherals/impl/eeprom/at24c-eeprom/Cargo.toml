@@ -1,0 +1,29 @@
+[package]
+name = "barracuda-at24c-eeprom"
+version = "0.1.0"
+edition = "2024"
+description = "24Cxx-class I2C serial EEPROM implementation"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-at24c.workspace = true
+barracuda-peripheral.workspace = true
+embassy-time.workspace = true
+embedded-hal.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

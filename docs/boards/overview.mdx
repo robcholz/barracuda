@@ -323,7 +323,9 @@ identifies the panel at start-up), the IT8951E-driven M5Paper
 (`it8951-display`), the directly driven ED047TC1 in PaperS3 and PaperDIY
 (`ed047tc1-display`, `paper-diy-display`) on the same `parallel-output` binding
 as the BOX-2, and the Paper Mono and PaperColor (`paper-mono-display`,
-`paper-color-display`). All of them expose Barracuda's stable
+`paper-color-display`). The ATOM Display's HDMI output
+(`m5hdmi-display`) loads M5Stack's FPGA design at start-up and drives it and
+its LT8618SX transmitter. All of them expose Barracuda's stable
 `DisplayPeripheral` API. Other fixed peripherals remain absent until their reusable implementation is
 implemented and selected in that Board's YAML. ESP32-C5 and ESP32-H2 products
 are intentionally excluded until those Platforms exist in Barracuda.

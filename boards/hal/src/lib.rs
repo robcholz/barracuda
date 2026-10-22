@@ -36,6 +36,8 @@ pub use barracuda_peripheral::buzzer;
 pub use barracuda_peripheral::camera;
 /// Stable attached display peripheral API.
 pub use barracuda_peripheral::display;
+/// Stable attached EEPROM peripheral API.
+pub use barracuda_peripheral::eeprom;
 /// Stable attached environment-sensor peripheral API.
 pub use barracuda_peripheral::environment;
 /// Stable attached inertial-measurement peripheral API.
@@ -56,6 +58,8 @@ pub use barracuda_peripheral::real_time_clock;
 pub use barracuda_peripheral::removable_storage;
 /// Stable attached rotary-encoder peripheral API.
 pub use barracuda_peripheral::rotary_encoder;
+/// Stable attached secure-element peripheral API.
+pub use barracuda_peripheral::secure_element;
 /// Stable touch-input API.
 pub use barracuda_peripheral::touch;
 /// Stable attached vibration-motor API.
@@ -239,6 +243,27 @@ pub trait SpiDeviceControl: embedded_hal::spi::ErrorType {
 
     /// Clocks `bytes` out with this device's chip select released.
     fn write_deselected(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
+}
+
+/// Bus control a bit-oriented protocol on an SPI controller needs beyond
+/// `embedded-hal`'s `SpiBus`: the clock and mode, and transfers shorter than
+/// a byte.
+///
+/// A JTAG test-access port driven through an SPI controller (TCK on SCK, TDI
+/// on MOSI, TDO on MISO, TMS on a GPIO the implementation owns) moves between
+/// states one clock at a time, which a byte-oriented `SpiBus` cannot clock.
+/// A Platform's `spi-bus` type implements this where its controller can.
+pub trait SpiBusControl: embedded_hal::spi::ErrorType {
+    /// Applies `frequency_hz` and `mode` to the following transfers.
+    fn configure(
+        &mut self,
+        frequency_hz: u32,
+        mode: embedded_hal::spi::Mode,
+    ) -> Result<(), Self::Error>;
+
+    /// Clocks out the low `bits` bits of `value`, 1 through 8, most
+    /// significant first, and returns once the last has been clocked.
+    fn write_bits(&mut self, value: u8, bits: u8) -> Result<(), Self::Error>;
 }
 
 /// One half of a pulse symbol: an output level held for a number of ticks.
@@ -926,6 +951,75 @@ impl infrared::InfraredPeripheral for NoPeripherals {
     type Infrared = UnavailableInfrared;
 
     fn take_infrared(&mut self, _instance: Instance) -> Option<Self::Infrared> {
+        None
+    }
+}
+
+/// Uninhabited EEPROM used when a Board has none.
+pub struct UnavailableEeprom {
+    never: Infallible,
+}
+
+impl eeprom::Eeprom for UnavailableEeprom {
+    type Error = Infallible;
+
+    fn geometry(&self) -> eeprom::EepromGeometry {
+        match self.never {}
+    }
+
+    async fn read(&mut self, _offset: u32, _buffer: &mut [u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn write(&mut self, _offset: u32, _data: &[u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl eeprom::EepromPeripheral for NoPeripherals {
+    type Eeprom = UnavailableEeprom;
+
+    fn take_eeprom(&mut self, _instance: Instance) -> Option<Self::Eeprom> {
+        None
+    }
+}
+
+/// Uninhabited secure element used when a Board has none.
+pub struct UnavailableSecureElement {
+    never: Infallible,
+}
+
+impl secure_element::SecureElement for UnavailableSecureElement {
+    type Error = Infallible;
+
+    async fn serial_number(&mut self) -> Result<secure_element::SerialNumber, Self::Error> {
+        match self.never {}
+    }
+
+    async fn fill_random(&mut self, _buffer: &mut [u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn public_key(
+        &mut self,
+        _slot: secure_element::KeySlot,
+    ) -> Result<secure_element::P256PublicKey, Self::Error> {
+        match self.never {}
+    }
+
+    async fn sign_digest(
+        &mut self,
+        _slot: secure_element::KeySlot,
+        _digest: &[u8; 32],
+    ) -> Result<secure_element::P256Signature, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl secure_element::SecureElementPeripheral for NoPeripherals {
+    type SecureElement = UnavailableSecureElement;
+
+    fn take_secure_element(&mut self, _instance: Instance) -> Option<Self::SecureElement> {
         None
     }
 }

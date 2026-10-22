@@ -24,6 +24,7 @@ pub const PERIPHERAL_APIS: &[&str] = &[
     "buzzer",
     "camera",
     "display",
+    "eeprom",
     "environment-sensor",
     "indicator",
     "inertial-measurement",
@@ -34,6 +35,7 @@ pub const PERIPHERAL_APIS: &[&str] = &[
     "real-time-clock",
     "removable-storage",
     "rotary-encoder",
+    "secure-element",
     "touch",
     "vibration",
 ];
@@ -1410,6 +1412,16 @@ fn claimable_peripheral(
             "take_infrared",
             "Infrared",
         ),
+        "eeprom" => (
+            "::barracuda_board_hal::eeprom::EepromPeripheral",
+            "take_eeprom",
+            "Eeprom",
+        ),
+        "secure-element" => (
+            "::barracuda_board_hal::secure_element::SecureElementPeripheral",
+            "take_secure_element",
+            "SecureElement",
+        ),
         _ => return None,
     })
 }
@@ -1985,6 +1997,20 @@ fn render_generic_hal(
                 "take_infrared",
                 "Infrared",
                 "UnavailableInfrared",
+            ),
+            (
+                "eeprom",
+                "eeprom::EepromPeripheral",
+                "take_eeprom",
+                "Eeprom",
+                "UnavailableEeprom",
+            ),
+            (
+                "secure-element",
+                "secure_element::SecureElementPeripheral",
+                "take_secure_element",
+                "SecureElement",
+                "UnavailableSecureElement",
             ),
         ] {
             if !primary_peripherals.contains(peripheral_api) {

@@ -22,6 +22,7 @@ use barracuda_board_hal::{
     buzzer::BuzzerPeripheral,
     camera::CameraPeripheral,
     display::DisplayPeripheral,
+    eeprom::EepromPeripheral,
     environment::EnvironmentSensorPeripheral,
     imu::ImuPeripheral,
     infrared::InfraredPeripheral,
@@ -31,6 +32,7 @@ use barracuda_board_hal::{
     real_time_clock::RealTimeClockPeripheral,
     removable_storage::{RemovableStorage, RemovableStorageEvent, RemovableStoragePeripheral},
     rotary_encoder::RotaryEncoderPeripheral,
+    secure_element::SecureElementPeripheral,
     touch::TouchPeripheral,
     vibration::VibrationPeripheral,
     AnalogProvider, BoardResources, DigitalProvider, ExposedIo, I2cProvider, I2sProvider,
@@ -220,6 +222,7 @@ where
         + BuzzerPeripheral
         + CameraPeripheral
         + DisplayPeripheral
+        + EepromPeripheral
         + EnvironmentSensorPeripheral
         + ImuPeripheral
         + InfraredPeripheral
@@ -229,6 +232,7 @@ where
         + RealTimeClockPeripheral
         + RemovableStoragePeripheral
         + RotaryEncoderPeripheral
+        + SecureElementPeripheral
         + TouchPeripheral
         + VibrationPeripheral
         + Unpin,
@@ -256,6 +260,11 @@ where
     <Peripherals::Keyboard as barracuda_board_hal::keyboard::Keyboard>::Error: core::fmt::Debug,
     Peripherals::RotaryEncoder: Send + 'static,
     <Peripherals::RotaryEncoder as barracuda_board_hal::rotary_encoder::RotaryEncoder>::Error:
+        core::fmt::Debug,
+    Peripherals::Eeprom: Send + 'static,
+    <Peripherals::Eeprom as barracuda_board_hal::eeprom::Eeprom>::Error: core::fmt::Debug,
+    Peripherals::SecureElement: Send + 'static,
+    <Peripherals::SecureElement as barracuda_board_hal::secure_element::SecureElement>::Error:
         core::fmt::Debug,
     Peripherals::PowerMonitor: Send + 'static,
     Peripherals::RealTimeClock: 'static,
