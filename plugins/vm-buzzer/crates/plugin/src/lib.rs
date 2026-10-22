@@ -1,4 +1,4 @@
-//! Lua package for the Board's primary built-in buzzer.
+//! Lua package for the Board's built-in buzzers.
 
 #![no_std]
 
@@ -8,14 +8,14 @@ mod config {
     barracuda_plugin::config!();
 }
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use barracuda_board_hal::buzzer::{Buzzer, BuzzerPeripheral, Note, Volume};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, LuaValue, Package, Result, Table, Variadic,
+    BoardDevices, Error, LentDevice, Lua, LuaPackage, LuaPackageRegistry, LuaValue, Package,
+    Result, Table, Variadic,
 };
-use core::cell::RefCell;
 use portable_atomic::{AtomicBool, Ordering};
 use portable_atomic_util::Arc;
 
@@ -24,22 +24,31 @@ const DEFAULT_VOLUME: u8 = 50;
 /// Most notes one melody may hold.
 const MAX_NOTES: usize = 256;
 
-/// Owns the Board's primary buzzer and publishes it to Lua.
+/// Owns the Board's buzzers and publishes them to Lua.
 #[barracuda_plugin::macros::plugin]
 pub struct BuzzerPlugin<Device> {
-    buzzer: Option<Device>,
+    buzzers: Vec<(&'static str, Device)>,
 }
 
 impl<Device> BuzzerPlugin<Device> {
-    /// Takes the built-in buzzer from the generated Board capability set.
+    /// Takes the built-in buzzers from the generated Board capability set,
+    /// the primary one first.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
         Builtins: BuzzerPeripheral<Buzzer = Device>,
     {
         Self {
-            buzzer: config::peripherals::BUZZER_DEVICE
-                .and_then(|instance| context.hal.peripherals.take_buzzer(instance)),
+            buzzers: config::peripherals::BUZZER_DEVICES
+                .iter()
+                .filter_map(|(name, instance)| {
+                    context
+                        .hal
+                        .peripherals
+                        .take_buzzer(*instance)
+                        .map(|buzzer| (*name, buzzer))
+                })
+                .collect(),
         }
     }
 }
@@ -60,67 +69,40 @@ where
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
-            .register(BuzzerPackage::new(self.buzzer.take()))
+            .register(BuzzerPackage::new(core::mem::take(&mut self.buzzers)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
     }
 }
 
-/// The buzzer while no call uses it.
-type Slot<Device> = Arc<critical_section::Mutex<RefCell<Option<Device>>>>;
-
-/// The buzzer taken out of its slot for one call; it goes back when the call
-/// ends or is cancelled.
-struct Lent<Device> {
-    device: Option<Device>,
-    home: Slot<Device>,
-}
-
-impl<Device> Lent<Device> {
-    fn take(home: &Slot<Device>, active: &AtomicBool) -> Result<Self> {
-        if !active.load(Ordering::Acquire) {
-            return Err(Error::runtime("buzzer package has been revoked"));
-        }
-        let device = critical_section::with(|section| home.borrow(section).borrow_mut().take());
-        match device {
-            Some(device) => Ok(Self {
-                device: Some(device),
-                home: Arc::clone(home),
-            }),
-            None => Err(Error::runtime("built-in buzzer is unavailable or busy")),
-        }
+/// Lends the buzzer `name`, or the primary one, to one call; it goes back
+/// when the call ends or is cancelled.
+fn lend<Device>(
+    buzzers: &BoardDevices<Device>,
+    active: &AtomicBool,
+    name: Option<&str>,
+) -> Result<LentDevice<Device>> {
+    if !active.load(Ordering::Acquire) {
+        return Err(Error::runtime("buzzer package has been revoked"));
     }
-
-    fn device(&mut self) -> Result<&mut Device> {
-        self.device
-            .as_mut()
-            .ok_or_else(|| Error::runtime("built-in buzzer is unavailable or busy"))
-    }
-}
-
-impl<Device> Drop for Lent<Device> {
-    fn drop(&mut self) {
-        if let Some(device) = self.device.take() {
-            critical_section::with(|section| {
-                self.home.borrow(section).replace(Some(device));
-            });
-        }
-    }
+    buzzers.lend(name).ok_or_else(|| {
+        Error::runtime(match name {
+            Some(name) => alloc::format!("buzzer `{name}` is unavailable or busy"),
+            None => String::from("built-in buzzer is unavailable or busy"),
+        })
+    })
 }
 
 struct BuzzerPackage<Device> {
-    /// Whether the Board has the device, which makes the package a capability.
-    present: bool,
-    buzzer: Slot<Device>,
+    buzzers: BoardDevices<Device>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> BuzzerPackage<Device> {
-    fn new(buzzer: Option<Device>) -> Self {
+    fn new(buzzers: Vec<(&'static str, Device)>) -> Self {
         Self {
-            present: buzzer.is_some(),
-            buzzer: Arc::new(critical_section::Mutex::new(RefCell::new(buzzer))),
+            buzzers: BoardDevices::new(buzzers),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -188,6 +170,15 @@ fn integer(value: &LuaValue) -> Result<i64> {
     optional_integer(value)?.ok_or_else(|| Error::runtime("expected an integer argument"))
 }
 
+/// A device name argument, or `None` for the primary device when it is nil.
+fn device_name(value: LuaValue) -> Result<Option<String>> {
+    match value {
+        LuaValue::Nil => Ok(None),
+        LuaValue::String(name) => Ok(Some(name)),
+        _ => Err(Error::runtime("expected a buzzer name")),
+    }
+}
+
 /// A table argument.
 fn table(value: LuaValue) -> Result<Table> {
     match value {
@@ -206,68 +197,66 @@ where
     Device::Error: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available = (Arc::clone(&self.buzzer), Arc::clone(&self.active));
-        let range = (Arc::clone(&self.buzzer), Arc::clone(&self.active));
-        let start = (Arc::clone(&self.buzzer), Arc::clone(&self.active));
-        let stop = (Arc::clone(&self.buzzer), Arc::clone(&self.active));
-        let tone = (Arc::clone(&self.buzzer), Arc::clone(&self.active));
-        let play = (Arc::clone(&self.buzzer), Arc::clone(&self.active));
+        let available = (self.buzzers.clone(), Arc::clone(&self.active));
+        let list = self.buzzers.clone();
+        let range = (self.buzzers.clone(), Arc::clone(&self.active));
+        let start = (self.buzzers.clone(), Arc::clone(&self.active));
+        let stop = (self.buzzers.clone(), Arc::clone(&self.active));
+        let tone = (self.buzzers.clone(), Arc::clone(&self.active));
+        let play = (self.buzzers.clone(), Arc::clone(&self.active));
         lua.register_lib("buzzer", move |package| {
-            package.register("available", move |(): ()| {
-                let (slot, active) = &available;
+            package.register("available", move |name: Variadic<String>| {
+                let (buzzers, active) = &available;
                 Some(Ok(active.load(Ordering::Acquire)
-                    && critical_section::with(|section| {
-                        slot.borrow(section).borrow().is_some()
-                    })))
+                    && buzzers.is_available(name.first().map(String::as_str))))
             })?;
-            package.register("range", move |(): ()| {
-                let (slot, active) = &range;
+            package.register_with("list", move |lua, (): ()| Some(list.list(lua)))?;
+            package.register("range", move |name: Variadic<String>| {
+                let (buzzers, active) = &range;
                 Some(
-                    Lent::take(slot, active)
-                        .and_then(|mut lent| Ok(lent.device()?.frequency_range()))
+                    lend(buzzers, active, name.first().map(String::as_str))
+                        .map(|lent| lent.frequency_range())
                         .map(|(lowest, highest)| (i64::from(lowest), i64::from(highest))),
                 )
             })?;
             package.register("start", move |values: Variadic<LuaValue>| {
-                let (slot, active) = &start;
+                let (buzzers, active) = &start;
                 Some((|| {
-                    let [frequency_hz, percent] = arguments(values, 1)?;
+                    let [frequency_hz, percent, name] = arguments(values, 1)?;
                     let frequency_hz = integer(&frequency_hz)?;
                     let volume = volume(optional_integer(&percent)?)?;
                     let frequency_hz = u32::try_from(frequency_hz)
                         .map_err(|_| Error::runtime("a frequency is positive hertz"))?;
-                    let mut lent = Lent::take(slot, active)?;
-                    lent.device()?
-                        .start(frequency_hz, volume)
-                        .map_err(buzzer_error)?;
+                    let name = device_name(name)?;
+                    let mut lent = lend(buzzers, active, name.as_deref())?;
+                    lent.start(frequency_hz, volume).map_err(buzzer_error)?;
                     Ok(true)
                 })())
             })?;
-            package.register("stop", move |(): ()| {
-                let (slot, active) = &stop;
+            package.register("stop", move |name: Variadic<String>| {
+                let (buzzers, active) = &stop;
                 Some((|| {
-                    let mut lent = Lent::take(slot, active)?;
-                    lent.device()?.stop().map_err(buzzer_error)?;
+                    let mut lent = lend(buzzers, active, name.first().map(String::as_str))?;
+                    lent.stop().map_err(buzzer_error)?;
                     Ok(true)
                 })())
             })?;
             package.register_async("tone", move |values: Variadic<LuaValue>| {
-                let (slot, active) = (Arc::clone(&tone.0), Arc::clone(&tone.1));
-                let parsed = arguments(values, 2).and_then(|[frequency, duration, percent]| {
-                    Ok((
-                        note(integer(&frequency)?, integer(&duration)?)?,
-                        volume(optional_integer(&percent)?)?,
-                    ))
-                });
+                let (buzzers, active) = (tone.0.clone(), Arc::clone(&tone.1));
+                let parsed =
+                    arguments(values, 2).and_then(|[frequency, duration, percent, name]| {
+                        Ok((
+                            note(integer(&frequency)?, integer(&duration)?)?,
+                            volume(optional_integer(&percent)?)?,
+                            device_name(name)?,
+                        ))
+                    });
                 async move {
                     Some(
                         async {
-                            let (note, volume) = parsed?;
-                            let mut lent = Lent::take(&slot, &active)?;
-                            lent.device()?
-                                .play_note(note, volume)
-                                .await
-                                .map_err(buzzer_error)?;
+                            let (note, volume, name) = parsed?;
+                            let mut lent = lend(&buzzers, &active, name.as_deref())?;
+                            lent.play_note(note, volume).await.map_err(buzzer_error)?;
                             Ok(true)
                         }
                         .await,
@@ -275,22 +264,20 @@ where
                 }
             })?;
             package.register_async("play", move |values: Variadic<LuaValue>| {
-                let (slot, active) = (Arc::clone(&play.0), Arc::clone(&play.1));
-                let parsed = arguments(values, 1).and_then(|[notes, percent]| {
+                let (buzzers, active) = (play.0.clone(), Arc::clone(&play.1));
+                let parsed = arguments(values, 1).and_then(|[notes, percent, name]| {
                     Ok((
                         melody(&table(notes)?)?,
                         volume(optional_integer(&percent)?)?,
+                        device_name(name)?,
                     ))
                 });
                 async move {
                     Some(
                         async {
-                            let (melody, volume) = parsed?;
-                            let mut lent = Lent::take(&slot, &active)?;
-                            lent.device()?
-                                .play(&melody, volume)
-                                .await
-                                .map_err(buzzer_error)?;
+                            let (melody, volume, name) = parsed?;
+                            let mut lent = lend(&buzzers, &active, name.as_deref())?;
+                            lent.play(&melody, volume).await.map_err(buzzer_error)?;
                             Ok(true)
                         }
                         .await,
@@ -311,11 +298,10 @@ where
     }
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
-        self.present
-            .then_some(barracuda_vm_plugin::PackageInterface::Stable {
-                version: 1,
-                purpose: "播放提示音",
-            })
+        (!self.buzzers.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 2,
+            purpose: "播放提示音",
+        })
     }
 
     fn revoke(&self) {
@@ -330,6 +316,7 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use core::cell::RefCell;
     use core::convert::Infallible;
     use std::vec::Vec;
 
@@ -394,7 +381,7 @@ mod tests {
     fn lua_plays_tones_and_melodies() {
         let buzzer = TestBuzzer::default();
         let events = Arc::clone(&buzzer.events);
-        let package = BuzzerPackage::new(Some(buzzer));
+        let package = BuzzerPackage::new(std::vec![("main", buzzer)]);
         assert!(run(
             &package,
             "local buzzer = require('buzzer')\n\
@@ -425,8 +412,33 @@ mod tests {
     }
 
     #[test]
+    fn lua_names_a_buzzer_and_defaults_to_the_primary() {
+        let main = TestBuzzer::default();
+        let side = TestBuzzer::default();
+        let (main_events, side_events) = (Arc::clone(&main.events), Arc::clone(&side.events));
+        let package = BuzzerPackage::new(std::vec![("main", main), ("side", side)]);
+        assert!(run(
+            &package,
+            "local buzzer = require('buzzer')\n\
+             local names = buzzer.list()\n\
+             assert(#names == 2 and names[1] == 'main' and names[2] == 'side')\n\
+             assert(buzzer.available('side') and not buzzer.available('missing'))\n\
+             assert(buzzer.start(1000))\n\
+             assert(buzzer.start(2000, 30, 'side'))\n\
+             assert(buzzer.stop('side'))\n\
+             local ok, err = buzzer.tone(440, 10, nil, 'missing')\n\
+             return ok == nil and err:find('missing') ~= nil",
+        ));
+        let events = |log: &Log<(u32, u8)>| {
+            critical_section::with(|section| log.borrow(section).borrow().clone())
+        };
+        assert_eq!(events(&main_events), [(1000, 50)]);
+        assert_eq!(events(&side_events), [(2000, 30), (0, 0)]);
+    }
+
+    #[test]
     fn a_board_without_buzzer_reports_none() {
-        let package = BuzzerPackage::<TestBuzzer>::new(None);
+        let package = BuzzerPackage::<TestBuzzer>::new(Vec::new());
         assert!(run(
             &package,
             "local buzzer = require('buzzer')\n\
@@ -437,7 +449,7 @@ mod tests {
 
     #[test]
     fn package_fits_the_vm_package_budget() {
-        let package = BuzzerPackage::new(Some(TestBuzzer::default()));
+        let package = BuzzerPackage::new(std::vec![("main", TestBuzzer::default())]);
         assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

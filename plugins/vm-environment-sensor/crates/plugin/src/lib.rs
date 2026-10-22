@@ -1,4 +1,4 @@
-//! Lua package for the Board's primary built-in environment sensor.
+//! Lua package for the Board's built-in environment sensors.
 
 #![no_std]
 
@@ -15,30 +15,37 @@ use barracuda_board_hal::environment::{
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
-    UserDataHandle, UserDataMethods, Variadic,
+    BoardDevices, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result,
+    UserData, UserDataHandle, UserDataMethods, Variadic,
 };
-use core::cell::RefCell;
 use portable_atomic::{AtomicBool, Ordering};
 use portable_atomic_util::Arc;
 
-/// Owns the Board's primary environment sensor and publishes it to Lua.
+/// Owns the Board's environment sensors and publishes them to Lua.
 #[barracuda_plugin::macros::plugin]
 pub struct EnvironmentSensorPlugin<Device> {
-    sensor: Option<Device>,
+    sensors: Vec<(&'static str, Device)>,
 }
 
 impl<Device> EnvironmentSensorPlugin<Device> {
-    /// Takes the built-in environment sensor from the generated Board
-    /// capability set.
+    /// Takes the built-in environment sensors from the generated Board capability
+    /// set, the primary one first.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
         Builtins: EnvironmentSensorPeripheral<EnvironmentSensor = Device>,
     {
         Self {
-            sensor: config::peripherals::ENVIRONMENT_SENSOR_DEVICE
-                .and_then(|instance| context.hal.peripherals.take_environment_sensor(instance)),
+            sensors: config::peripherals::ENVIRONMENT_SENSOR_DEVICES
+                .iter()
+                .filter_map(|(name, instance)| {
+                    context
+                        .hal
+                        .peripherals
+                        .take_environment_sensor(*instance)
+                        .map(|device| (*name, device))
+                })
+                .collect(),
         }
     }
 }
@@ -59,7 +66,7 @@ where
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
-            .register(EnvironmentPackage::new(self.sensor.take()))
+            .register(EnvironmentPackage::new(core::mem::take(&mut self.sensors)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
@@ -70,17 +77,14 @@ where
 const PACKAGE: &str = "environment";
 
 struct EnvironmentPackage<Device> {
-    /// Whether the Board has the device, which makes the package a capability.
-    present: bool,
-    sensor: Arc<critical_section::Mutex<RefCell<Option<Device>>>>,
+    sensors: BoardDevices<Device>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> EnvironmentPackage<Device> {
-    fn new(sensor: Option<Device>) -> Self {
+    fn new(sensors: Vec<(&'static str, Device)>) -> Self {
         Self {
-            present: sensor.is_some(),
-            sensor: Arc::new(critical_section::Mutex::new(RefCell::new(sensor))),
+            sensors: BoardDevices::new(sensors),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -92,30 +96,34 @@ where
     Device::Error: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available_sensor = Arc::clone(&self.sensor);
-        let available_active = Arc::clone(&self.active);
-        let open_sensor = Arc::clone(&self.sensor);
-        let open_active = Arc::clone(&self.active);
+        let available = (self.sensors.clone(), Arc::clone(&self.active));
+        let list = self.sensors.clone();
+        let open = (self.sensors.clone(), Arc::clone(&self.active));
         lua.register_lib(PACKAGE, move |package| {
-            package.register("available", move |(): ()| {
-                Some(Ok(available_active.load(Ordering::Acquire)
-                    && critical_section::with(|section| {
-                        available_sensor.borrow(section).borrow().is_some()
-                    })))
+            package.register("available", move |name: Variadic<String>| {
+                let (devices, active) = &available;
+                Some(Ok(active.load(Ordering::Acquire)
+                    && devices.is_available(name.first().map(String::as_str))))
             })?;
-            package.register_with("open", move |lua, (): ()| {
-                if !open_active.load(Ordering::Acquire) {
+            package.register_with("list", move |lua, (): ()| Some(list.list(lua)))?;
+            package.register_with("open", move |lua, name: Variadic<String>| {
+                let (devices, active) = &open;
+                if !active.load(Ordering::Acquire) {
                     return Some(Err(Error::runtime("environment package has been revoked")));
                 }
-                let sensor = critical_section::with(|section| {
-                    open_sensor.borrow(section).borrow_mut().take()
-                });
-                Some(match sensor {
-                    Some(sensor) => lua
-                        .create_userdata(EnvironmentHandle::new(sensor, Arc::clone(&open_active))),
-                    None => Err(Error::runtime(
-                        "built-in environment sensor is unavailable or already open",
-                    )),
+                let name = name.first().map(String::as_str);
+                Some(match devices.take(name) {
+                    Some(device) => {
+                        lua.create_userdata(EnvironmentHandle::new(device, Arc::clone(active)))
+                    }
+                    None => Err(Error::runtime(match name {
+                        Some(name) => alloc::format!(
+                            "environment sensor `{name}` is unavailable or already open"
+                        ),
+                        None => String::from(
+                            "built-in environment sensor is unavailable or already open",
+                        ),
+                    })),
                 })
             })
         })
@@ -132,11 +140,10 @@ where
     }
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
-        self.present
-            .then_some(barracuda_vm_plugin::PackageInterface::Stable {
-                version: 1,
-                purpose: "读取环境传感器",
-            })
+        (!self.sensors.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 2,
+            purpose: "读取环境传感器",
+        })
     }
 
     fn revoke(&self) {
@@ -306,7 +313,7 @@ mod tests {
 
     #[test]
     fn lua_lists_quantities_and_reads_named_values() {
-        let package = EnvironmentPackage::new(Some(TestSensor));
+        let package = EnvironmentPackage::new(std::vec![("air", TestSensor)]);
         let result = eval(
             &package,
             "local environment = require('environment')\n\
@@ -326,7 +333,7 @@ mod tests {
 
     #[test]
     fn lua_reports_an_unknown_quantity_and_a_closed_handle() {
-        let package = EnvironmentPackage::new(Some(TestSensor));
+        let package = EnvironmentPackage::new(std::vec![("air", TestSensor)]);
         let result = eval(
             &package,
             "local sensor = require('environment').open()\n\
@@ -343,7 +350,7 @@ mod tests {
 
     #[test]
     fn a_board_without_a_sensor_reports_unavailable() {
-        let package = EnvironmentPackage::<TestSensor>::new(None);
+        let package = EnvironmentPackage::<TestSensor>::new(std::vec::Vec::new());
         assert!(package.interface().is_none());
         let result = eval(
             &package,
@@ -358,7 +365,21 @@ mod tests {
 
     #[test]
     fn package_fits_the_vm_package_budget() {
-        let package = EnvironmentPackage::new(Some(TestSensor));
+        let package = EnvironmentPackage::new(std::vec![("air", TestSensor)]);
         assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
+
+    #[test]
+    fn lua_lists_and_opens_each_device_the_primary_by_default() {
+        let package = EnvironmentPackage::new(std::vec![("air", TestSensor), ("side", TestSensor)]);
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install package");
+
+        let result: bool = futures_lite::future::block_on(
+            lua.load("local devices = require('environment')\nlocal names = devices.list()\nlocal second <close> = devices.open(names[2])\nlocal first <close> = devices.open()\nlocal again, problem = devices.open(names[2])\nreturn #names == 2 and names[1] == 'air' and first:is_open() and second:is_open() and again == nil and problem ~= nil and not devices.available() and not devices.available('missing')")
+                .eval_async(),
+        )
+        .expect("open devices");
+        assert!(result);
     }
 }

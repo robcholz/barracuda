@@ -260,6 +260,20 @@ fn the_system_ui_takes_the_primary_screen_and_lua_the_rest() {
             Filled::Many(vec![device("panel", 0)])
         )]
     );
+    let selection = run(
+        root.path(),
+        &format!("{THREE_DISPLAYS}plugins:\n  display:\n    enabled: true\n"),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        claims(&selection, "display")[0].2,
+        Filled::Many(vec![
+            device("front", 1),
+            device("back-eink", 0),
+            device("status", 2)
+        ])
+    );
 }
 
 #[test]
@@ -275,9 +289,10 @@ fn wiring_overrides_defaults_and_is_checked() {
         claims(&selection, "ui")[0].2,
         Filled::One(Some(device("status", 2)))
     );
+    // The primary display comes first in the rest.
     assert_eq!(
         claims(&selection, "display")[0].2,
-        Filled::Many(vec![device("back-eink", 0), device("front", 1)])
+        Filled::Many(vec![device("front", 1), device("back-eink", 0)])
     );
 
     for (wiring, expected) in [

@@ -1,4 +1,4 @@
-//! Lua package for the Board's primary built-in vibration motor.
+//! Lua package for the Board's built-in vibration motors.
 
 #![no_std]
 
@@ -8,36 +8,45 @@ mod config {
     barracuda_plugin::config!();
 }
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use barracuda_board_hal::vibration::{Pulse, Strength, Vibration, VibrationPeripheral};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, LuaValue, Package, Result, Table, Variadic,
+    BoardDevices, Error, LentDevice, Lua, LuaPackage, LuaPackageRegistry, LuaValue, Package,
+    Result, Table, Variadic,
 };
-use core::cell::RefCell;
 use portable_atomic::{AtomicBool, Ordering};
 use portable_atomic_util::Arc;
 
 /// Most steps one pattern may hold.
 const MAX_STEPS: usize = 64;
 
-/// Owns the Board's primary vibration motor and publishes it to Lua.
+/// Owns the Board's vibration motors and publishes them to Lua.
 #[barracuda_plugin::macros::plugin]
 pub struct VibrationPlugin<Device> {
-    motor: Option<Device>,
+    motors: Vec<(&'static str, Device)>,
 }
 
 impl<Device> VibrationPlugin<Device> {
-    /// Takes the built-in motor from the generated Board capability set.
+    /// Takes the built-in motors from the generated Board capability set, the
+    /// primary one first.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
         Builtins: VibrationPeripheral<Vibration = Device>,
     {
         Self {
-            motor: config::peripherals::VIBRATION_DEVICE
-                .and_then(|instance| context.hal.peripherals.take_vibration(instance)),
+            motors: config::peripherals::VIBRATION_DEVICES
+                .iter()
+                .filter_map(|(name, instance)| {
+                    context
+                        .hal
+                        .peripherals
+                        .take_vibration(*instance)
+                        .map(|motor| (*name, motor))
+                })
+                .collect(),
         }
     }
 }
@@ -58,69 +67,40 @@ where
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
-            .register(VibrationPackage::new(self.motor.take()))
+            .register(VibrationPackage::new(core::mem::take(&mut self.motors)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
     }
 }
 
-/// The motor while no call uses it.
-type Slot<Device> = Arc<critical_section::Mutex<RefCell<Option<Device>>>>;
-
-/// The motor taken out of its slot for one call; it goes back when the call
-/// ends or is cancelled.
-struct Lent<Device> {
-    device: Option<Device>,
-    home: Slot<Device>,
-}
-
-impl<Device> Lent<Device> {
-    fn take(home: &Slot<Device>, active: &AtomicBool) -> Result<Self> {
-        if !active.load(Ordering::Acquire) {
-            return Err(Error::runtime("vibration package has been revoked"));
-        }
-        let device = critical_section::with(|section| home.borrow(section).borrow_mut().take());
-        match device {
-            Some(device) => Ok(Self {
-                device: Some(device),
-                home: Arc::clone(home),
-            }),
-            None => Err(Error::runtime(
-                "built-in vibration motor is unavailable or busy",
-            )),
-        }
+/// Lends the motor `name`, or the primary one, to one call; it goes back when
+/// the call ends or is cancelled.
+fn lend<Device>(
+    motors: &BoardDevices<Device>,
+    active: &AtomicBool,
+    name: Option<&str>,
+) -> Result<LentDevice<Device>> {
+    if !active.load(Ordering::Acquire) {
+        return Err(Error::runtime("vibration package has been revoked"));
     }
-
-    fn device(&mut self) -> Result<&mut Device> {
-        self.device
-            .as_mut()
-            .ok_or_else(|| Error::runtime("built-in vibration motor is unavailable or busy"))
-    }
-}
-
-impl<Device> Drop for Lent<Device> {
-    fn drop(&mut self) {
-        if let Some(device) = self.device.take() {
-            critical_section::with(|section| {
-                self.home.borrow(section).replace(Some(device));
-            });
-        }
-    }
+    motors.lend(name).ok_or_else(|| {
+        Error::runtime(match name {
+            Some(name) => alloc::format!("vibration motor `{name}` is unavailable or busy"),
+            None => String::from("built-in vibration motor is unavailable or busy"),
+        })
+    })
 }
 
 struct VibrationPackage<Device> {
-    /// Whether the Board has the device, which makes the package a capability.
-    present: bool,
-    motor: Slot<Device>,
+    motors: BoardDevices<Device>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> VibrationPackage<Device> {
-    fn new(motor: Option<Device>) -> Self {
+    fn new(motors: Vec<(&'static str, Device)>) -> Self {
         Self {
-            present: motor.is_some(),
-            motor: Arc::new(critical_section::Mutex::new(RefCell::new(motor))),
+            motors: BoardDevices::new(motors),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -186,6 +166,15 @@ fn integer(value: &LuaValue) -> Result<i64> {
     optional_integer(value)?.ok_or_else(|| Error::runtime("expected an integer argument"))
 }
 
+/// A motor name argument, or `None` for the primary motor when it is nil.
+fn device_name(value: LuaValue) -> Result<Option<String>> {
+    match value {
+        LuaValue::Nil => Ok(None),
+        LuaValue::String(name) => Ok(Some(name)),
+        _ => Err(Error::runtime("expected a vibration motor name")),
+    }
+}
+
 /// A table argument.
 fn table(value: LuaValue) -> Result<Table> {
     match value {
@@ -204,61 +193,61 @@ where
     Device::Error: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available = (Arc::clone(&self.motor), Arc::clone(&self.active));
-        let variable = (Arc::clone(&self.motor), Arc::clone(&self.active));
-        let set = (Arc::clone(&self.motor), Arc::clone(&self.active));
-        let stop = (Arc::clone(&self.motor), Arc::clone(&self.active));
-        let pulse = (Arc::clone(&self.motor), Arc::clone(&self.active));
-        let run = (Arc::clone(&self.motor), Arc::clone(&self.active));
+        let available = (self.motors.clone(), Arc::clone(&self.active));
+        let list = self.motors.clone();
+        let variable = (self.motors.clone(), Arc::clone(&self.active));
+        let set = (self.motors.clone(), Arc::clone(&self.active));
+        let stop = (self.motors.clone(), Arc::clone(&self.active));
+        let pulse = (self.motors.clone(), Arc::clone(&self.active));
+        let run = (self.motors.clone(), Arc::clone(&self.active));
         lua.register_lib("vibration", move |package| {
-            package.register("available", move |(): ()| {
-                let (slot, active) = &available;
+            package.register("available", move |name: Variadic<String>| {
+                let (motors, active) = &available;
                 Some(Ok(active.load(Ordering::Acquire)
-                    && critical_section::with(|section| {
-                        slot.borrow(section).borrow().is_some()
-                    })))
+                    && motors.is_available(name.first().map(String::as_str))))
             })?;
-            package.register("variable", move |(): ()| {
-                let (slot, active) = &variable;
+            package.register_with("list", move |lua, (): ()| Some(list.list(lua)))?;
+            package.register("variable", move |name: Variadic<String>| {
+                let (motors, active) = &variable;
                 Some(
-                    Lent::take(slot, active)
-                        .and_then(|mut lent| Ok(lent.device()?.has_variable_strength())),
+                    lend(motors, active, name.first().map(String::as_str))
+                        .map(|lent| lent.has_variable_strength()),
                 )
             })?;
-            package.register("set", move |percent: i64| {
-                let (slot, active) = &set;
+            package.register("set", move |values: Variadic<LuaValue>| {
+                let (motors, active) = &set;
                 Some((|| {
-                    let strength = strength(Some(percent))?;
-                    let mut lent = Lent::take(slot, active)?;
-                    lent.device()?.set(strength).map_err(motor_error)?;
+                    let [percent, name] = arguments(values, 1)?;
+                    let strength = strength(Some(integer(&percent)?))?;
+                    let name = device_name(name)?;
+                    let mut lent = lend(motors, active, name.as_deref())?;
+                    lent.set(strength).map_err(motor_error)?;
                     Ok(true)
                 })())
             })?;
-            package.register("stop", move |(): ()| {
-                let (slot, active) = &stop;
+            package.register("stop", move |name: Variadic<String>| {
+                let (motors, active) = &stop;
                 Some((|| {
-                    let mut lent = Lent::take(slot, active)?;
-                    lent.device()?.set(Strength::OFF).map_err(motor_error)?;
+                    let mut lent = lend(motors, active, name.first().map(String::as_str))?;
+                    lent.set(Strength::OFF).map_err(motor_error)?;
                     Ok(true)
                 })())
             })?;
             package.register_async("pulse", move |values: Variadic<LuaValue>| {
-                let (slot, active) = (Arc::clone(&pulse.0), Arc::clone(&pulse.1));
-                let parsed = arguments(values, 1).and_then(|[duration, percent]| {
+                let (motors, active) = (pulse.0.clone(), Arc::clone(&pulse.1));
+                let parsed = arguments(values, 1).and_then(|[duration, percent, name]| {
                     Ok((
                         Pulse::new(milliseconds(integer(&duration)?)?, 0),
                         strength(optional_integer(&percent)?)?,
+                        device_name(name)?,
                     ))
                 });
                 async move {
                     Some(
                         async {
-                            let (step, strength) = parsed?;
-                            let mut lent = Lent::take(&slot, &active)?;
-                            lent.device()?
-                                .pulse(&[step], strength)
-                                .await
-                                .map_err(motor_error)?;
+                            let (step, strength, name) = parsed?;
+                            let mut lent = lend(&motors, &active, name.as_deref())?;
+                            lent.pulse(&[step], strength).await.map_err(motor_error)?;
                             Ok(true)
                         }
                         .await,
@@ -266,22 +255,20 @@ where
                 }
             })?;
             package.register_async("pattern", move |values: Variadic<LuaValue>| {
-                let (slot, active) = (Arc::clone(&run.0), Arc::clone(&run.1));
-                let parsed = arguments(values, 1).and_then(|[steps, percent]| {
+                let (motors, active) = (run.0.clone(), Arc::clone(&run.1));
+                let parsed = arguments(values, 1).and_then(|[steps, percent, name]| {
                     Ok((
                         pattern(&table(steps)?)?,
                         strength(optional_integer(&percent)?)?,
+                        device_name(name)?,
                     ))
                 });
                 async move {
                     Some(
                         async {
-                            let (steps, strength) = parsed?;
-                            let mut lent = Lent::take(&slot, &active)?;
-                            lent.device()?
-                                .pulse(&steps, strength)
-                                .await
-                                .map_err(motor_error)?;
+                            let (steps, strength, name) = parsed?;
+                            let mut lent = lend(&motors, &active, name.as_deref())?;
+                            lent.pulse(&steps, strength).await.map_err(motor_error)?;
                             Ok(true)
                         }
                         .await,
@@ -302,11 +289,10 @@ where
     }
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
-        self.present
-            .then_some(barracuda_vm_plugin::PackageInterface::Stable {
-                version: 1,
-                purpose: "振动提醒",
-            })
+        (!self.motors.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 2,
+            purpose: "振动提醒",
+        })
     }
 
     fn revoke(&self) {
@@ -321,6 +307,7 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use core::cell::RefCell;
     use core::convert::Infallible;
     use std::vec::Vec;
 
@@ -377,7 +364,7 @@ mod tests {
     fn lua_sets_pulses_and_patterns() {
         let motor = TestMotor::default();
         let strengths = Arc::clone(&motor.strengths);
-        let package = VibrationPackage::new(Some(motor));
+        let package = VibrationPackage::new(std::vec![("main", motor)]);
         assert!(run(
             &package,
             "local vibration = require('vibration')\n\
@@ -395,8 +382,31 @@ mod tests {
     }
 
     #[test]
+    fn lua_names_a_motor_and_defaults_to_the_primary() {
+        let (main, side) = (TestMotor::default(), TestMotor::default());
+        let (main_log, side_log) = (Arc::clone(&main.strengths), Arc::clone(&side.strengths));
+        let package = VibrationPackage::new(std::vec![("main", main), ("side", side)]);
+        assert!(run(
+            &package,
+            "local vibration = require('vibration')\n\
+             local names = vibration.list()\n\
+             assert(#names == 2 and names[1] == 'main' and names[2] == 'side')\n\
+             assert(vibration.set(40))\n\
+             assert(vibration.set(70, 'side'))\n\
+             assert(vibration.pulse(10, nil, 'side'))\n\
+             local ok, err = vibration.stop('missing')\n\
+             return ok == nil and err:find('missing') ~= nil",
+        ));
+        let strengths = |log: &Arc<critical_section::Mutex<RefCell<Vec<u8>>>>| {
+            critical_section::with(|section| log.borrow(section).borrow().clone())
+        };
+        assert_eq!(strengths(&main_log), [40]);
+        assert_eq!(strengths(&side_log), [70, 100, 0]);
+    }
+
+    #[test]
     fn a_board_without_motor_reports_none() {
-        let package = VibrationPackage::<TestMotor>::new(None);
+        let package = VibrationPackage::<TestMotor>::new(Vec::new());
         assert!(run(
             &package,
             "local vibration = require('vibration')\n\
@@ -407,7 +417,7 @@ mod tests {
 
     #[test]
     fn package_fits_the_vm_package_budget() {
-        let package = VibrationPackage::new(Some(TestMotor::default()));
+        let package = VibrationPackage::new(std::vec![("main", TestMotor::default())]);
         assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

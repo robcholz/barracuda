@@ -1,4 +1,4 @@
-//! Lua package for the Board's primary built-in keyboard.
+//! Lua package for the Board's built-in keyboards.
 
 #![no_std]
 
@@ -8,15 +8,14 @@ mod config {
     barracuda_plugin::config!();
 }
 
-use alloc::{format, string::String};
+use alloc::{format, string::String, vec::Vec};
 use barracuda_board_hal::keyboard::{Key, KeyEvent, Keyboard, KeyboardPeripheral, Modifiers};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
-    UserDataHandle, UserDataMethods,
+    BoardDevices, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result,
+    UserData, UserDataHandle, UserDataMethods, Variadic,
 };
-use core::cell::RefCell;
 use embassy_time::{Duration, Instant, Timer};
 use portable_atomic::{AtomicBool, Ordering};
 use portable_atomic_util::Arc;
@@ -24,22 +23,31 @@ use portable_atomic_util::Arc;
 /// How often `wait` polls the keyboard.
 const WAIT_POLL: Duration = Duration::from_millis(10);
 
-/// Owns the Board's primary keyboard and publishes it to Lua.
+/// Owns the Board's keyboards and publishes them to Lua.
 #[barracuda_plugin::macros::plugin]
 pub struct KeyboardPlugin<Device> {
-    keyboard: Option<Device>,
+    keyboards: Vec<(&'static str, Device)>,
 }
 
 impl<Device> KeyboardPlugin<Device> {
-    /// Takes the built-in keyboard from the generated Board capability set.
+    /// Takes the built-in keyboards from the generated Board capability
+    /// set, the primary one first.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
         Builtins: KeyboardPeripheral<Keyboard = Device>,
     {
         Self {
-            keyboard: config::peripherals::KEYBOARD_DEVICE
-                .and_then(|instance| context.hal.peripherals.take_keyboard(instance)),
+            keyboards: config::peripherals::KEYBOARD_DEVICES
+                .iter()
+                .filter_map(|(name, instance)| {
+                    context
+                        .hal
+                        .peripherals
+                        .take_keyboard(*instance)
+                        .map(|device| (*name, device))
+                })
+                .collect(),
         }
     }
 }
@@ -60,7 +68,7 @@ where
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
-            .register(KeyboardPackage::new(self.keyboard.take()))
+            .register(KeyboardPackage::new(core::mem::take(&mut self.keyboards)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
@@ -68,17 +76,14 @@ where
 }
 
 struct KeyboardPackage<Device> {
-    /// Whether the Board has the device, which makes the package a capability.
-    present: bool,
-    keyboard: Arc<critical_section::Mutex<RefCell<Option<Device>>>>,
+    keyboards: BoardDevices<Device>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> KeyboardPackage<Device> {
-    fn new(keyboard: Option<Device>) -> Self {
+    fn new(keyboards: Vec<(&'static str, Device)>) -> Self {
         Self {
-            present: keyboard.is_some(),
-            keyboard: Arc::new(critical_section::Mutex::new(RefCell::new(keyboard))),
+            keyboards: BoardDevices::new(keyboards),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -90,31 +95,32 @@ where
     Device::Error: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available_keyboard = Arc::clone(&self.keyboard);
-        let available_active = Arc::clone(&self.active);
-        let open_keyboard = Arc::clone(&self.keyboard);
-        let open_active = Arc::clone(&self.active);
+        let available = (self.keyboards.clone(), Arc::clone(&self.active));
+        let list = self.keyboards.clone();
+        let open = (self.keyboards.clone(), Arc::clone(&self.active));
         lua.register_lib("keyboard", move |package| {
-            package.register("available", move |(): ()| {
-                Some(Ok(available_active.load(Ordering::Acquire)
-                    && critical_section::with(|section| {
-                        available_keyboard.borrow(section).borrow().is_some()
-                    })))
+            package.register("available", move |name: Variadic<String>| {
+                let (devices, active) = &available;
+                Some(Ok(active.load(Ordering::Acquire)
+                    && devices.is_available(name.first().map(String::as_str))))
             })?;
-            package.register_with("open", move |lua, (): ()| {
-                if !open_active.load(Ordering::Acquire) {
+            package.register_with("list", move |lua, (): ()| Some(list.list(lua)))?;
+            package.register_with("open", move |lua, name: Variadic<String>| {
+                let (devices, active) = &open;
+                if !active.load(Ordering::Acquire) {
                     return Some(Err(Error::runtime("keyboard package has been revoked")));
                 }
-                let keyboard = critical_section::with(|section| {
-                    open_keyboard.borrow(section).borrow_mut().take()
-                });
-                Some(match keyboard {
-                    Some(keyboard) => {
-                        lua.create_userdata(KeyboardHandle::new(keyboard, Arc::clone(&open_active)))
+                let name = name.first().map(String::as_str);
+                Some(match devices.take(name) {
+                    Some(device) => {
+                        lua.create_userdata(KeyboardHandle::new(device, Arc::clone(active)))
                     }
-                    None => Err(Error::runtime(
-                        "built-in keyboard is unavailable or already open",
-                    )),
+                    None => Err(Error::runtime(match name {
+                        Some(name) => {
+                            alloc::format!("keyboard `{name}` is unavailable or already open")
+                        }
+                        None => String::from("built-in keyboard is unavailable or already open"),
+                    })),
                 })
             })
         })
@@ -131,11 +137,10 @@ where
     }
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
-        self.present
-            .then_some(barracuda_vm_plugin::PackageInterface::Stable {
-                version: 1,
-                purpose: "读取键盘按键",
-            })
+        (!self.keyboards.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 2,
+            purpose: "读取键盘按键",
+        })
     }
 
     fn revoke(&self) {
@@ -331,7 +336,7 @@ mod tests {
 
     #[test]
     fn lua_reads_key_events() {
-        let package = KeyboardPackage::new(Some(keyboard()));
+        let package = KeyboardPackage::new(std::vec![("keys", keyboard())]);
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install package");
 
@@ -345,7 +350,21 @@ mod tests {
 
     #[test]
     fn package_fits_the_vm_package_budget() {
-        let package = KeyboardPackage::new(Some(keyboard()));
+        let package = KeyboardPackage::new(std::vec![("keys", keyboard())]);
         assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
+
+    #[test]
+    fn lua_lists_and_opens_each_device_the_primary_by_default() {
+        let package = KeyboardPackage::new(std::vec![("keys", keyboard()), ("side", keyboard())]);
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install package");
+
+        let result: bool = futures_lite::future::block_on(
+            lua.load("local devices = require('keyboard')\nlocal names = devices.list()\nlocal second <close> = devices.open(names[2])\nlocal first <close> = devices.open()\nlocal again, problem = devices.open(names[2])\nreturn #names == 2 and names[1] == 'keys' and first:is_open() and second:is_open() and again == nil and problem ~= nil and not devices.available() and not devices.available('missing')")
+                .eval_async(),
+        )
+        .expect("open devices");
+        assert!(result);
     }
 }

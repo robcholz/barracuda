@@ -4,12 +4,12 @@ sidebarTitle: "环境传感器"
 description: "用 `environment` Lua 包在 Lua 中读取开发板的温湿度、空气质量、光照和接近传感器。"
 ---
 
-基于开发板的主环境传感器安装 `environment` Lua 包。
+基于开发板的环境传感器安装 `environment` Lua 包，默认使用主环境传感器。
 
 - 插件 ID：`environment-sensor`
 - 依赖：`vm`
 - 设置：无
-- 上下文资源：外设槽位 `environment-sensor.device`（`primary`，可选）
+- 上下文资源：外设槽位 `environment-sensor.devices`（`*`）
 - 提供的能力：无
 - 所需能力：来自 `vm` 的 `LuaPackageRegistry`
 - Workflow：无
@@ -19,12 +19,13 @@ description: "用 `environment` Lua 包在 Lua 中读取开发板的温湿度、
 - 任务：无
 - 存储：无
 
-本插件只获取一次开发板的主 `EnvironmentSensor` 能力，并安装 `environment` Lua 包。环境传感器报告其芯片测量的所有环境量。有多颗这类芯片的产品，例如带 SEN55 和 SCD40 的 M5Stack AirQ，把它们作为一个设备呈现，所以脚本看到的是一个传感器，它的测量量是这些芯片的并集。I2C 的所有权、芯片启动和整数单位换算仍由所选的实现和生成的开发板 HAL 拥有。
+本插件获取开发板上没有被其他插件占用的每个 `EnvironmentSensor`，主环境传感器排在最前，并安装 `environment` Lua 包。环境传感器报告其芯片测量的所有环境量。有多颗这类芯片的产品，例如带 SEN55 和 SCD40 的 M5Stack AirQ，把它们作为一个设备呈现，所以脚本看到的是一个传感器，它的测量量是这些芯片的并集。I2C 的所有权、芯片启动和整数单位换算仍由所选的实现和生成的开发板 HAL 拥有。
 
 Lua API：
 
-- `environment.available() -> boolean`
-- `environment.open() -> handle`
+- `environment.list() -> { name, ... }`：各环境传感器在开发板上的名称，主环境传感器排在最前
+- `environment.available([name]) -> boolean`：指定名称的环境传感器（不给出时为主环境传感器）能否打开
+- `environment.open([name]) -> handle`：打开指定名称的环境传感器，不给出时打开主环境传感器
 - `handle:quantities() -> name, ...`：这个传感器报告的测量量
 - `handle:read(name, ...) -> value, ...`：一次采样；按顺序返回每个指定测量量的值，不给名称时返回所有报告的测量量
 - `handle:is_open() -> boolean`
@@ -50,6 +51,6 @@ local sensor <close> = environment.open()
 local temperature, co2 = sensor:read("temperature", "co2")
 ```
 
-当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 1。
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2。
 
-没有环境传感器的开发板报告不可用，`open` 返回 `nil, error`。这个只能移动的内置能力每次开机只允许一个句柄；显式关闭、词法 `<close>`、垃圾回收和插件被撤销都会阻止后续操作。本插件不做后台采样，也不拥有长时间运行的任务。
+没有环境传感器的开发板报告不可用，`open` 返回 `nil, error`。这个只能移动的内置能力每个设备每次开机只允许一个句柄；显式关闭、词法 `<close>`、垃圾回收和插件被撤销都会阻止后续操作。本插件不做后台采样，也不拥有长时间运行的任务。

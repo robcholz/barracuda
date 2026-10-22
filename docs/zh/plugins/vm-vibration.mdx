@@ -4,12 +4,12 @@ sidebarTitle: "Vibration"
 description: "用 `vibration` Lua 包在 Lua 中驱动开发板的振动马达。"
 ---
 
-基于开发板的主振动马达安装 `vibration` Lua 包。
+基于开发板的振动马达安装 `vibration` Lua 包，默认使用主马达。
 
 - 插件 ID：`vibration`
 - 依赖：`vm`
 - 设置：无
-- 上下文资源：外设槽位 `vibration.device`（`primary`，可选）
+- 上下文资源：外设槽位 `vibration.devices`（`*`）
 - 提供的能力：无
 - 所需能力：来自 `vm` 的 `LuaPackageRegistry`
 - Workflow：无
@@ -19,20 +19,23 @@ description: "用 `vibration` Lua 包在 Lua 中驱动开发板的振动马达�
 - 任务：无
 - 存储：无
 
-本插件只获取一次开发板的主 `Vibration` 能力，并安装 `vibration` Lua 包。它使用的是语义层面的外设能力，从不直接操作驱动马达的 PMIC 或扩展芯片。
+本插件获取开发板上没有被其他插件占用的每个 `Vibration` 马达，主马达排在最前，并安装 `vibration` Lua 包。它使用的是语义层面的外设能力，从不直接操作驱动马达的 PMIC 或扩展芯片。
 
 Lua API：
 
-- `vibration.available() -> boolean`
-- `vibration.variable() -> boolean` 报告强度是否可调
-- `vibration.set(strength) -> true` 让马达持续运行直到改变；0 表示停止
-- `vibration.stop() -> true`
-- `vibration.pulse(duration_ms[, strength]) -> true` 运行一次，停止后返回
-- `vibration.pattern(steps[, strength]) -> true` 运行 `\{ \{on_ms, off_ms\}, ... \}`，最多 64 步，结束后返回
+- `vibration.list() -> { name, ... }`：各马达在开发板上的名称，主马达排在最前
+- `vibration.available([name]) -> boolean`
+- `vibration.variable([name]) -> boolean` 报告强度是否可调
+- `vibration.set(strength[, name]) -> true` 让马达持续运行直到改变；0 表示停止
+- `vibration.stop([name]) -> true`
+- `vibration.pulse(duration_ms[, strength[, name]]) -> true` 运行一次，停止后返回
+- `vibration.pattern(steps[, strength[, name]]) -> true` 运行 `\{ \{on_ms, off_ms\}, ... \}`，最多 64 步，结束后返回
 
-`strength` 取 0 到 100 的百分比，默认 100；不能调节强度的马达在任何非零强度下都全力运行。强度大于 100，或在另一次调用运行期间调用，都会返回 `nil, error`。取消 `pulse` 或 `pattern` 会让马达停止。
+`name` 是 `list` 返回的开发板设备名；不给出时调用使用主马达，所以为单个马达写的脚本在有多个马达的开发板上无需修改。只想指定马达而不指定强度时，强度传 `nil`。
 
-当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 1。没有振动马达的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
+`strength` 取 0 到 100 的百分比，默认 100；不能调节强度的马达在任何非零强度下都全力运行。强度大于 100、名称不存在，或在同一个马达正在运行时调用，都会返回 `nil, error`。取消 `pulse` 或 `pattern` 会让马达停止。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2。没有振动马达的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
 
 ```lua
 local vibration = require("vibration")

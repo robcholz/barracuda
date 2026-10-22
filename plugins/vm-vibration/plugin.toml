@@ -3,4 +3,4 @@ depends-on = ["vm"]
 description = "Registers the built-in vibration-motor Lua package."
 
 [peripherals.vibration]
-device = { fill = "primary", optional = true }
+devices = "*"

@@ -4,12 +4,13 @@ sidebarTitle: "Environment Sensor"
 description: "Read the Board's temperature, humidity, air-quality, light, and proximity sensor from Lua with the `environment` package."
 ---
 
-Installs the `environment` Lua package over the Board's primary environment sensor.
+Installs the `environment` Lua package over the Board's environment sensors, the
+primary one by default.
 
 - Plugin ID: `environment-sensor`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: peripheral slot `environment-sensor.device` (`primary`, optional)
+- Context resources: peripheral slot `environment-sensor.devices` (`*`)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -19,8 +20,8 @@ Installs the `environment` Lua package over the Board's primary environment sens
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary `EnvironmentSensor` capability exactly
-once and installs the `environment` Lua package. An environment sensor reports
+This Plugin takes every `EnvironmentSensor` of the Board that no other Plugin claims,
+the primary one first, and installs the `environment` Lua package. An environment sensor reports
 whichever ambient quantities its chips measure. A product with several such
 chips, such as the M5Stack AirQ with its SEN55 and SCD40, presents them as one
 device, so a script sees one sensor with the union of their quantities. I2C
@@ -29,8 +30,12 @@ implementation and the generated Board HAL.
 
 Lua API:
 
-- `environment.available() -> boolean`
-- `environment.open() -> handle`
+- `environment.list() -> { name, ... }`: the Board names of the environment sensors, the
+  primary one first
+- `environment.available([name]) -> boolean`: whether the named environment sensor, or
+  the primary one, can be opened
+- `environment.open([name]) -> handle`: opens the named environment sensor, or the
+  primary one
 - `handle:quantities() -> name, ...`: the quantities this sensor reports
 - `handle:read(name, ...) -> value, ...`: one sample; the value of each named
   quantity in order, or of every reported quantity when no name is given
@@ -61,10 +66,10 @@ local temperature, co2 = sensor:read("temperature", "co2")
 ```
 
 While the Board has the device, the package declares a stable interface
-(`PackageInterface::Stable`), version 1.
+(`PackageInterface::Stable`), version 2.
 
 Boards without an environment sensor report unavailable, and `open` returns
 `nil, error`. The move-only
-built-in capability permits one handle per boot; explicit close, lexical
+built-in capability permits one handle per device and boot; explicit close, lexical
 `<close>`, collection, and Plugin revocation prevent further operations. The
 Plugin performs no background sampling and owns no long-running tasks.

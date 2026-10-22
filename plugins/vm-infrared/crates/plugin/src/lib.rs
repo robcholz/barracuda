@@ -1,4 +1,4 @@
-//! Lua package for the Board's primary built-in infrared transceiver.
+//! Lua package for the Board's built-in infrared transceivers.
 
 #![no_std]
 
@@ -13,9 +13,9 @@ use barracuda_board_hal::infrared::{Carrier, Infrared, InfraredPeripheral, NecCo
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, LuaValue, Package, Result, Table, Variadic,
+    BoardDevices, Error, LentDevice, Lua, LuaPackage, LuaPackageRegistry, LuaValue, Package,
+    Result, Table, Variadic,
 };
-use core::cell::RefCell;
 use embassy_time::{Duration, with_timeout};
 use portable_atomic::{AtomicBool, Ordering};
 use portable_atomic_util::Arc;
@@ -23,22 +23,31 @@ use portable_atomic_util::Arc;
 /// Most timings one raw send or receive carries.
 const MAX_TIMINGS: usize = 512;
 
-/// Owns the Board's primary infrared transceiver and publishes it to Lua.
+/// Owns the Board's infrared transceivers and publishes them to Lua.
 #[barracuda_plugin::macros::plugin]
 pub struct InfraredPlugin<Device> {
-    infrared: Option<Device>,
+    transceivers: Vec<(&'static str, Device)>,
 }
 
 impl<Device> InfraredPlugin<Device> {
-    /// Takes the built-in transceiver from the generated Board capability set.
+    /// Takes the built-in transceivers from the generated Board capability
+    /// set, the primary one first.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
         Builtins: InfraredPeripheral<Infrared = Device>,
     {
         Self {
-            infrared: config::peripherals::INFRARED_DEVICE
-                .and_then(|instance| context.hal.peripherals.take_infrared(instance)),
+            transceivers: config::peripherals::INFRARED_DEVICES
+                .iter()
+                .filter_map(|(name, instance)| {
+                    context
+                        .hal
+                        .peripherals
+                        .take_infrared(*instance)
+                        .map(|infrared| (*name, infrared))
+                })
+                .collect(),
         }
     }
 }
@@ -59,69 +68,42 @@ where
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
-            .register(InfraredPackage::new(self.infrared.take()))
+            .register(InfraredPackage::new(core::mem::take(
+                &mut self.transceivers,
+            )))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
     }
 }
 
-/// The transceiver while no call uses it.
-type Slot<Device> = Arc<critical_section::Mutex<RefCell<Option<Device>>>>;
-
-/// The transceiver taken out of its slot for one call; it goes back when the
-/// call ends or is cancelled.
-struct Lent<Device> {
-    device: Option<Device>,
-    home: Slot<Device>,
-}
-
-impl<Device> Lent<Device> {
-    fn take(home: &Slot<Device>, active: &AtomicBool) -> Result<Self> {
-        if !active.load(Ordering::Acquire) {
-            return Err(Error::runtime("infrared package has been revoked"));
-        }
-        let device = critical_section::with(|section| home.borrow(section).borrow_mut().take());
-        match device {
-            Some(device) => Ok(Self {
-                device: Some(device),
-                home: Arc::clone(home),
-            }),
-            None => Err(Error::runtime(
-                "built-in infrared transceiver is unavailable or busy",
-            )),
-        }
+/// Lends the transceiver `name`, or the primary one, to one call; it goes
+/// back when the call ends or is cancelled.
+fn lend<Device>(
+    transceivers: &BoardDevices<Device>,
+    active: &AtomicBool,
+    name: Option<&str>,
+) -> Result<LentDevice<Device>> {
+    if !active.load(Ordering::Acquire) {
+        return Err(Error::runtime("infrared package has been revoked"));
     }
-
-    fn device(&mut self) -> Result<&mut Device> {
-        self.device
-            .as_mut()
-            .ok_or_else(|| Error::runtime("built-in infrared transceiver is unavailable or busy"))
-    }
-}
-
-impl<Device> Drop for Lent<Device> {
-    fn drop(&mut self) {
-        if let Some(device) = self.device.take() {
-            critical_section::with(|section| {
-                self.home.borrow(section).replace(Some(device));
-            });
-        }
-    }
+    transceivers.lend(name).ok_or_else(|| {
+        Error::runtime(match name {
+            Some(name) => alloc::format!("infrared transceiver `{name}` is unavailable or busy"),
+            None => String::from("built-in infrared transceiver is unavailable or busy"),
+        })
+    })
 }
 
 struct InfraredPackage<Device> {
-    /// Whether the Board has the device, which makes the package a capability.
-    present: bool,
-    infrared: Slot<Device>,
+    transceivers: BoardDevices<Device>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> InfraredPackage<Device> {
-    fn new(infrared: Option<Device>) -> Self {
+    fn new(transceivers: Vec<(&'static str, Device)>) -> Self {
         Self {
-            present: infrared.is_some(),
-            infrared: Arc::new(critical_section::Mutex::new(RefCell::new(infrared))),
+            transceivers: BoardDevices::new(transceivers),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -203,6 +185,20 @@ fn table(value: LuaValue) -> Result<Table> {
     }
 }
 
+/// An integer argument that must be given.
+fn integer(value: &LuaValue) -> Result<i64> {
+    optional_integer(value)?.ok_or_else(|| Error::runtime("expected an integer argument"))
+}
+
+/// A transceiver name argument, or `None` for the primary one when it is nil.
+fn device_name(value: LuaValue) -> Result<Option<String>> {
+    match value {
+        LuaValue::Nil => Ok(None),
+        LuaValue::String(name) => Ok(Some(name)),
+        _ => Err(Error::runtime("expected an infrared transceiver name")),
+    }
+}
+
 fn infrared_error(error: impl core::fmt::Debug) -> Error {
     Error::runtime(alloc::format!("infrared operation failed: {error:?}"))
 }
@@ -216,34 +212,41 @@ where
     Device::Error: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available = (Arc::clone(&self.infrared), Arc::clone(&self.active));
-        let can_receive = (Arc::clone(&self.infrared), Arc::clone(&self.active));
-        let nec = (Arc::clone(&self.infrared), Arc::clone(&self.active));
-        let raw = (Arc::clone(&self.infrared), Arc::clone(&self.active));
-        let receive = (Arc::clone(&self.infrared), Arc::clone(&self.active));
+        let available = (self.transceivers.clone(), Arc::clone(&self.active));
+        let list = self.transceivers.clone();
+        let can_receive = (self.transceivers.clone(), Arc::clone(&self.active));
+        let nec = (self.transceivers.clone(), Arc::clone(&self.active));
+        let raw = (self.transceivers.clone(), Arc::clone(&self.active));
+        let receive = (self.transceivers.clone(), Arc::clone(&self.active));
         lua.register_lib("infrared", move |package| {
-            package.register("available", move |(): ()| {
-                let (slot, active) = &available;
+            package.register("available", move |name: Variadic<String>| {
+                let (transceivers, active) = &available;
                 Some(Ok(active.load(Ordering::Acquire)
-                    && critical_section::with(|section| {
-                        slot.borrow(section).borrow().is_some()
-                    })))
+                    && transceivers
+                        .is_available(name.first().map(String::as_str))))
             })?;
-            package.register("can_receive", move |(): ()| {
-                let (slot, active) = &can_receive;
-                Some(Lent::take(slot, active).and_then(|mut lent| Ok(lent.device()?.can_receive())))
+            package.register_with("list", move |lua, (): ()| Some(list.list(lua)))?;
+            package.register("can_receive", move |name: Variadic<String>| {
+                let (transceivers, active) = &can_receive;
+                Some(
+                    lend(transceivers, active, name.first().map(String::as_str))
+                        .map(|lent| lent.can_receive()),
+                )
             })?;
-            package.register_async("send_nec", move |(address, command): (i64, i64)| {
-                let (slot, active) = (Arc::clone(&nec.0), Arc::clone(&nec.1));
+            package.register_async("send_nec", move |values: Variadic<LuaValue>| {
+                let (slot, active) = (nec.0.clone(), Arc::clone(&nec.1));
+                let parsed = arguments(values, 2).and_then(|[address, command, name]| {
+                    Ok((
+                        nec_command(integer(&address)?, integer(&command)?)?,
+                        device_name(name)?,
+                    ))
+                });
                 async move {
                     Some(
                         async {
-                            let command = nec_command(address, command)?;
-                            let mut lent = Lent::take(&slot, &active)?;
-                            lent.device()?
-                                .send_nec(command)
-                                .await
-                                .map_err(infrared_error)?;
+                            let (command, name) = parsed?;
+                            let mut lent = lend(&slot, &active, name.as_deref())?;
+                            lent.send_nec(command).await.map_err(infrared_error)?;
                             Ok(true)
                         }
                         .await,
@@ -251,20 +254,20 @@ where
                 }
             })?;
             package.register_async("send_raw", move |values: Variadic<LuaValue>| {
-                let (slot, active) = (Arc::clone(&raw.0), Arc::clone(&raw.1));
-                let parsed = arguments(values, 1).and_then(|[list, frequency, duty]| {
+                let (slot, active) = (raw.0.clone(), Arc::clone(&raw.1));
+                let parsed = arguments(values, 1).and_then(|[list, frequency, duty, name]| {
                     Ok((
                         timings(&table(list)?)?,
                         carrier(optional_integer(&frequency)?, optional_integer(&duty)?)?,
+                        device_name(name)?,
                     ))
                 });
                 async move {
                     Some(
                         async {
-                            let (timings, carrier) = parsed?;
-                            let mut lent = Lent::take(&slot, &active)?;
-                            lent.device()?
-                                .send_raw(carrier, &timings)
+                            let (timings, carrier, name) = parsed?;
+                            let mut lent = lend(&slot, &active, name.as_deref())?;
+                            lent.send_raw(carrier, &timings)
                                 .await
                                 .map_err(infrared_error)?;
                             Ok(true)
@@ -274,7 +277,7 @@ where
                 }
             })?;
             package.register_async_with("receive", move |lua, values: Variadic<LuaValue>| {
-                let (slot, active) = (Arc::clone(&receive.0), Arc::clone(&receive.1));
+                let (slot, active) = (receive.0.clone(), Arc::clone(&receive.1));
                 // The table a raw frame comes back in is made before the wait,
                 // while the Lua context is at hand.
                 let table = lua.create_table();
@@ -282,7 +285,8 @@ where
                     Some(
                         async {
                             let table = table?;
-                            let [timeout_ms] = arguments(values, 0)?;
+                            let [timeout_ms, name] = arguments(values, 0)?;
+                            let name = device_name(name)?;
                             let timeout = match optional_integer(&timeout_ms)? {
                                 None => None,
                                 Some(milliseconds) => Some(Duration::from_millis(
@@ -291,8 +295,8 @@ where
                                     })?,
                                 )),
                             };
-                            let mut lent = Lent::take(&slot, &active)?;
-                            let device = lent.device()?;
+                            let mut lent = lend(&slot, &active, name.as_deref())?;
+                            let device = &mut *lent;
                             if !device.can_receive() {
                                 return Err(Error::runtime("the Board has no infrared receiver"));
                             }
@@ -350,11 +354,10 @@ where
     }
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
-        self.present
-            .then_some(barracuda_vm_plugin::PackageInterface::Stable {
-                version: 1,
-                purpose: "红外遥控收发",
-            })
+        (!self.transceivers.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 2,
+            purpose: "红外遥控收发",
+        })
     }
 
     fn revoke(&self) {
@@ -369,6 +372,7 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use core::cell::RefCell;
     use core::convert::Infallible;
     use std::vec::Vec;
 
@@ -450,7 +454,7 @@ mod tests {
             ..TestInfrared::default()
         };
         let sent = Arc::clone(&infrared.sent);
-        let package = InfraredPackage::new(Some(infrared));
+        let package = InfraredPackage::new(std::vec![("main", infrared)]);
         assert!(run(
             &package,
             "local ir = require('infrared')\n\
@@ -476,8 +480,35 @@ mod tests {
     }
 
     #[test]
+    fn lua_names_a_transceiver_and_defaults_to_the_primary() {
+        let (main, side) = (TestInfrared::default(), TestInfrared::default());
+        let (main_sent, side_sent) = (Arc::clone(&main.sent), Arc::clone(&side.sent));
+        let package = InfraredPackage::new(std::vec![("main", main), ("side", side)]);
+        assert!(run(
+            &package,
+            "local ir = require('infrared')\n\
+             local names = ir.list()\n\
+             assert(#names == 2 and names[1] == 'main' and names[2] == 'side')\n\
+             assert(ir.can_receive('side'))\n\
+             assert(ir.send_nec(1, 2))\n\
+             assert(ir.send_nec(3, 4, 'side'))\n\
+             assert(ir.send_raw({100}, nil, nil, 'side'))\n\
+             local ok, err = ir.send_nec(5, 6, 'missing')\n\
+             return ok == nil and err:find('missing') ~= nil",
+        ));
+        let sent = |log: &Log<(u32, Vec<u16>)>| {
+            critical_section::with(|section| log.borrow(section).borrow().clone())
+        };
+        assert_eq!(sent(&main_sent), [(0, std::vec![1, 2])]);
+        assert_eq!(
+            sent(&side_sent),
+            [(0, std::vec![3, 4]), (38_000, std::vec![100])]
+        );
+    }
+
+    #[test]
     fn a_board_without_infrared_reports_none() {
-        let package = InfraredPackage::<TestInfrared>::new(None);
+        let package = InfraredPackage::<TestInfrared>::new(Vec::new());
         assert!(run(
             &package,
             "local ir = require('infrared')\n\
@@ -488,7 +519,7 @@ mod tests {
 
     #[test]
     fn package_fits_the_vm_package_budget() {
-        let package = InfraredPackage::new(Some(TestInfrared::default()));
+        let package = InfraredPackage::new(std::vec![("main", TestInfrared::default())]);
         assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

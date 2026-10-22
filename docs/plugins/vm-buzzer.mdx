@@ -4,12 +4,13 @@ sidebarTitle: "Buzzer"
 description: "Play tones and melodies on the Board's buzzer from Lua with the `buzzer` package."
 ---
 
-Installs the `buzzer` Lua package over the Board's primary buzzer.
+Installs the `buzzer` Lua package over the Board's buzzers, the primary one
+by default.
 
 - Plugin ID: `buzzer`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: peripheral slot `buzzer.device` (`primary`, optional)
+- Context resources: peripheral slot `buzzer.devices` (`*`)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -19,28 +20,36 @@ Installs the `buzzer` Lua package over the Board's primary buzzer.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary `Buzzer` capability exactly once and
-installs the `buzzer` Lua package. It consumes the semantic peripheral and
-never reaches its PWM output.
+This Plugin takes every `Buzzer` of the Board that no other Plugin claims,
+the primary one first, and installs the `buzzer` Lua package. It consumes the
+semantic peripheral and never reaches its PWM output.
 
 Lua API:
 
-- `buzzer.available() -> boolean`
-- `buzzer.range() -> lowest_hz, highest_hz`
-- `buzzer.tone(frequency_hz, duration_ms[, volume]) -> true` sounds one tone
-  and returns when it ends; a zero frequency rests
-- `buzzer.play(notes[, volume]) -> true` plays `\{ \{frequency_hz, duration_ms\}, ... \}`,
-  at most 256 notes, and returns when the melody ends
-- `buzzer.start(frequency_hz[, volume]) -> true` sounds a tone until `stop`
-- `buzzer.stop() -> true`
+- `buzzer.list() -> { name, ... }`: the Board names of the buzzers, the
+  primary one first
+- `buzzer.available([name]) -> boolean`
+- `buzzer.range([name]) -> lowest_hz, highest_hz`
+- `buzzer.tone(frequency_hz, duration_ms[, volume[, name]]) -> true` sounds one
+  tone and returns when it ends; a zero frequency rests
+- `buzzer.play(notes[, volume[, name]]) -> true` plays
+  `\{ \{frequency_hz, duration_ms\}, ... \}`, at most 256 notes, and returns
+  when the melody ends
+- `buzzer.start(frequency_hz[, volume[, name]]) -> true` sounds a tone until
+  `stop`
+- `buzzer.stop([name]) -> true`
+
+`name` is a Board device name from `list`; without it a call uses the primary
+buzzer, so a script written for one buzzer runs unchanged on a Board with
+several. To name a buzzer without choosing a volume, pass `nil` for the volume.
 
 `volume` is 0 through 100 percent and defaults to 50. A frequency outside
-`range`, a volume above 100, or a call while another is playing returns
-`nil, error`. Cancelling `tone` or `play`, for example by stopping the script,
+`range`, a volume above 100, an unknown name, or a call while another is
+playing on the same buzzer returns `nil, error`. Cancelling `tone` or `play`, for example by stopping the script,
 silences the buzzer.
 
 While the Board has the device, the package declares a stable interface
-(`PackageInterface::Stable`), version 1. Boards without a buzzer still install
+(`PackageInterface::Stable`), version 2. Boards without a buzzer still install
 the package; `available` returns false and every other call returns
 `nil, error`. Plugin revocation prevents every further call.
 

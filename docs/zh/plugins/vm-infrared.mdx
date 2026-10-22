@@ -4,12 +4,12 @@ sidebarTitle: "Infrared"
 description: "用 `infrared` Lua 包在 Lua 中发送和接收红外遥控码。"
 ---
 
-基于开发板的主红外发射器安装 `infrared` Lua 包；开发板带有红外接收器时也一并使用它。
+基于开发板的红外发射器安装 `infrared` Lua 包，开发板带有红外接收器时也一并使用，默认使用主设备。
 
 - 插件 ID：`infrared`
 - 依赖：`vm`
 - 设置：无
-- 上下文资源：外设槽位 `infrared.device`（`primary`，可选）
+- 上下文资源：外设槽位 `infrared.devices`（`*`）
 - 提供的能力：无
 - 所需能力：来自 `vm` 的 `LuaPackageRegistry`
 - Workflow：无
@@ -19,19 +19,22 @@ description: "用 `infrared` Lua 包在 Lua 中发送和接收红外遥控码。
 - 任务：无
 - 存储：无
 
-本插件只获取一次开发板的主 `Infrared` 能力，并安装 `infrared` Lua 包。它使用的是语义层面的外设能力，从不直接操作背后的脉冲序列通道。
+本插件获取开发板上没有被其他插件占用的每个 `Infrared` 设备，主设备排在最前，并安装 `infrared` Lua 包。它使用的是语义层面的外设能力，从不直接操作背后的脉冲序列通道。
 
 Lua API：
 
-- `infrared.available() -> boolean`
-- `infrared.can_receive() -> boolean`
-- `infrared.send_nec(address, command) -> true` 在 38 kHz 载波上发送一条 NEC 命令；地址大于 255 时按扩展 NEC 发送
-- `infrared.send_raw(timings[, carrier_hz[, duty_percent]]) -> true` 发送 `\{mark_us, space_us, mark_us, ...\}`，最多 512 个时长；未给出时载波为 38000 Hz、占空比 33 %
-- `infrared.receive([timeout_ms]) -> kind, ...` 等待一帧：返回 `"nec", address, command`；按住按键时的重复码返回 `"repeat"`；其他协议返回 `"raw", timings`，timings 是以微秒为单位、从 mark 开始的表；超过 `timeout_ms` 时返回 `nil, "timeout"`
+- `infrared.list() -> { name, ... }`：各红外设备在开发板上的名称，主设备排在最前
+- `infrared.available([name]) -> boolean`
+- `infrared.can_receive([name]) -> boolean`
+- `infrared.send_nec(address, command[, name]) -> true` 在 38 kHz 载波上发送一条 NEC 命令；地址大于 255 时按扩展 NEC 发送
+- `infrared.send_raw(timings[, carrier_hz[, duty_percent[, name]]]) -> true` 发送 `\{mark_us, space_us, mark_us, ...\}`，最多 512 个时长；未给出时载波为 38000 Hz、占空比 33 %
+- `infrared.receive([timeout_ms[, name]]) -> kind, ...` 等待一帧：返回 `"nec", address, command`；按住按键时的重复码返回 `"repeat"`；其他协议返回 `"raw", timings`，timings 是以微秒为单位、从 mark 开始的表；超过 `timeout_ms` 时返回 `nil, "timeout"`
 
-参数超出范围、在没有接收器的开发板上调用 `receive`，或在另一次调用进行期间调用，都会返回 `nil, error`。取消 `receive` 会停止接收。
+`name` 是 `list` 返回的开发板设备名；不给出时调用使用主设备，所以为单个设备写的脚本在有多个设备的开发板上无需修改。只想指定设备而不给出它前面的可选参数时，这些参数传 `nil`。
 
-当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 1。没有红外设备的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
+参数超出范围、名称不存在、在没有接收器的设备上调用 `receive`，或在同一个设备正在进行另一次调用时调用，都会返回 `nil, error`。取消 `receive` 会停止接收。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2。没有红外设备的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
 
 ```lua
 local infrared = require("infrared")

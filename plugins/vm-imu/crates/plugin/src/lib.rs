@@ -1,4 +1,4 @@
-//! Lua package for the Board's primary built-in IMU.
+//! Lua package for the Board's built-in IMUs.
 
 #![no_std]
 
@@ -8,34 +8,42 @@ mod config {
     barracuda_plugin::config!();
 }
 
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use barracuda_board_hal::imu::{Imu, ImuDescriptor, ImuPeripheral, ImuSample};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
-    UserDataHandle, UserDataMethods,
+    BoardDevices, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result,
+    UserData, UserDataHandle, UserDataMethods, Variadic,
 };
-use core::cell::RefCell;
 use portable_atomic::{AtomicBool, Ordering};
 use portable_atomic_util::Arc;
 
-/// Owns the Board's primary IMU capability and publishes it to Lua.
+/// Owns the Board's IMUs and publishes them to Lua.
 #[barracuda_plugin::macros::plugin]
 pub struct ImuPlugin<Device> {
-    imu: Option<Device>,
+    imus: Vec<(&'static str, Device)>,
 }
 
 impl<Device> ImuPlugin<Device> {
-    /// Takes the built-in IMU from the generated Board capability set.
+    /// Takes the built-in IMUs from the generated Board capability
+    /// set, the primary one first.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
         Builtins: ImuPeripheral<Imu = Device>,
     {
         Self {
-            imu: config::peripherals::INERTIAL_MEASUREMENT_DEVICE
-                .and_then(|instance| context.hal.peripherals.take_imu(instance)),
+            imus: config::peripherals::INERTIAL_MEASUREMENT_DEVICES
+                .iter()
+                .filter_map(|(name, instance)| {
+                    context
+                        .hal
+                        .peripherals
+                        .take_imu(*instance)
+                        .map(|device| (*name, device))
+                })
+                .collect(),
         }
     }
 }
@@ -56,7 +64,7 @@ where
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
-            .register(ImuPackage::new(self.imu.take()))
+            .register(ImuPackage::new(core::mem::take(&mut self.imus)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
@@ -64,17 +72,14 @@ where
 }
 
 struct ImuPackage<Device> {
-    /// Whether the Board has the device, which makes the package a capability.
-    present: bool,
-    imu: Arc<critical_section::Mutex<RefCell<Option<Device>>>>,
+    imus: BoardDevices<Device>,
     active: Arc<AtomicBool>,
 }
 
 impl<Device> ImuPackage<Device> {
-    fn new(imu: Option<Device>) -> Self {
+    fn new(imus: Vec<(&'static str, Device)>) -> Self {
         Self {
-            present: imu.is_some(),
-            imu: Arc::new(critical_section::Mutex::new(RefCell::new(imu))),
+            imus: BoardDevices::new(imus),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -86,28 +91,28 @@ where
     Device::Error: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available_imu = Arc::clone(&self.imu);
-        let available_active = Arc::clone(&self.active);
-        let open_imu = Arc::clone(&self.imu);
-        let open_active = Arc::clone(&self.active);
+        let available = (self.imus.clone(), Arc::clone(&self.active));
+        let list = self.imus.clone();
+        let open = (self.imus.clone(), Arc::clone(&self.active));
         lua.register_lib("motion", move |package| {
-            package.register("available", move |(): ()| {
-                Some(Ok(available_active.load(Ordering::Acquire)
-                    && critical_section::with(|section| {
-                        available_imu.borrow(section).borrow().is_some()
-                    })))
+            package.register("available", move |name: Variadic<String>| {
+                let (devices, active) = &available;
+                Some(Ok(active.load(Ordering::Acquire)
+                    && devices.is_available(name.first().map(String::as_str))))
             })?;
-            package.register_with("open", move |lua, (): ()| {
-                if !open_active.load(Ordering::Acquire) {
+            package.register_with("list", move |lua, (): ()| Some(list.list(lua)))?;
+            package.register_with("open", move |lua, name: Variadic<String>| {
+                let (devices, active) = &open;
+                if !active.load(Ordering::Acquire) {
                     return Some(Err(Error::runtime("imu package has been revoked")));
                 }
-                let imu =
-                    critical_section::with(|section| open_imu.borrow(section).borrow_mut().take());
-                Some(match imu {
-                    Some(imu) => lua.create_userdata(ImuHandle::new(imu, Arc::clone(&open_active))),
-                    None => Err(Error::runtime(
-                        "built-in IMU is unavailable or already open",
-                    )),
+                let name = name.first().map(String::as_str);
+                Some(match devices.take(name) {
+                    Some(device) => lua.create_userdata(ImuHandle::new(device, Arc::clone(active))),
+                    None => Err(Error::runtime(match name {
+                        Some(name) => alloc::format!("IMU `{name}` is unavailable or already open"),
+                        None => String::from("built-in IMU is unavailable or already open"),
+                    })),
                 })
             })
         })
@@ -124,11 +129,10 @@ where
     }
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
-        self.present
-            .then_some(barracuda_vm_plugin::PackageInterface::Stable {
-                version: 2,
-                purpose: "读取动作传感器",
-            })
+        (!self.imus.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 3,
+            purpose: "读取动作传感器",
+        })
     }
 
     fn revoke(&self) {
@@ -299,7 +303,7 @@ mod tests {
 
     #[test]
     fn lua_reads_descriptor_and_sample() {
-        let package = ImuPackage::new(Some(TestImu));
+        let package = ImuPackage::new(std::vec![("body", TestImu)]);
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install package");
 
@@ -313,7 +317,21 @@ mod tests {
 
     #[test]
     fn package_fits_the_vm_package_budget() {
-        let package = ImuPackage::new(Some(TestImu));
+        let package = ImuPackage::new(std::vec![("body", TestImu)]);
         assert!(barracuda_vm_runtime::fits_package_budget(&package));
+    }
+
+    #[test]
+    fn lua_lists_and_opens_each_device_the_primary_by_default() {
+        let package = ImuPackage::new(std::vec![("body", TestImu), ("head", TestImu)]);
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install package");
+
+        let result: bool = futures_lite::future::block_on(
+            lua.load("local devices = require('motion')\nlocal names = devices.list()\nlocal second <close> = devices.open(names[2])\nlocal first <close> = devices.open()\nlocal again, problem = devices.open(names[2])\nreturn #names == 2 and names[1] == 'body' and first:is_open() and second:is_open() and again == nil and problem ~= nil and not devices.available() and not devices.available('missing')")
+                .eval_async(),
+        )
+        .expect("open devices");
+        assert!(result);
     }
 }

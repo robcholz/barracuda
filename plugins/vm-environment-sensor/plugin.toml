@@ -3,4 +3,4 @@ depends-on = ["vm"]
 description = "Registers the built-in environment-sensor Lua package."
 
 [peripherals.environment-sensor]
-device = { fill = "primary", optional = true }
+devices = "*"

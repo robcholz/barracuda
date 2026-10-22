@@ -4,13 +4,13 @@ sidebarTitle: "Infrared"
 description: "Send and receive infrared remote-control codes from Lua with the `infrared` package."
 ---
 
-Installs the `infrared` Lua package over the Board's primary infrared
-transmitter and, where the Board has one, its receiver.
+Installs the `infrared` Lua package over the Board's infrared transmitters
+and, where the Board has them, receivers, the primary one by default.
 
 - Plugin ID: `infrared`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: peripheral slot `infrared.device` (`primary`, optional)
+- Context resources: peripheral slot `infrared.devices` (`*`)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -20,30 +20,38 @@ transmitter and, where the Board has one, its receiver.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary `Infrared` capability exactly once and
-installs the `infrared` Lua package. It consumes the semantic peripheral and
+This Plugin takes every `Infrared` device of the Board that no other Plugin
+claims, the primary one first, and installs the `infrared` Lua package. It consumes the semantic peripheral and
 never reaches the pulse-train channels behind it.
 
 Lua API:
 
-- `infrared.available() -> boolean`
-- `infrared.can_receive() -> boolean`
-- `infrared.send_nec(address, command) -> true` sends one NEC command on the
-  38 kHz carrier; an address above 255 is sent as extended NEC
-- `infrared.send_raw(timings[, carrier_hz[, duty_percent]]) -> true` sends
-  `\{mark_us, space_us, mark_us, ...\}`, at most 512 timings, on a carrier of
-  38000 Hz and 33 % unless given
-- `infrared.receive([timeout_ms]) -> kind, ...` waits for one frame:
+- `infrared.list() -> { name, ... }`: the Board names of the infrared
+  devices, the primary one first
+- `infrared.available([name]) -> boolean`
+- `infrared.can_receive([name]) -> boolean`
+- `infrared.send_nec(address, command[, name]) -> true` sends one NEC command
+  on the 38 kHz carrier; an address above 255 is sent as extended NEC
+- `infrared.send_raw(timings[, carrier_hz[, duty_percent[, name]]]) -> true`
+  sends `\{mark_us, space_us, mark_us, ...\}`, at most 512 timings, on a
+  carrier of 38000 Hz and 33 % unless given
+- `infrared.receive([timeout_ms[, name]]) -> kind, ...` waits for one frame:
   `"nec", address, command`, `"repeat"` for a held button's repeat code, or
   `"raw", timings` for any other protocol, with the timings as a table of
   microseconds, mark first; after `timeout_ms` it returns `nil, "timeout"`
 
-A value out of range, a `receive` on a Board without a receiver, or a call
-while another is running returns `nil, error`. Cancelling a `receive` stops
+`name` is a Board device name from `list`; without it a call uses the primary
+device, so a script written for one device runs unchanged on a Board with
+several. To name a device without the optional values before it, pass `nil`
+for them.
+
+A value out of range, an unknown name, a `receive` on a device without a
+receiver, or a call while another is running on the same device returns
+`nil, error`. Cancelling a `receive` stops
 listening.
 
 While the Board has the device, the package declares a stable interface
-(`PackageInterface::Stable`), version 1. Boards without an infrared device
+(`PackageInterface::Stable`), version 2. Boards without an infrared device
 still install the package; `available` returns false and every other call
 returns `nil, error`. Plugin revocation prevents every further call.
 

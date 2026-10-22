@@ -24,8 +24,8 @@ Display 插件拥有所有未被其他插件占用的开发板显示屏，并把
 Lua API：
 
 - `display.available([name]) -> boolean`：指定名称的显示屏（未给出名称时为任意显示屏）是否仍然可以打开
-- `display.list() -> { name, ... }`：本插件的显示屏在开发板中的名称
-- `display.open([name]) -> handle`：打开指定名称的显示屏，或第一个仍可用的显示屏
+- `display.list() -> { name, ... }`：本插件的显示屏在开发板中的名称；本插件拥有主显示屏时，它排在最前
+- `display.open([name]) -> handle`：打开指定名称的显示屏，或按 `list` 顺序第一个仍可用的显示屏
 - `display.rgb565(red, green, blue) -> integer`：把 8 位通道打包成一个 RGB565 值
 - `handle:descriptor() -> width, height, pixel_format, technology`
 - `handle:draw_rgb565(x, y, width, height, pixels)`，其中 `pixels` 包含 `width * height` 个小端 16 位 RGB565 值，最多 256 KiB，例如 `string.pack('<I2', display.rgb565(255, 0, 0))` 表示一个红色像素

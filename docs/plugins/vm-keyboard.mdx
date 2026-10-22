@@ -4,12 +4,13 @@ sidebarTitle: "Keyboard"
 description: "Read key presses and typed characters from the Board's keyboard in Lua with the `keyboard` package."
 ---
 
-Installs the `keyboard` Lua package over the Board's primary keyboard.
+Installs the `keyboard` Lua package over the Board's keyboards, the
+primary one by default.
 
 - Plugin ID: `keyboard`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: peripheral slot `keyboard.device` (`primary`, optional)
+- Context resources: peripheral slot `keyboard.devices` (`*`)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -19,14 +20,18 @@ Installs the `keyboard` Lua package over the Board's primary keyboard.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary `Keyboard` capability exactly once and
-installs the `keyboard` Lua package. Matrix scanning or the key controller,
+This Plugin takes every `Keyboard` of the Board that no other Plugin claims,
+the primary one first, and installs the `keyboard` Lua package. Matrix scanning or the key controller,
 the keymap, and modifier state stay with the selected implementation.
 
 Lua API:
 
-- `keyboard.available() -> boolean`
-- `keyboard.open() -> handle`
+- `keyboard.list() -> { name, ... }`: the Board names of the keyboards, the
+  primary one first
+- `keyboard.available([name]) -> boolean`: whether the named keyboard, or
+  the primary one, can be opened
+- `keyboard.open([name]) -> handle`: opens the named keyboard, or the
+  primary one
 - `handle:read() -> key, pressed, text, modifiers, code`, or nothing when no
   key changed
 - `handle:wait(timeout_ms) -> key, pressed, text, modifiers, code`, or nothing
@@ -45,10 +50,10 @@ Fn 16 for the modifiers held after the event. `code` is the key's position,
 stable for one Board.
 
 While the Board has the device, the package declares a stable interface
-(`PackageInterface::Stable`), version 1.
+(`PackageInterface::Stable`), version 2.
 
 Boards without a keyboard report unavailable. The move-only built-in
-capability permits one handle per boot; explicit close, lexical `<close>`,
+capability permits one handle per device and boot; explicit close, lexical `<close>`,
 collection, and Plugin revocation prevent further operations. The Plugin
 performs no background scanning and owns no long-running tasks: a script
 that stops reading stops the keyboard's scan.

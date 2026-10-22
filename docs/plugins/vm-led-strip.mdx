@@ -4,12 +4,13 @@ sidebarTitle: "LED Strip"
 description: "Light the Board's LED strip from Lua with the `light` package."
 ---
 
-Installs the `light` Lua package over the Board's primary LED strip.
+Installs the `light` Lua package over the Board's LED strips, the primary one
+by default.
 
 - Plugin ID: `led-strip`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: peripheral slot `led-strip.device` (`primary`, optional)
+- Context resources: peripheral slot `led-strip.devices` (`*`)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -19,17 +20,23 @@ Installs the `light` Lua package over the Board's primary LED strip.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary `LedStrip` capability exactly
-once and installs the `light` Lua package. It consumes the semantic peripheral
+This Plugin takes every `LedStrip` of the Board that no other Plugin claims,
+the primary one first, and installs the `light` Lua package. It consumes the semantic peripheral
 capability and never exposes or reconstructs its SPI or RMT transport.
 
 Lua API:
 
-- `light.available() -> boolean`
-- `light.open() -> handle`
-- `light.fill(color) -> true` sets every pixel to `color`, `"#RRGGBB"` or
-  one of `white`, `warm`, `red`, `green`, `blue`, `off`, `black`
-- `light.off() -> true` turns every pixel off
+- `light.list() -> { name, ... }`: the Board names of the LED strips, the
+  primary one first
+- `light.available([name]) -> boolean`: whether the named LED strip, or
+  the primary one, can be opened
+- `light.open([name]) -> handle`: opens the named LED strip, or the
+  primary one
+- `light.fill(color[, name]) -> true` sets every pixel of the named strip, or
+  the primary one, to `color`, `"#RRGGBB"` or one of `white`, `warm`, `red`,
+  `green`, `blue`, `off`, `black`
+- `light.off([name]) -> true` turns every pixel of the named strip, or the
+  primary one, off
 - `handle:len() -> integer`
 - `handle:write(rgb_bytes)` where each pixel is three consecutive RGB bytes
 - `handle:clear()`
@@ -37,13 +44,14 @@ Lua API:
 - `handle:close()`
 
 While the Board has the device, the package declares a stable interface
-(`PackageInterface::Stable`), version 2; version 2 added `light.fill` and `light.off`.
+(`PackageInterface::Stable`), version 3; version 2 added `light.fill` and
+`light.off`, and version 3 added `light.list` and the strip names.
 
 `fill` and `off`, from version 2, use the strip while no handle holds it
 and return `nil, error` while one does.
 
 Boards without a built-in LED strip still install the package; `available`
-returns false and `open` returns `nil, error`. One handle is open at a time:
+returns false and `open` returns `nil, error`. One handle per strip is open at a time:
 explicit close, lexical `<close>`, and collection prevent further operations
 on it and give the strip back, so `open` works again; Plugin revocation
 prevents every further operation.

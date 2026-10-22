@@ -4,12 +4,12 @@ sidebarTitle: "Rotary Encoder"
 description: "用 `encoder` Lua 包在 Lua 中读取开发板旋钮转过的距离。"
 ---
 
-基于开发板的主旋转编码器安装 `encoder` Lua 包。
+基于开发板的旋转编码器安装 `encoder` Lua 包，默认使用主旋转编码器。
 
 - 插件 ID：`rotary-encoder`
 - 依赖：`vm`
 - 设置：无
-- 上下文资源：外设槽位 `rotary-encoder.device`（`primary`，可选）
+- 上下文资源：外设槽位 `rotary-encoder.devices`（`*`）
 - 提供的能力：无
 - 所需能力：来自 `vm` 的 `LuaPackageRegistry`
 - Workflow：无
@@ -19,12 +19,13 @@ description: "用 `encoder` Lua 包在 Lua 中读取开发板旋钮转过的距�
 - 任务：无
 - 存储：无
 
-本插件只获取一次开发板的主 `RotaryEncoder` 能力，并安装 `encoder` Lua 包。平台的脉冲计数器在硬件中计数编码器的边沿，因此两次读取之间的转动不会丢失。
+本插件获取开发板上没有被其他插件占用的每个 `RotaryEncoder`，主旋转编码器排在最前，并安装 `encoder` Lua 包。平台的脉冲计数器在硬件中计数编码器的边沿，因此两次读取之间的转动不会丢失。
 
 Lua API：
 
-- `encoder.available() -> boolean`
-- `encoder.open() -> handle`
+- `encoder.list() -> { name, ... }`：各旋转编码器在开发板上的名称，主旋转编码器排在最前
+- `encoder.available([name]) -> boolean`：指定名称的旋转编码器（不给出时为主旋转编码器）能否打开
+- `encoder.open([name]) -> handle`：打开指定名称的旋转编码器，不给出时打开主旋转编码器
 - `handle:position() -> edges`：自启动或上次复位以来的有符号位置
 - `handle:delta() -> edges`：自上次 `delta` 以来转过的边沿数
 - `handle:reset()`：把当前位置设为零
@@ -33,6 +34,6 @@ Lua API：
 
 位置以正交边沿计数，编码器两路信号的一个完整周期计 4。按下旋钮属于开发板 `buttons` 外设的一个按键，不属于这个包。
 
-当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 1。
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2。
 
-没有旋转编码器的开发板报告不可用。这个只能移动的内置能力每次开机只允许一个句柄；显式关闭、词法 `<close>`、垃圾回收和插件被撤销都会阻止后续操作。本插件不拥有长时间运行的任务。
+没有旋转编码器的开发板报告不可用。这个只能移动的内置能力每个设备每次开机只允许一个句柄；显式关闭、词法 `<close>`、垃圾回收和插件被撤销都会阻止后续操作。本插件不拥有长时间运行的任务。

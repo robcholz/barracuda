@@ -4,12 +4,13 @@ sidebarTitle: "Vibration"
 description: "Run the Board's vibration motor from Lua with the `vibration` package."
 ---
 
-Installs the `vibration` Lua package over the Board's primary vibration motor.
+Installs the `vibration` Lua package over the Board's vibration motors, the
+primary one by default.
 
 - Plugin ID: `vibration`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: peripheral slot `vibration.device` (`primary`, optional)
+- Context resources: peripheral slot `vibration.devices` (`*`)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -19,28 +20,38 @@ Installs the `vibration` Lua package over the Board's primary vibration motor.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary `Vibration` capability exactly once and
-installs the `vibration` Lua package. It consumes the semantic peripheral and
+This Plugin takes every `Vibration` motor of the Board that no other Plugin
+claims, the primary one first, and installs the `vibration` Lua package. It consumes the semantic peripheral and
 never reaches the PMIC or expander that drives the motor.
 
 Lua API:
 
-- `vibration.available() -> boolean`
-- `vibration.variable() -> boolean` reports whether the strength is adjustable
-- `vibration.set(strength) -> true` runs the motor until changed; 0 stops it
-- `vibration.stop() -> true`
-- `vibration.pulse(duration_ms[, strength]) -> true` runs the motor once and
-  returns when it stops
-- `vibration.pattern(steps[, strength]) -> true` runs
+- `vibration.list() -> { name, ... }`: the Board names of the motors, the
+  primary one first
+- `vibration.available([name]) -> boolean`
+- `vibration.variable([name]) -> boolean` reports whether the strength is
+  adjustable
+- `vibration.set(strength[, name]) -> true` runs the motor until changed; 0
+  stops it
+- `vibration.stop([name]) -> true`
+- `vibration.pulse(duration_ms[, strength[, name]]) -> true` runs the motor
+  once and returns when it stops
+- `vibration.pattern(steps[, strength[, name]]) -> true` runs
   `\{ \{on_ms, off_ms\}, ... \}`, at most 64 steps, and returns when it ends
 
+`name` is a Board device name from `list`; without it a call uses the primary
+motor, so a script written for one motor runs unchanged on a Board with
+several. To name a motor without choosing a strength, pass `nil` for the
+strength.
+
 `strength` is 0 through 100 percent and defaults to 100; a motor without
-strength control runs fully for any non-zero strength. A strength above 100
-or a call while another is running returns `nil, error`. Cancelling `pulse` or
+strength control runs fully for any non-zero strength. A strength above 100,
+an unknown name, or a call while another is running on the same motor returns
+`nil, error`. Cancelling `pulse` or
 `pattern` stops the motor.
 
 While the Board has the device, the package declares a stable interface
-(`PackageInterface::Stable`), version 1. Boards without a motor still install
+(`PackageInterface::Stable`), version 2. Boards without a motor still install
 the package; `available` returns false and every other call returns
 `nil, error`. Plugin revocation prevents every further call.
 
