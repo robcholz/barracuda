@@ -351,6 +351,14 @@ regulator's voltage field and enable bit beside them, and
 only their own M5PM1 or expander pins next to the display implementations
 that use the others.
 
+The M5Stack PowerHub's STM32G031 power co-processor relays four semantic
+peripherals, so four implementations share it the same way:
+`powerhub-buttons` reads only its button register, `powerhub-led-strip`
+writes only the LED supply, color, and brightness registers,
+`powerhub-power-monitor` only the metering enable and the battery registers,
+and `powerhub-rtc` only the clock registers. All four use
+`drivers/chips/m5powerhub`.
+
 ## Stable construction and runtime behavior
 
 `PeripheralImplementation` declares move-only `Bindings`, validated `Config`,

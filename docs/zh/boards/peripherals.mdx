@@ -225,6 +225,8 @@ pdm-i2s-stream:
 
 如果辅助芯片同时提供一个语义外设，就按寄存器共享，绝不让两个所有者拥有同一个寄存器。在 Core2、Tough、Station、StickC 和 CoreS3 上，`m5stack-pmic-display` 控制 AXP192 或 AXP2101 的稳压器，而 `axp192-axp2101-power-monitor` 通过自己的总线视图读取同一个 PMIC 的电池数据，只访问状态、ADC 和电量计寄存器。`axp192-axp2101-vibration` 在它们旁边只写 Core2 振动马达稳压器的电压字段和使能位，`m5ioe1-vibration` 只写 StopWatch 上 M5IOE1 的 PWM 通道及其引脚。`m5pm1-power-monitor` 和 `pi4ioe5v6408-buttons` 同样只配置自己的 M5PM1 或扩展芯片引脚，其他引脚仍归使用它们的显示实现。
 
+M5Stack PowerHub 的 STM32G031 电源协处理器转发四个语义外设，因此四个实现以同样方式共享它：`powerhub-buttons` 只读取它的按键寄存器，`powerhub-led-strip` 只写 LED 电源、颜色和亮度寄存器，`powerhub-power-monitor` 只写计量使能并读取电池寄存器，`powerhub-rtc` 只访问时钟寄存器。四者都使用 `drivers/chips/m5powerhub`。
+
 ## 稳定的构造和运行时行为
 
 `PeripheralImplementation` 声明只能移动（move-only）的 `Bindings`、经过校验的 `Config`、返回的语义 `Peripheral`，以及它的初始化 `Error`。它的 future 不装箱，并且是单态化的。

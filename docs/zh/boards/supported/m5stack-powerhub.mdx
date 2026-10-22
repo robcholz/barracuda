@@ -28,9 +28,14 @@ cargo image deploy
 
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
-| `buttons` | 按键 A（GPIO11） | — |
+| `buttons` | 按键 A（GPIO11）和按键 B（电源协处理器） | — |
+| `led-strip` | 8 个 RGB LED（WS2812C，电源协处理器） | [`light`](/zh/plugins/vm-led-strip) |
+| `power-monitor` | 电池电压和电流（电源协处理器） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `real-time-clock` | 实时时钟（RX8130CE，电源协处理器） | — |
 
-按键 B 经由 STM32 协处理器读取，没有声明。
+内部 I2C 总线（SDA `GPIO45`，SCL `GPIO48`，100 kHz）上 `50h` 的 STM32G031 电源协处理器转发实时时钟、电池监测、LED 和按键 B，这些器件位于它自己的总线上。每个设备只访问协处理器中属于自己的寄存器，用法与 M5Unified 相同；M5Stack 没有公开寄存器表。电池读数来自 PowerHub Kit 的 2S 电池组；没有电池组时，监测器报告没有电池。
+
+协处理器的端口电源开关（USB、Port A、Port C、RS485/CAN）、各端口的电压和电流读数，以及它背后的六个 INA226 监测器都没有声明。
 
 ## 可用引脚
 

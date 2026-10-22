@@ -12,14 +12,42 @@ toolchain:
 native-layout:
   artifact: partitions.csv
 peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # The STM32G031 power co-processor at 50h: M5Unified
+        # `_pin_table_i2c_ex_in` (internal SCL GPIO48, SDA GPIO45) and the
+        # board detection's `_probe_i2c_addr(45, 48, 0x50)`; M5Stack PowerHub
+        # pin map "SYS_SDA G45, SYS_SCL G48". M5Unified's `Power_Class` talks
+        # to it at 100 kHz (`i2c_freq`).
+        peripheral: I2C1
+        scl: GPIO48
+        sda: GPIO45
+        frequency-hz: 100000
   devices:
-    # Button A on GPIO11, active low with the Board's pull-up (M5Unified
-    # `M5Unified::update`). Button B is read through the STM32 co-processor
-    # and is not declared.
+    # The co-processor relays the RX8130CE, the INA226 monitors, the LEDs,
+    # and one button, which sit on its own bus (M5Stack PowerHub pin map);
+    # each implementation below touches only its own registers of it.
+    #
+    # Button A on GPIO11, active low with the Board's pull-up, and button B,
+    # bit 0 of the co-processor's register A0h (M5Unified `M5Unified::update`).
     buttons:
-      implementation: gpio-buttons
+      implementation: powerhub-buttons
       bindings:
-        button-1: GPIO11
+        i2c: internal-i2c
+        button-a: GPIO11
+    # The eight WS2812C LEDs (M5Unified `LED_PowerHub_Class`).
+    led-strip:
+      implementation: powerhub-led-strip
+      bindings: { i2c: internal-i2c }
+    # The battery input's voltage and current (M5Unified `Power_Class`).
+    power-monitor:
+      implementation: powerhub-power-monitor
+      bindings: { i2c: internal-i2c }
+    # The RX8130CE behind the co-processor (M5Unified `RTC_PowerHub_Class`).
+    real-time-clock:
+      implementation: powerhub-rtc
+      bindings: { i2c: internal-i2c }
 exposed-io:
   pins:
     # Port A (red) and Port C (blue): M5Stack PowerHub pin map; M5Unified
