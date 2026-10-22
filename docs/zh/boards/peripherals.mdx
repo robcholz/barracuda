@@ -129,6 +129,32 @@ SPI 上的 microSD 卡（`spi-sd-fat-removable-storage`）还会修改其设备�
 
 `spi-output` 是由 SPI 控制器输出的 LED 灯带数据线，它独占一个任何 `spi-device` 都没有使用的控制器。因此，除了 `spi-device` 使用的总线之外，开发板还需要为每个 `spi-output` 留出一个空闲的控制器。
 
+`rmt-output` 是遥控收发器（ESP RMT）的一个发送通道及其引脚，`rmt-input` 是一个接收通道。多个通道可以使用同一个收发器：组合只构建一次收发器，并把各自的通道以 `PulseOutput` 或 `PulseInput` 交给每个实现，它们自行输出或记录电平与时长组成的符号。因此，接在 `rmt-output` 上的 LED 灯带（`rmt-led-strip`）不占用 SPI 控制器，红外 LED 和接收器也使用这些通道的载波和毛刺滤波。每个平台列出可以发送和接收的通道（`platform.yml` 中的 `hal.rmt-channels`），`cargo board select` 会拒绝范围之外的通道。M5Stack StickS3 的红外发射器和接收器：
+
+~~~yaml
+rmt-output:
+  ir-transmit:
+    peripheral: RMT
+    channel: 0
+    pin: GPIO46
+rmt-input:
+  ir-receive:
+    peripheral: RMT
+    channel: 4
+    pin: GPIO42
+~~~
+
+`pwm-output` 是 PWM 控制器（ESP LEDC）的一个定时器、一个输出通道以及它们驱动的引脚。实现通过 `PwmFrequencyControl` 重新设置定时器频率，让无源蜂鸣器改变音高；占空比决定音量。控制器只构建一次并共享：开发板的 PWM 输出和运行时 PWM 池各自使用自己的定时器和通道，`cargo board select` 会拒绝使用池中定时器或通道的输出。M5Stack Dial 的蜂鸣器：
+
+~~~yaml
+pwm-output:
+  buzzer-tone:
+    peripheral: LEDC
+    timer: Timer1
+    channel: Channel1
+    pin: GPIO3
+~~~
+
 `analog-input` 是一个 ADC 通道：控制器和引脚。多个输入可以使用同一个控制器；组合会启用每个通道、只构建一次转换器，并把各自的通道交给每个实现，通道读取校准后的毫伏值（`AnalogVoltageInput`）。ESP32-S3-Korvo-2 的按键阶梯和电池：
 
 ~~~yaml
@@ -185,7 +211,7 @@ pdm-i2s-stream:
 
 在 M5Stack CoreP4X 上，`corep4x-dsi-display` 以同样的方式隐藏位于 `0x4F` 的 M5IOE1 扩展芯片（面板电源、复位和 PWM 背光）和位于 `0x6E` 的 M5PM1 电源控制器（5 V 升压），分别通过 `drivers/chips/m5ioe1` 和 `drivers/chips/m5pm1`。Paper Mono 的 `paper-mono-display` 用同样两个驱动控制面板电源、复位和前光；`paper-color-display` 和 `paper-diy-display` 用 M5PM1 控制电子墨水屏电源。
 
-如果辅助芯片同时提供一个语义外设，就按寄存器共享，绝不让两个所有者拥有同一个寄存器。在 Core2、Tough、Station、StickC 和 CoreS3 上，`m5stack-pmic-display` 控制 AXP192 或 AXP2101 的稳压器，而 `axp192-axp2101-power-monitor` 通过自己的总线视图读取同一个 PMIC 的电池数据，只访问状态、ADC 和电量计寄存器。`m5pm1-power-monitor` 和 `pi4ioe5v6408-buttons` 同样只配置自己的 M5PM1 或扩展芯片引脚，其他引脚仍归使用它们的显示实现。
+如果辅助芯片同时提供一个语义外设，就按寄存器共享，绝不让两个所有者拥有同一个寄存器。在 Core2、Tough、Station、StickC 和 CoreS3 上，`m5stack-pmic-display` 控制 AXP192 或 AXP2101 的稳压器，而 `axp192-axp2101-power-monitor` 通过自己的总线视图读取同一个 PMIC 的电池数据，只访问状态、ADC 和电量计寄存器。`axp192-axp2101-vibration` 在它们旁边只写 Core2 振动马达稳压器的电压字段和使能位，`m5ioe1-vibration` 只写 StopWatch 上 M5IOE1 的 PWM 通道及其引脚。`m5pm1-power-monitor` 和 `pi4ioe5v6408-buttons` 同样只配置自己的 M5PM1 或扩展芯片引脚，其他引脚仍归使用它们的显示实现。
 
 ## 稳定的构造和运行时行为
 

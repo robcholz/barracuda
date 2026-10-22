@@ -15,7 +15,7 @@ build:
       cargo install espup
       espup install --toolchain-version 1.98.1.0 --targets esp32s3,esp32p4 --esp-riscv-gcc
 hal:
-  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, i2s-stream, dsi-host, ethernet-rmii, wifi-coprocessor-sdio, power-hold]
+  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, i2s-stream, dsi-host, ethernet-rmii, wifi-coprocessor-sdio, power-hold, rmt-output, rmt-input]
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2, SPI3]
   runtime-uart-controllers: [UART1]
@@ -31,6 +31,10 @@ hal:
   sdmmc-slots:
     - slot: 0
       power: { channel: 4, millivolts: 3300 }
+  # RMT: channels 0-3 transmit and 4-7 receive (esp-hal `rmt`).
+  rmt-channels:
+    transmit: [0, 1, 2, 3]
+    receive: [4, 5, 6, 7]
 selection:
   board-chips:
     - esp32p4

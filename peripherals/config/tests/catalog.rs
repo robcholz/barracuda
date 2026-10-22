@@ -1768,3 +1768,87 @@ parameters: {}
     // Devices on one controller must agree on its lines.
     assert!(parse(&yaml("GPIO19")).is_err());
 }
+
+fn repository_board(name: &str, edit: impl FnOnce(String) -> String) -> String {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    edit(
+        fs::read_to_string(root.join("boards/configs").join(name).join("board.yml"))
+            .expect("repository Board"),
+    )
+}
+
+fn render_repository_board(yaml: &str) -> Result<String, GenerateError> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let board = parse(yaml).expect("valid repository Board");
+    let catalog = load_catalog(&root).expect("repository Implementation catalog");
+    let resolved = resolve_board(&board, &catalog).expect("resolved repository Board");
+    let platform = resolve_board_platform(
+        &root,
+        board.hardware().chip(),
+        board.toolchain().map(|toolchain| toolchain.target()),
+    )
+    .expect("Board Platform");
+    validate_platform_hal(&board, &resolved, &platform)?;
+    render_board_hal_for_platform(&board, &resolved, &platform)
+}
+
+#[test]
+fn pulse_train_channels_share_one_transceiver() {
+    let rust = render_repository_board(&repository_board("m5stack-capsule", |yaml| yaml))
+        .expect("generated Capsule HAL");
+    assert_valid_rust(&rust);
+    // The LED and the infrared LED take channels 0 and 1 of one RMT.
+    assert_eq!(rust.matches("hal::rmt_controller(").count(), 1);
+    assert!(rust.contains("hal::rmt_output(::barracuda_platform_selected::__platform::hal::rmt_channel!(shared_rmt_rmt, 0)"));
+    assert!(rust.contains("hal::rmt_output(::barracuda_platform_selected::__platform::hal::rmt_channel!(shared_rmt_rmt, 1)"));
+    assert!(rust.contains("type Infrared = InfraredPeripheral;"));
+    // The LED no longer holds an SPI controller: both join the runtime pool.
+    assert!(rust.contains("runtime_controller_spi3"));
+}
+
+#[test]
+fn a_pwm_output_shares_its_controller_with_the_runtime_pool() {
+    let rust = render_repository_board(&repository_board("m5stack-dial", |yaml| yaml))
+        .expect("generated Dial HAL");
+    assert_valid_rust(&rust);
+    assert_eq!(rust.matches("hal::pwm_controller!(").count(), 1);
+    assert!(rust.contains("hal::pwm_output(shared_pwm_ledc, ::barracuda_platform_selected::__platform::hal::runtime_pwm_timer!(Timer1)"));
+    assert!(rust.contains("hal::runtime_pwm_resource(shared_pwm_ledc, &["));
+    assert!(!rust.contains("runtime_pwm_controller_ledc"));
+    // The LED's supply switch starts off.
+    assert!(rust.contains("DigitalLevel::Low"));
+    assert!(rust.contains("type Buzzer = BuzzerPeripheral;"));
+    // Kinds the Dial lacks are still claimable, as nothing.
+    assert!(rust.contains("type Vibration = ::barracuda_board_hal::UnavailableVibration;"));
+}
+
+#[test]
+fn rmt_channels_and_pwm_timers_stay_within_what_the_platform_offers() {
+    // Channel 5 receives on the ESP32-S3; it cannot transmit.
+    let receive_channel = repository_board("m5stack-capsule", |yaml| {
+        yaml.replace(
+            "channel: 1\n        pin: GPIO4",
+            "channel: 5\n        pin: GPIO4",
+        )
+    });
+    assert!(matches!(
+        render_repository_board(&receive_channel),
+        Err(GenerateError::UnsupportedRmtChannel { channel: 5, .. })
+    ));
+    // Timer0 belongs to the runtime PWM pool.
+    let pool_timer = repository_board("m5stack-dial", |yaml| {
+        yaml.replace("timer: Timer1", "timer: Timer0")
+    });
+    assert!(matches!(
+        render_repository_board(&pool_timer),
+        Err(GenerateError::PwmOutputInRuntimePool { .. })
+    ));
+    // One channel serves one device.
+    let shared_channel = repository_board("m5stack-capsule", |yaml| {
+        yaml.replace(
+            "channel: 1\n        pin: GPIO4",
+            "channel: 0\n        pin: GPIO4",
+        )
+    });
+    assert!(parse(&shared_channel).is_err());
+}

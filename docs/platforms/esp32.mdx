@@ -94,6 +94,22 @@ these controllers on a Board's exposed pins:
 | `esp32c3` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 | `esp32c6` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 
+Every ESP32 Platform also drives the remote-control transceiver (the RMT)
+for peripherals: transmit channels (`rmt-output`) and receive channels
+(`rmt-input`) on any pin, which one transceiver at 80 MHz serves. An LED chain
+on a transmit channel takes no SPI controller, and an infrared LED gets its
+carrier from the channel. The ESP32's eight channels each transmit or
+receive; the ESP32-S3 and ESP32-P4 transmit on channels 0 to 3 and receive on
+4 to 7, the ESP32-C3 and ESP32-C6 transmit on 0 and 1 and receive on 2 and 3.
+The transceiver runs in esp-hal's blocking mode: an LED write keeps the CPU
+until the chain is out, and an awaited infrared transfer polls the channel
+every 500 µs.
+
+Every Platform but the ESP32-P4 drives a retunable PWM output for a buzzer
+(`pwm-output`): one LEDC timer and channel, at ten bits of duty. The LEDC
+controller is built once and shared with the runtime PWM pool, which keeps
+`Timer0` and `Channel0`; a Board's outputs take the others.
+
 Several `spi-device` declarations may name one SPI controller, such as a
 display and a microSD card on one bus: the controller is built once, and each
 device keeps its chip select and runs at its own clock. A transaction takes

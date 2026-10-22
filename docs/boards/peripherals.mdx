@@ -187,6 +187,48 @@ controller, takes a whole controller of its own: one that no `spi-device`
 names. A Board therefore needs a free controller for each `spi-output` beside
 the buses its `spi-device` entries use.
 
+An `rmt-output` is one transmit channel of the remote-control transceiver
+(the ESP RMT) and its pin, and an `rmt-input` one receive channel. Several
+channels may name one transceiver: the composition builds it once and hands
+each implementation its channel as a `PulseOutput` or `PulseInput`, which
+clock out or record level-and-duration symbols on their own. An LED chain on
+an `rmt-output` (`rmt-led-strip`) therefore takes no SPI controller, and an
+infrared LED and receiver use the same channels' carrier and glitch filter.
+Each Platform lists the channels that transmit and receive
+(`hal.rmt-channels` in `platform.yml`), and `cargo board select` refuses a
+channel outside them. The M5Stack StickS3's infrared transmitter and
+receiver:
+
+~~~yaml
+rmt-output:
+  ir-transmit:
+    peripheral: RMT
+    channel: 0
+    pin: GPIO46
+rmt-input:
+  ir-receive:
+    peripheral: RMT
+    channel: 4
+    pin: GPIO42
+~~~
+
+A `pwm-output` is one timer and one output channel of a PWM controller (the
+ESP LEDC) and the pin they drive. The implementation retunes the timer,
+through `PwmFrequencyControl`, so a passive buzzer changes pitch; the duty
+cycle sets its volume. The controller is built once and shared: Board PWM
+outputs and the runtime PWM pool each take their own timers and channels,
+and `cargo board select` refuses an output that names one of the pool's. The
+M5Stack Dial's buzzer:
+
+~~~yaml
+pwm-output:
+  buzzer-tone:
+    peripheral: LEDC
+    timer: Timer1
+    channel: Channel1
+    pin: GPIO3
+~~~
+
 An `analog-input` is one ADC channel: the controller and the pin. Several
 inputs may name one controller; the composition enables every channel, builds
 the converter once, and hands each implementation its channel, which reads
@@ -281,7 +323,10 @@ never by two owners of one register. On the Core2, Tough, Station, StickC,
 and CoreS3, `m5stack-pmic-display` drives the AXP192 or AXP2101 regulators,
 while `axp192-axp2101-power-monitor` reads the same PMIC's battery through its
 own view of the bus and touches only the status, ADC, and fuel-gauge
-registers. `m5pm1-power-monitor` and `pi4ioe5v6408-buttons` likewise configure
+registers. `axp192-axp2101-vibration` writes only the Core2 motor
+regulator's voltage field and enable bit beside them, and
+`m5ioe1-vibration` only the StopWatch's M5IOE1 PWM channel and its pin.
+`m5pm1-power-monitor` and `pi4ioe5v6408-buttons` likewise configure
 only their own M5PM1 or expander pins next to the display implementations
 that use the others.
 
