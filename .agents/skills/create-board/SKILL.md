@@ -75,10 +75,16 @@ plugins:
 
 ## 3. Add the native layout
 
-Copy the layout of a Board on the same chip and fit it to this Board's
-flash: `partitions.csv` (ESP-IDF, including both OTA slots) on ESP chips,
-`memory.x` on STM32, `file-layout.yml` on host Boards. The native file is the
-only layout source; never add a converter or a second table.
+Copy the layout of a Board on the same chip and flash size:
+`partitions.csv` (ESP-IDF) on ESP chips, `memory.x` on STM32,
+`file-layout.yml` on host Boards. The native file is the only layout source;
+never add a converter or a second table.
+
+An ESP table has `ota_0` alone on 4 MiB and 8 MiB of flash and `ota_0` plus
+`ota_1` on 16 MiB, never a `factory` app
+([ESP flash layout](../../../docs/boards/overview.mdx#esp-flash-layout)).
+Then pick a profile whose firmware fits the slot
+([Fitting the flash](../../../docs/boards/profiles.mdx#fitting-the-flash)).
 
 ## 4. Add missing hardware support
 

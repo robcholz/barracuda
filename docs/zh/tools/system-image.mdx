@@ -50,4 +50,6 @@ application:
     offset: 0
 ```
 
+`ota_0` 是每块 ESP 开发板的第一个应用槽位，在 Flash 小于 16 MiB 的开发板上也是唯一一个，所以同一组参数适用于一个平台的所有开发板；参见[开发板](/zh/boards/overview)中的 ESP Flash 布局。
+
 命令不经过 shell 执行。除了 `{chip}` 和 `{layout}`，它还可以使用 `{application}`（构建出的应用）、`{output}`（要写出的文件）和 `{flash-size}`（开发板的 `hardware.flash-size`；ESP 分区表则取能容纳它的最小闪存大小）。没有 release 驱动的平台（例如主机平台）不发布固件。

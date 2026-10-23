@@ -87,6 +87,10 @@ application:
     offset: 0
 ```
 
+`ota_0` is the first app slot on every ESP Board and the only one on Boards
+with less than 16 MiB of flash, so one argument list serves every Board of a
+Platform; see [ESP flash layout](/boards/overview#esp-flash-layout).
+
 A command runs without a shell. Besides `{chip}` and `{layout}`, it may name
 `{application}`, the built application; `{output}`, the file to write; and
 `{flash-size}`, the Board's `hardware.flash-size`, or for an ESP partition

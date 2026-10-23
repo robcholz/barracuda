@@ -46,7 +46,9 @@ tag 的格式是 `v<major>.<minor>.<patch>`。带后缀的 tag（例如 `v0.2.0-
 }
 ```
 
-ESP 的 `firmware.bin` 在 `ota_0` 内结束。它的填充部分会擦除 `otadata`，所以之前切换到 `ota_1` 的开发板会启动新的应用；它不碰 `kv_database` 和 `system`，所以更新会保留开发板的设置。填充部分也会擦除 `nvs`，Barracuda 不在那里保存任何东西。
+ESP 的 `firmware.bin` 在第一个应用槽位 `ota_0` 内结束：4 MiB 和 8 MiB Flash 的开发板只有这一个槽位，16 MiB 的开发板有两个（参见[开发板](/zh/boards/overview)中的 ESP Flash 布局）。它的填充部分会擦除 `otadata`，所以即使开发板之前切换到了 `ota_1`，bootloader 也会启动新的应用；它不碰 `kv_database` 和 `system`，所以更新会保留开发板的设置。填充部分也会擦除 `nvs`，Barracuda 不在那里保存任何东西。
+
+只有开发板的分区表与发布版本的相同时，安装页才会保留设置。改变了开发板分区表的发布版本（例如 4 MiB 和 8 MiB 开发板去掉 `ota_1` 的那一版）在装有旧版本的开发板上只能全新安装。
 
 ## 固件里的版本
 

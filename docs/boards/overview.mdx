@@ -100,7 +100,8 @@ runtime error, and a restart rebuilds the complete exposed surface.
 Physical layout remains in that Board bundle but uses the boot ecosystem's
 native format:
 
-- ESP32: `partitions.csv` (including OTA slots and ESP flags).
+- ESP32: `partitions.csv` (including the app slots and ESP flags; see
+  [ESP flash layout](#esp-flash-layout)).
 - STM32: `memory.x` and linker/Embassy Boot symbols.
 - macOS and Linux: `file-layout.yml` for its file-backed NOR image.
 
@@ -277,6 +278,30 @@ shared `indicator-led` implementation and explicitly exposes PC13 as the dynamic
 name `user-button`. The STM32 Platform HAL replaces its former Board-specific
 HAL crate. The name `user-button` identifies the physical PC13 pin; an
 application acquires its digital function at runtime.
+
+## ESP flash layout
+
+An ESP Board's `partitions.csv` keeps `nvs`, `otadata`, and `phy_init` below
+`0x20000`, its app slots from `0x20000`, and then `kv_database`, `system`, and
+`resources`. How many app slots it has depends on its flash:
+
+| Flash | App slots | Size of each |
+| --- | --- | --- |
+| 4 MiB | `ota_0` | 2816 KiB (`0x2c0000`) |
+| 8 MiB | `ota_0` | 6912 KiB (`0x6c0000`) |
+| 16 MiB | `ota_0`, `ota_1` | 7552 KiB (`0x760000`), less where the data regions are larger |
+
+On 4 MiB and 8 MiB Boards, `ota_0` takes the room a second slot would hold, so
+the firmware can be twice as large. The data regions keep their sizes and
+offsets.
+
+`cargo run`, the release image, and the browser installer write `ota_0` on
+every Board. The ESP-IDF bootloader starts `ota_0` while `otadata` is
+erased, as the release image leaves it; with one slot it starts `ota_0`
+whatever `otadata` holds. A table therefore has no `factory` app, which the
+bootloader would start instead, and its slots run from `ota_0` without a gap;
+the Platform build rejects any other table. Pick a
+[profile](/boards/profiles#fitting-the-flash) whose firmware fits the slot.
 
 ## M5Stack Board coverage
 

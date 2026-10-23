@@ -56,10 +56,17 @@ the same name:
 }
 ```
 
-An ESP `firmware.bin` ends inside `ota_0`. Its padding erases `otadata`, so a
-Board that had switched to `ota_1` boots the new app, and it leaves
-`kv_database` and `system` alone, so an update keeps the Board's settings.
-Barracuda keeps nothing in `nvs`, which the padding also erases.
+An ESP `firmware.bin` ends inside `ota_0`, the first app slot: the only one
+on Boards with 4 MiB or 8 MiB of flash, the first of two on 16 MiB Boards (see
+[ESP flash layout](/boards/overview#esp-flash-layout)). Its padding erases
+`otadata`, so the bootloader starts the new app even on a Board that had
+switched to `ota_1`, and it leaves `kv_database` and `system` alone, so an
+update keeps the Board's settings. Barracuda keeps nothing in `nvs`, which the
+padding also erases.
+
+The installer keeps settings only when the Board's partition table is the
+release's. A release that changes a Board's table, as dropping `ota_1` on 4 MiB
+and 8 MiB Boards did, gets a fresh install on Boards that hold an earlier one.
 
 ## The version in the firmware
 

@@ -65,7 +65,7 @@ exposed-io:
 
 物理布局仍然放在该开发板包中，但使用启动生态的原生格式：
 
-- ESP32：`partitions.csv`（包括 OTA 槽位和 ESP 标志）。
+- ESP32：`partitions.csv`（包括应用槽位和 ESP 标志；参见下文的 ESP Flash 布局）。
 - STM32：`memory.x` 以及链接器/Embassy Boot 符号。
 - macOS 和 Linux：`file-layout.yml`，用于其以文件为后端的 NOR 镜像。
 
@@ -167,6 +167,20 @@ cargo run
 使用同一模组的开发板仍然是各自独立的开发板包：随着开发板 schema 的扩展，把它们确切的固定接线添加到各自的开发板包中，而不是把一块开发套件当作所有基于该芯片的产品的别名。
 
 `nucleo-u5a5zj-q` 在 ESP 系列之外演示了同样的纯 YAML 组合。它的配置通过共享的 `indicator-led` 实现构建 PC7 上高电平有效的绿色 LD1，并把 PC13 显式暴露为动态 GPIO 名称 `user-button`。STM32 平台 HAL 取代了它以前开发板专用的 HAL crate。名称 `user-button` 标识物理引脚 PC13；应用在运行时获取它的数字功能。
+
+## ESP Flash 布局
+
+ESP 开发板的 `partitions.csv` 把 `nvs`、`otadata` 和 `phy_init` 放在 `0x20000` 以下，应用槽位从 `0x20000` 开始，之后是 `kv_database`、`system` 和 `resources`。应用槽位的数量取决于 Flash 大小：
+
+| Flash | 应用槽位 | 每个槽位的大小 |
+| --- | --- | --- |
+| 4 MiB | `ota_0` | 2816 KiB（`0x2c0000`） |
+| 8 MiB | `ota_0` | 6912 KiB（`0x6c0000`） |
+| 16 MiB | `ota_0`、`ota_1` | 7552 KiB（`0x760000`），数据分区更大的开发板上更小 |
+
+在 4 MiB 和 8 MiB 的开发板上，`ota_0` 占用了第二个槽位原本的空间，因此固件可以大一倍。数据分区的大小和偏移不变。
+
+`cargo run`、发布镜像和浏览器安装页在每块开发板上都写入 `ota_0`。`otadata` 被擦除时（发布镜像会擦除它），ESP-IDF bootloader 启动 `ota_0`；只有一个槽位时，无论 `otadata` 中是什么，它都启动 `ota_0`。因此分区表中没有 `factory` 应用（否则 bootloader 会改为启动它），槽位从 `ota_0` 开始连续编号；平台构建会拒绝其他分区表。请选择固件能装进槽位的 [profile](/zh/boards/profiles)。
 
 ## M5Stack 开发板覆盖范围
 
