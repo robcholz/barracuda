@@ -937,6 +937,15 @@ macro_rules! __barracuda_stm32_runtime_pwm_timer {
     };
 }
 
+/// Passes the TIM1 token through as the runtime PWM controller; unlike the
+/// ESP LEDC, the timer needs no shared state built at the Board call site.
+#[macro_export]
+macro_rules! __barracuda_stm32_pwm_controller {
+    ($timer:expr) => {
+        $timer
+    };
+}
+
 /// Resolves one TIM1 output channel declared by the Platform.
 #[macro_export]
 macro_rules! __barracuda_stm32_runtime_pwm_channel {
@@ -945,6 +954,8 @@ macro_rules! __barracuda_stm32_runtime_pwm_channel {
     };
 }
 
+#[doc(hidden)]
+pub use __barracuda_stm32_pwm_controller as pwm_controller;
 pub use __barracuda_stm32_runtime_adc_channel as runtime_adc_channel;
 #[doc(hidden)]
 pub use __barracuda_stm32_runtime_pwm_channel as runtime_pwm_channel;
