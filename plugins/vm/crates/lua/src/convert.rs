@@ -390,6 +390,39 @@ macro_rules! tuple_impl {
     };
 }
 
+/// A call's leading arguments `T`, a tuple, and one optional trailing
+/// argument a caller may leave out or pass as `nil`, such as the name of the
+/// device a call addresses.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Trailing<T, O>(pub T, pub Option<O>);
+
+macro_rules! trailing_impl {
+    ($count:expr; $(($type:ident, $value:ident, $offset:expr)),+) => {
+        impl<$($type: FromLua,)+ O: FromLua> FromLuaMulti for Trailing<($($type,)+), O> {
+            fn from_lua_multi(lua: &mut Thread, count: c_int) -> Result<Self> {
+                if count != $count && count != $count + 1 {
+                    return Err(Error::new(
+                        ErrorKind::Conversion,
+                        alloc::format!("expected {} or {} values", $count, $count + 1),
+                    ));
+                }
+                let first = lua.top() - count + 1;
+                $(let $value = $type::from_lua(lua, first + $offset)?;)+
+                let trailing = if count == $count {
+                    None
+                } else {
+                    Option::<O>::from_lua(lua, first + $count)?
+                };
+                Ok(Self(($($value,)+), trailing))
+            }
+        }
+    };
+}
+
+trailing_impl!(1; (A, a, 0));
+trailing_impl!(2; (A, a, 0), (B, b, 1));
+trailing_impl!(3; (A, a, 0), (B, b, 1), (C, c, 2));
+
 tuple_impl!(2; (A, a, 0), (B, b, 1));
 tuple_impl!(3; (A, a, 0), (B, b, 1), (C, c, 2));
 tuple_impl!(4; (A, a, 0), (B, b, 1), (C, c, 2), (D, d, 3));

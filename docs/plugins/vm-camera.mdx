@@ -21,7 +21,8 @@ code as the `camera` Lua package, the primary camera by default.
 - Storage: none
 
 This Plugin takes every `Camera` of the Board that no other Plugin claims,
-the primary one first, and installs the `camera` Lua package. OV2640/OV3660 control buses,
+the primary one first, and installs the `camera` Lua package. OV2640, OV3660,
+and GC0308 control buses,
 parallel capture, and DMA remain owned by the implementation and Platform HAL.
 
 Lua API:
@@ -33,8 +34,8 @@ Lua API:
 - `camera.open([name]) -> handle`: opens the named camera, or the
   primary one
 - `camera.snap([capacity[, name]]) -> bytes, pixel_format` takes one frame
-  with the named camera, or the primary one, with room for 128 KiB unless
-  given
+  with the named camera, or the primary one, with room for 128 KiB of JPEG,
+  or exactly one uncompressed frame, unless given
 - `handle:descriptor() -> width, height, pixel_format`
 - `handle:capture(capacity) -> bytes`
 - `handle:is_open() -> boolean`

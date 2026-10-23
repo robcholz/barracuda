@@ -83,19 +83,25 @@ cargo image deploy
 
 除 ESP32-P4 外，每个平台都为蜂鸣器提供可重新调频的 PWM 输出（`pwm-output`）：一个 LEDC 定时器和通道，占空比精度为十位。LEDC 控制器只构建一次，并与运行时 PWM 池共享；运行时 PWM 池保留 `Timer0` 和 `Channel0`，开发板的输出使用其他定时器和通道。
 
+`spi-bus` 还能通过控制器的命令阶段输出不足 8 位的时钟，并修改其时钟和模式（`SpiBusControl`）；ATOM Display 用它在 SPI 线上通过 JTAG 加载 FPGA。
+
 多个 `spi-device` 声明可以使用同一个 SPI 控制器，例如同一条总线上的显示屏和 microSD 卡：控制器只构建一次，每个设备保留自己的片选并以自己的时钟运行。每次传输只在很短的临界区内取出总线，因此长时间的显示传输不会屏蔽中断。
 
 ESP32、ESP32-S3、ESP32-C3 和 ESP32-C6 为外设采样模拟输入（`analog-input`）：开发板的每个输入写明 ADC 控制器和引脚，同一控制器上的输入共用一个转换器，实现以 11 dB 衰减读取校准后的毫伏值，最高约 3.1 V。电阻分压后的电池和电阻阶梯按键会用到它。
 
 ESP32 和 ESP32-S3 在一个 I2S0 控制器上驱动 PDM 麦克风和 I2S 功放（`pdm-i2s-stream`）。M5Stack 把麦克风的时钟和功放的字选择接在同一个引脚上，因此控制器在每次读取时切换到 PDM 接收（使用芯片的 PDM 转 PCM 滤波器），每次写入时切换到标准 I2S 发送；两侧都可以缺省。
 
-ESP32 还支持 I2S 音频流（`i2s-stream`，不带 MCLK 引脚：该芯片只能把主时钟输出到固定引脚）和 SD 主机 1 号槽位上的 SD/MMC 卡，其固定引脚是 CLK `GPIO14`、CMD `GPIO15` 和 D0 `GPIO2`。esp-hal 没有 ESP32 的摄像头接收器，因此它不支持 `camera-capture`。
+ESP32 还支持 I2S 音频流（`i2s-stream`，不带 MCLK 引脚：该芯片只能把主时钟输出到固定引脚）和 SD 主机 1 号槽位上的 SD/MMC 卡，其固定引脚是 CLK `GPIO14`、CMD `GPIO15` 和 D0 `GPIO2`。它不支持 `camera-capture`：esp-hal 没有 ESP32 的摄像头接收器，而 ESP32 的 I2S0 摄像头模式会把传感器的每个字节扩展成一个只能写入内部 RAM 的 32 位 DMA 字，因此一帧必须经由小缓冲区流式接收，并在中断时限内压缩，而平台没有这样的中断时限。
 
 ESP32、ESP32-S3 和 ESP32-C6 用脉冲计数器的单元 0 解码正交编码器（`pulse-counter`），计数两路信号的每个边沿。ESP32-C3 没有脉冲计数器，esp-hal 目前也没有 ESP32-P4 的 PCNT 驱动。
 
+ESP32-S3 通过 esp-hal 的中断驱动在 TWAI 控制器上驱动经典 CAN 总线（`twai`）。只有在应用选定位速率时控制器才接入总线；每次启动都按新的速率重新构建驱动，由 80 MHz 的 APB 时钟分频，每位 20 个时间量子（800 kbit/s 用 25 个，否则用 16 或 10 个），采样点约在 80 %，因此时钟能整除得到的任何速率都可用，范围从 5 kbit/s 到 1 Mbit/s。
+
 ESP32-S3 还支持四线 SPI 设备、SD/MMC 卡、摄像头采集、8 位并行输出（`parallel-output`，即 i8080 模式下的 LCD_CAM 控制器，可带或不带数据/命令线）、I2S 音频流和电容触摸。
 
-ESP32-P4 还支持 I2S 音频流（`i2s-stream`，与 ESP32-S3 使用同一个适配层）和 MIPI DSI 主机（`dsi-host`）：链路、位于 PSRAM、由 VDMA 扫描输出的 RGB565 帧缓冲、视频开始前和进行中的 DCS 命令，以及背光引脚。由于 esp-hal 没有 ESP32-P4 的 LEDC 驱动，背光只能开关。
+摄像头采集（`camera-capture`）由 LCD_CAM 控制器接收 8 位 DVP 传感器的数据。一次采集就是一帧：接收器等待一个 VSYNC 脉冲结束（按高电平有效处理），在目标缓冲区写满或下一个脉冲到来时停止。它的 DMA 存储（`dma-buffer-bytes`）来自大容量内存，开发板有 PSRAM 时即为 PSRAM。摄像头模组自带振荡器的开发板省略 `xclk` 和 `xclk-frequency-hz`，控制器不输出主时钟。接收器在每一步最多忙等一个帧周期，因此一次采集最多占用执行器两帧的时间。
+
+ESP32-P4 还支持 I2S 音频流（`i2s-stream`，与 ESP32-S3 使用同一个适配层）和 MIPI DSI 主机（`dsi-host`）：链路、位于 PSRAM、由 VDMA 扫描输出的 RGB565 帧缓冲、视频开始前和进行中的 DCS 命令，以及背光引脚。由于 esp-hal 没有 ESP32-P4 的 LEDC 驱动，背光只能开关。它没有 `mipi-csi` 摄像头主机：esp-hal 没有 ESP32-P4 的 CSI 接收器、CSI 桥或 ISP 驱动。
 
 ESP32-P4 还在它唯一的 SD 主机的槽位 0 上驱动 microSD 卡（`sdmmc-device`）。这个槽位的固定引脚是 `GPIO39` 到 `GPIO44`，由芯片的 LDO VO4 以 3.3 V 供电，所以开发板的存储卡声明 `slot: 0`、`power-channel: 4` 和 `power-millivolts: 3300`。SD 主机归平台所有：启动时平台只构建一次主机，把槽位 1 留给 Wi-Fi 协处理器，把槽位 0 交给开发板的存储卡。`cargo board select` 会拒绝位于槽位 1 或开发板协处理器所用槽位上的存储卡。存储卡以 4 线按它的 `frequency-hz` 运行，高于 25 MHz 时切换到高速模式，最高 40 MHz。它和协处理器按请求的先后轮流使用 SD 主机唯一的传输引擎，两者之间没有优先级。一次存储卡传输最多 4 KiB，所以大文件占住 Wi-Fi 的时间不会超过一次这样的传输，在 40 MHz 下约 0.2 ms。
 

@@ -516,6 +516,63 @@ peripherals:
     assert!(rust.contains("test_media::Implementation"));
 }
 
+#[test]
+fn renders_a_camera_receiver_without_a_master_clock() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-camera",
+        r#"
+id: test-camera
+api-version: 1
+peripheral: camera
+implementation:
+  package: test-camera
+  crate: test_camera
+  factory: "::{{crate}}::Implementation<{{binding.capture.type}}>"
+  bindings-expression: "::{{crate}}::Bindings::new({{binding.capture.value}})"
+  config-expression: "()"
+bindings:
+  capture:
+    kind: camera-capture
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: oscillator-camera-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    camera-capture:
+      camera:
+        peripheral: LCD_CAM
+        dma: DMA_CH0
+        pclk: GPIO4
+        vsync: GPIO5
+        href: GPIO6
+        data: [GPIO7, GPIO8, GPIO9, GPIO10, GPIO11, GPIO12, GPIO13, GPIO14]
+        dma-buffer-bytes: 153600
+  devices:
+    camera:
+      implementation: test-camera
+      bindings: { capture: camera }
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved camera Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated camera HAL");
+
+    assert_valid_rust(&rust);
+    assert!(rust.contains("hal::camera_capture_without_master_clock(bindings.camera_capture_controller, bindings.camera_capture_dma, bindings.camera_capture_pclk,"));
+    assert!(rust.contains("hal::camera_dma_buffer!(153600)"));
+    assert!(!rust.contains("camera_capture_xclk"));
+}
+
 const PARALLEL_MANIFEST: &str = r#"
 id: test-parallel
 api-version: 1
@@ -1591,7 +1648,10 @@ const CLAIMABLE_KINDS: &[(&str, &str, &str)] = &[
     ("buttons", "buttons_set", "Buttons"),
     ("buzzer", "buzzer_set", "Buzzer"),
     ("camera", "camera_set", "Camera"),
+    ("can", "can_set", "Can"),
+    ("digital-io", "digital_io_set", "DigitalIo"),
     ("display", "display_set", "Display"),
+    ("eeprom", "eeprom_set", "Eeprom"),
     (
         "environment-sensor",
         "environment_sensor_set",
@@ -1602,9 +1662,12 @@ const CLAIMABLE_KINDS: &[(&str, &str, &str)] = &[
     ("infrared", "infrared_set", "Infrared"),
     ("keyboard", "keyboard_set", "Keyboard"),
     ("led-strip", "led_strip_set", "LedStrip"),
+    ("lora", "lora_set", "Lora"),
+    ("nfc-reader", "nfc_reader_set", "NfcReader"),
     ("power-monitor", "power_monitor_set", "PowerMonitor"),
     ("real-time-clock", "real_time_clock_set", "RealTimeClock"),
     ("rotary-encoder", "rotary_encoder_set", "RotaryEncoder"),
+    ("secure-element", "secure_element_set", "SecureElement"),
     ("touch", "touch_set", "Touch"),
     ("vibration", "vibration_set", "Vibration"),
 ];
@@ -2084,4 +2147,66 @@ fn rmt_channels_and_pwm_timers_stay_within_what_the_platform_offers() {
         )
     });
     assert!(parse(&shared_channel).is_err());
+}
+
+#[test]
+fn renders_a_twai_controller_and_the_bus_kinds() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-can",
+        r#"
+id: test-can
+api-version: 1
+peripheral: can
+implementation:
+  package: test-can
+  crate: test_can
+  factory: "::{{crate}}::Implementation<{{binding.controller.type}}>"
+  bindings-expression: "{{binding.controller.value}}"
+  config-expression: "()"
+bindings:
+  controller:
+    kind: twai
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: plc-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    twai:
+      can-bus:
+        peripheral: TWAI0
+        tx: GPIO42
+        rx: GPIO43
+  devices:
+    can:
+      implementation: test-can
+      bindings: { controller: can-bus }
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved CAN Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated CAN HAL");
+
+    assert_valid_rust(&rust);
+    assert!(rust.contains(
+        "hal::twai_controller(bindings.can_controller_controller, bindings.can_controller_tx, bindings.can_controller_rx)"
+    ));
+    assert!(rust.contains("controller_binding_type!(TWAI0)"));
+    assert!(
+        rust.contains("impl ::barracuda_board_hal::can::CanPeripheral for GeneratedPeripherals")
+    );
+    // A Board without the other new kinds still answers for them.
+    assert!(rust.contains("type NfcReader = ::barracuda_board_hal::UnavailableNfcReader;"));
+    assert!(rust.contains("type Lora = ::barracuda_board_hal::UnavailableLora;"));
+    assert!(rust.contains("type DigitalIo = ::barracuda_board_hal::UnavailableDigitalIo;"));
+    assert!(board.peripheral_io().uses_controller("TWAI0"));
 }

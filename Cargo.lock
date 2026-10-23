@@ -789,6 +789,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-at24c-eeprom"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-at24c",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-atecc608-secure-element"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-atecc608",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-atom-s3-display"
 version = "0.1.0"
 dependencies = [
@@ -834,6 +856,16 @@ dependencies = [
  "barracuda-driver-aw9523",
  "barracuda-driver-axp2101",
  "barracuda-driver-es7210",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-aw9523-digital-io"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-aw9523",
  "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
@@ -905,6 +937,7 @@ dependencies = [
  "barracuda-peripheral",
  "critical-section",
  "embassy-executor",
+ "embassy-futures",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -937,9 +970,12 @@ dependencies = [
  "barracuda-adc-battery-power-monitor",
  "barracuda-adc-ladder-buttons",
  "barracuda-apa102-led-strip",
+ "barracuda-at24c-eeprom",
+ "barracuda-atecc608-secure-element",
  "barracuda-atom-s3-display",
  "barracuda-atom-s3r-display",
  "barracuda-aw88298-es7210-audio-codec",
+ "barracuda-aw9523-digital-io",
  "barracuda-axp192-axp2101-power-monitor",
  "barracuda-axp192-axp2101-vibration",
  "barracuda-bm8563-rtc",
@@ -960,6 +996,7 @@ dependencies = [
  "barracuda-es8388-es7210-audio-codec",
  "barracuda-es8389-audio-codec",
  "barracuda-ft5x06-touch",
+ "barracuda-gc0308-camera",
  "barracuda-gpio-buttons",
  "barracuda-gt911-touch",
  "barracuda-gt911-tt21100-touch",
@@ -970,9 +1007,11 @@ dependencies = [
  "barracuda-it8951-display",
  "barracuda-lm75b-environment-sensor",
  "barracuda-ltr553-environment-sensor",
+ "barracuda-m5hdmi-display",
  "barracuda-m5ioe1-vibration",
  "barracuda-m5pm1-power-monitor",
  "barracuda-m5stack-pmic-display",
+ "barracuda-mfrc522-nfc-reader",
  "barracuda-mipi-dbi-display",
  "barracuda-mipi-dbi-parallel-display",
  "barracuda-mipi-dbi-pi4ioe5v6408-display",
@@ -985,6 +1024,10 @@ dependencies = [
  "barracuda-paper-mono-display",
  "barracuda-pdm-i2s-audio-codec",
  "barracuda-pi4ioe5v6408-buttons",
+ "barracuda-powerhub-buttons",
+ "barracuda-powerhub-led-strip",
+ "barracuda-powerhub-power-monitor",
+ "barracuda-powerhub-rtc",
  "barracuda-pwm-buzzer",
  "barracuda-quadrature-rotary-encoder",
  "barracuda-rmt-infrared",
@@ -996,11 +1039,14 @@ dependencies = [
  "barracuda-sht4x-environment-sensor",
  "barracuda-spi-sd-fat-removable-storage",
  "barracuda-ssd1306-spi-display",
+ "barracuda-st25r3916-nfc-reader",
  "barracuda-st77916-qspi-display",
  "barracuda-stopwatch-co5300-display",
+ "barracuda-sx1262-pi4ioe5v6408-lora",
  "barracuda-tab5-dsi-display",
  "barracuda-tab5-sc202cs-camera",
  "barracuda-tab5-touch",
+ "barracuda-twai-can",
  "barracuda-ws2812-spi-led-strip",
 ]
 
@@ -1115,6 +1161,22 @@ dependencies = [
  "barracuda-vm-plugin",
  "barracuda-vm-runtime",
  "critical-section",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-can-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "embassy-time",
  "futures-lite",
  "portable-atomic",
  "portable-atomic-util",
@@ -1257,6 +1319,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-digital-io-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "embassy-time",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
 name = "barracuda-display-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1275,6 +1353,20 @@ dependencies = [
 
 [[package]]
 name = "barracuda-driver-apa102"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-at24c"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-atecc608"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
@@ -1435,6 +1527,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-gc0308"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-gt911"
 version = "0.1.0"
 dependencies = [
@@ -1478,6 +1577,13 @@ name = "barracuda-driver-ir-nec"
 version = "0.1.0"
 
 [[package]]
+name = "barracuda-driver-iso14443a"
+version = "0.1.0"
+dependencies = [
+ "embassy-futures",
+]
+
+[[package]]
 name = "barracuda-driver-it8951"
 version = "0.1.0"
 dependencies = [
@@ -1510,11 +1616,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-lt8618sx"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-driver-ltr553"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
 ]
+
+[[package]]
+name = "barracuda-driver-m5hdmi"
+version = "0.1.0"
 
 [[package]]
 name = "barracuda-driver-m5ioe1"
@@ -1528,6 +1645,23 @@ name = "barracuda-driver-m5pm1"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-m5powerhub"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-driver-mfrc522"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-iso14443a",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
 ]
 
 [[package]]
@@ -1608,6 +1742,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-driver-st25r3916"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-iso14443a",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+]
+
+[[package]]
 name = "barracuda-driver-st712x"
 version = "0.1.0"
 dependencies = [
@@ -1617,6 +1761,15 @@ dependencies = [
 [[package]]
 name = "barracuda-driver-st77916"
 version = "0.1.0"
+
+[[package]]
+name = "barracuda-driver-sx126x"
+version = "0.1.0"
+dependencies = [
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+]
 
 [[package]]
 name = "barracuda-driver-tca8418"
@@ -1647,6 +1800,21 @@ dependencies = [
  "barracuda-peripheral",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-eeprom-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -1751,6 +1919,19 @@ dependencies = [
  "barracuda-driver-aw9523",
  "barracuda-driver-ft5x06",
  "barracuda-peripheral",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-gc0308-camera"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-aw9523",
+ "barracuda-driver-axp2101",
+ "barracuda-driver-gc0308",
+ "barracuda-driver-ov3660",
+ "barracuda-peripheral",
+ "embassy-futures",
  "embedded-hal 1.0.0",
 ]
 
@@ -2221,6 +2402,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-lora-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "embassy-time",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
 name = "barracuda-ltr553-environment-sensor"
 version = "0.1.0"
 dependencies = [
@@ -2242,6 +2439,19 @@ dependencies = [
  "getset",
  "libm",
  "portable-atomic",
+]
+
+[[package]]
+name = "barracuda-m5hdmi-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-driver-lt8618sx",
+ "barracuda-driver-m5hdmi",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -2296,6 +2506,18 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "spin 0.10.1",
+]
+
+[[package]]
+name = "barracuda-mfrc522-nfc-reader"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-iso14443a",
+ "barracuda-driver-mfrc522",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -2385,6 +2607,22 @@ dependencies = [
  "barracuda-peripheral",
  "embassy-futures",
  "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-nfc-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "embassy-time",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2972,8 +3210,11 @@ dependencies = [
  "barracuda-builtin-app-workflow-plugin",
  "barracuda-buzzer-plugin",
  "barracuda-camera-plugin",
+ "barracuda-can-plugin",
  "barracuda-captive-portal-plugin",
+ "barracuda-digital-io-plugin",
  "barracuda-display-plugin",
+ "barracuda-eeprom-plugin",
  "barracuda-environment-sensor-plugin",
  "barracuda-files-plugin",
  "barracuda-gpio-plugin",
@@ -2991,12 +3232,15 @@ dependencies = [
  "barracuda-infrared-plugin",
  "barracuda-keyboard-plugin",
  "barracuda-led-strip-plugin",
+ "barracuda-lora-plugin",
  "barracuda-message-queue-plugin",
+ "barracuda-nfc-plugin",
  "barracuda-power-monitor-plugin",
  "barracuda-power-plugin",
  "barracuda-pwm-plugin",
  "barracuda-rotary-encoder-plugin",
  "barracuda-scheduler-plugin",
+ "barracuda-secure-element-plugin",
  "barracuda-sound-plugin",
  "barracuda-spi-plugin",
  "barracuda-system-fonts-plugin",
@@ -3057,6 +3301,48 @@ dependencies = [
  "barracuda-plugin-build",
  "critical-section",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "barracuda-powerhub-buttons"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-driver-m5powerhub",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-powerhub-led-strip"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-m5powerhub",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-powerhub-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-m5powerhub",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-powerhub-rtc"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-m5powerhub",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -3207,6 +3493,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-secure-element-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
 name = "barracuda-sht3x-environment-sensor"
 version = "0.1.0"
 dependencies = [
@@ -3280,6 +3581,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-st25r3916-nfc-reader"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-iso14443a",
+ "barracuda-driver-m5ioe1",
+ "barracuda-driver-st25r3916",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-st77916-qspi-display"
 version = "0.1.0"
 dependencies = [
@@ -3301,6 +3615,19 @@ dependencies = [
  "barracuda-peripheral",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-sx1262-pi4ioe5v6408-lora"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-pi4ioe5v6408",
+ "barracuda-driver-sx126x",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
 ]
 
 [[package]]
@@ -3484,6 +3811,15 @@ name = "barracuda-tracing"
 version = "0.1.0"
 dependencies = [
  "tracing",
+]
+
+[[package]]
+name = "barracuda-twai-can"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-peripheral",
+ "embassy-futures",
 ]
 
 [[package]]

@@ -7,8 +7,8 @@ use alloc::boxed::Box;
 use barracuda_board_hal::{
     AnalogErrorType, AnalogInput, AnalogVoltageInput, ConfigurableDigitalPin, DigitalLevel,
     InputConfig, OutputConfig, OutputDrive, Pull as BoardPull, RuntimeAnalogPlatform,
-    RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SharedI2cBus, SpiDeviceControl,
-    UartConfig, UartDataBits, UartParity, UartStopBits, UnavailableAnalogOutput,
+    RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SharedI2cBus, SpiBusControl,
+    SpiDeviceControl, UartConfig, UartDataBits, UartParity, UartStopBits, UnavailableAnalogOutput,
 };
 use core::cell::RefCell;
 use embassy_sync::blocking_mutex::CriticalSectionMutex;
@@ -77,7 +77,103 @@ pub type DigitalOutput = Output<'static>;
 /// Type-erased digital input consumed by peripheral implementations.
 pub type DigitalInput = Input<'static>;
 /// Blocking SPI bus used by statically selected devices.
-pub type SpiBus = Spi<'static, Blocking>;
+///
+/// It is esp-hal's blocking driver, which it dereferences to, and also
+/// clocks transfers shorter than a byte ([`SpiBusControl`]) through the
+/// controller's command phase, which a JTAG port driven through the
+/// controller needs.
+pub struct SpiBus(Spi<'static, Blocking>);
+
+impl core::ops::Deref for SpiBus {
+    type Target = Spi<'static, Blocking>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for SpiBus {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl embedded_hal::spi::ErrorType for SpiBus {
+    type Error = esp_hal::spi::Error;
+}
+
+impl embedded_hal::spi::SpiBus for SpiBus {
+    fn read(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::read(&mut self.0, words)
+    }
+
+    fn write(&mut self, words: &[u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::write(&mut self.0, words)
+    }
+
+    fn transfer(&mut self, read: &mut [u8], write: &[u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::transfer(&mut self.0, read, write)
+    }
+
+    fn transfer_in_place(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::transfer_in_place(&mut self.0, words)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::flush(&mut self.0)
+    }
+}
+
+impl SpiBusControl for SpiBus {
+    fn configure(&mut self, frequency_hz: u32, mode: EmbeddedMode) -> Result<(), Self::Error> {
+        let config = SpiConfig::default()
+            .with_frequency(Rate::from_hz(frequency_hz))
+            .with_mode(hal_spi_mode(mode));
+        self.0
+            .apply_config(&config)
+            .map_err(|_| esp_hal::spi::Error::Unsupported)
+    }
+
+    fn write_bits(&mut self, value: u8, bits: u8) -> Result<(), Self::Error> {
+        use esp_hal::spi::master::{Address, Command, DataMode};
+
+        let mode = DataMode::SingleTwoDataLines;
+        let shift = 8u8.saturating_sub(bits);
+        let mask = u8::MAX.checked_shr(u32::from(shift)).unwrap_or(0);
+        // The command phase sends its value from bit 7 down to bit 0, then
+        // bits 15 to 8 (ESP-IDF `spi_ll_set_command`, MSB first), so a
+        // command of up to eight bits starts at bit 7.
+        let aligned = u16::from(value & mask) << shift;
+        let command = match bits {
+            1 => Command::_1Bit(aligned, mode),
+            2 => Command::_2Bit(aligned, mode),
+            3 => Command::_3Bit(aligned, mode),
+            4 => Command::_4Bit(aligned, mode),
+            5 => Command::_5Bit(aligned, mode),
+            6 => Command::_6Bit(aligned, mode),
+            7 => Command::_7Bit(aligned, mode),
+            8 => Command::_8Bit(aligned, mode),
+            _ => return Err(esp_hal::spi::Error::Unsupported),
+        };
+        self.0
+            .half_duplex_write(mode, command, Address::None, 0, &[])?;
+        // A half-duplex transfer leaves the command phase enabled, and the
+        // full-duplex transfers that follow do not clear it; an empty
+        // transfer without a command, which clocks nothing, does.
+        self.0
+            .half_duplex_write(mode, Command::None, Address::None, 0, &[])
+    }
+}
+
+/// Converts an `embedded-hal` SPI mode to esp-hal's.
+fn hal_spi_mode(mode: EmbeddedMode) -> HalSpiMode {
+    match (mode.polarity, mode.phase) {
+        (Polarity::IdleLow, Phase::CaptureOnFirstTransition) => HalSpiMode::_0,
+        (Polarity::IdleLow, Phase::CaptureOnSecondTransition) => HalSpiMode::_1,
+        (Polarity::IdleHigh, Phase::CaptureOnFirstTransition) => HalSpiMode::_2,
+        (Polarity::IdleHigh, Phase::CaptureOnSecondTransition) => HalSpiMode::_3,
+    }
+}
 
 /// Standards-compliant single-owner SPI device.
 ///
@@ -833,12 +929,7 @@ impl RuntimePlatform for RuntimeAdapter {
         frequency_hz: u32,
         mode: EmbeddedMode,
     ) -> Result<Self::SpiBus, Self::SpiError> {
-        let mode = match (mode.polarity, mode.phase) {
-            (Polarity::IdleLow, Phase::CaptureOnFirstTransition) => HalSpiMode::_0,
-            (Polarity::IdleLow, Phase::CaptureOnSecondTransition) => HalSpiMode::_1,
-            (Polarity::IdleHigh, Phase::CaptureOnFirstTransition) => HalSpiMode::_2,
-            (Polarity::IdleHigh, Phase::CaptureOnSecondTransition) => HalSpiMode::_3,
-        };
+        let mode = hal_spi_mode(mode);
         let bus = Spi::new(
             controller,
             SpiConfig::default()
@@ -1481,12 +1572,13 @@ pub fn spi_bus(
     mosi: impl PeripheralOutput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<SpiBus, SpiConfigError> {
-    Ok(Spi::new(
+    let bus = Spi::new(
         spi,
         SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
     )?
     .with_sck(sck)
-    .with_mosi(mosi))
+    .with_mosi(mosi);
+    Ok(SpiBus(bus))
 }
 
 /// Constructs one data-only SPI waveform output from a Platform-owned controller.
@@ -1495,11 +1587,12 @@ pub fn spi_output(
     data: impl PeripheralOutput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<SpiBus, SpiConfigError> {
-    Ok(Spi::new(
+    let bus = Spi::new(
         spi,
         SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
     )?
-    .with_mosi(data))
+    .with_mosi(data);
+    Ok(SpiBus(bus))
 }
 
 /// Constructs one receive-only SPI bus from Board-selected resources.
@@ -1509,12 +1602,13 @@ pub fn spi_bus_rx_only(
     miso: impl PeripheralInput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<SpiBus, SpiConfigError> {
-    Ok(Spi::new(
+    let bus = Spi::new(
         spi,
         SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
     )?
     .with_sck(sck)
-    .with_miso(miso))
+    .with_miso(miso);
+    Ok(SpiBus(bus))
 }
 
 /// Constructs one full-duplex SPI bus from Board-selected resources.
@@ -1525,13 +1619,14 @@ pub fn spi_bus_full_duplex(
     miso: impl PeripheralInput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<SpiBus, SpiConfigError> {
-    Ok(Spi::new(
+    let bus = Spi::new(
         spi,
         SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
     )?
     .with_sck(sck)
     .with_mosi(mosi)
-    .with_miso(miso))
+    .with_miso(miso);
+    Ok(SpiBus(bus))
 }
 
 /// Constructs one receive-only SPI device from Board-selected resources.
@@ -1598,7 +1693,7 @@ pub fn spi_device_three_wire(
     spi.apply_config(&write_config)?;
     let chip_select = digital_output(chip_select, DigitalLevel::High);
     let bus = ThreeWireSpiBus {
-        spi,
+        spi: SpiBus(spi),
         write_config,
         read_config,
     };
@@ -1609,12 +1704,12 @@ pub fn spi_device_three_wire(
 }
 
 fn exclusive_spi_device(
-    bus: SpiBus,
+    bus: Spi<'static, Blocking>,
     chip_select: impl OutputPin + 'static,
     frequency_hz: u32,
 ) -> SpiDevice {
     let chip_select = digital_output(chip_select, DigitalLevel::High);
-    match ExclusiveDevice::new(bus, chip_select, Delay::new()) {
+    match ExclusiveDevice::new(SpiBus(bus), chip_select, Delay::new()) {
         Ok(device) => SpiDevice {
             device,
             config: SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),

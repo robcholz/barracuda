@@ -17,8 +17,8 @@ use barracuda_plugin::manager::{
 use barracuda_workflow_plugin::WorkflowActionRegistry;
 
 pub use barracuda_lua::{
-    Bytes, Context, Error, Function, Lua, LuaValue, MetaMethod, Package, Result, Table, UserData,
-    UserDataHandle, UserDataMethods, Variadic,
+    Bytes, Context, Error, Function, Lua, LuaValue, MetaMethod, Package, Result, Table, Trailing,
+    UserData, UserDataHandle, UserDataMethods, Variadic,
 };
 pub use barracuda_vm_package_api::{
     BoardDevices, LentDevice, LuaPackage, LuaPackageRegistration, LuaPackageRegistry,

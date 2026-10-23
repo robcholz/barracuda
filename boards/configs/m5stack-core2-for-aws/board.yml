@@ -16,12 +16,16 @@ peripherals:
   io:
     i2c-device:
       internal-i2c:
-        # M5GFX/M5Unified: the internal bus (I2C_NUM_1, 400 kHz) of the PMIC at
-        # 34h, an AXP192 on the original Core2 and an AXP2101 on Core2 v1.1.
+        # M5GFX/M5Unified: the internal bus (I2C_NUM_1) of the PMIC at 34h, an
+        # AXP192 on the original Core2 and an AXP2101 on Core2 v1.1. It runs at
+        # 100 kHz, M5Unified's `Power_Class` rate, because the ATECC608B on it
+        # wakes only on a 60 µs low pulse, which the zero byte that wakes it
+        # makes at 100 kHz and not at 400 kHz (Microchip; CryptoAuthLib
+        # `hal_i2c_wake` and ArduinoECCX08 `wakeup` slow the bus the same way).
         peripheral: I2C1
         scl: GPIO22
         sda: GPIO21
-        frequency-hz: 400000
+        frequency-hz: 100000
     spi-device:
       display-spi:
         # M5GFX Core2: SPI3_HOST at 40 MHz. MISO (GPIO38) only serves the TF card.
@@ -119,6 +123,14 @@ peripherals:
       implementation: axp192-axp2101-power-monitor
       bindings: { i2c: internal-i2c }
       parameters: { ina3221-battery-current: true }
+    # ATECC608B-TNGTLS (Trust&GO) at 35h on the internal bus
+    # (docs.m5stack.com Core2 for AWS: "ATECC608B-TNGTLSU-G (addr 0x35)",
+    # internal I2C G21/G22).
+    secure-element:
+      implementation: atecc608-secure-element
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 53
     # The vibration motor on AXP192 LDO3 (Core2) or AXP2101 DLDO1 (Core2
     # v1.1), the PMIC the display also uses (M5Unified
     # `Power_Class::setVibration`).

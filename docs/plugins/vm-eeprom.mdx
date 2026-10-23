@@ -1,0 +1,63 @@
+---
+title: "EEPROM Plugin"
+sidebarTitle: "EEPROM"
+description: "Keep small data across power loss in the Board's EEPROM from Lua with the `eeprom` package."
+---
+
+Installs the `eeprom` Lua package over the Board's EEPROMs, the primary one by
+default.
+
+- Plugin ID: `eeprom`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `eeprom.devices` (`*`)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `eeprom`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes every `Eeprom` of the Board that no other Plugin claims, the
+primary one first, and installs the `eeprom` Lua package. It consumes the semantic peripheral, which
+splits writes at the memory's page boundaries and waits out each page's write
+cycle, so scripts address bytes and never pages.
+
+Lua API:
+
+- `eeprom.list() -> { name, ... }`: the Board names of the EEPROMs, the
+  primary one first
+- `eeprom.available([name]) -> boolean`
+- `eeprom.size([name]) -> bytes`, the memory's capacity
+- `eeprom.page_size([name]) -> bytes`, the most bytes one write cycle programs
+- `eeprom.read(offset, length[, name]) -> binary string`
+- `eeprom.write(offset, binary_string[, name]) -> true` returns once every
+  byte is programmed
+
+`name` is a Board device name from `list`; without it a call uses the primary
+EEPROM, so a script written for one EEPROM runs unchanged on a Board with
+several. To name a EEPROM without the optional values before it, pass `nil` for
+them.
+
+Offsets count bytes from 0. A range past the end of the memory, a negative
+offset or length, an unknown name, or a call while another is running on the
+same memory returns `nil, error`
+without touching the memory. Cancelling a write leaves the pages written so
+far programmed.
+
+An EEPROM endures a limited number of write cycles per page (typically one
+million); keep frequently changing values in RAM and write them back
+occasionally.
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2. Boards without an EEPROM still
+install the package; `available` returns false and every other call returns
+`nil, error`. Plugin revocation prevents every further call.
+
+```lua
+local eeprom = require("eeprom")
+eeprom.write(0, string.pack("<I4", 42))
+local value = string.unpack("<I4", eeprom.read(0, 4))
+```

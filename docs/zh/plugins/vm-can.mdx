@@ -1,0 +1,51 @@
+---
+title: "CAN 插件"
+sidebarTitle: "CAN"
+description: "用 `can` Lua 包在 Lua 中收发 CAN 帧。"
+---
+
+基于开发板的 CAN 总线安装 `can` Lua 包，默认使用主 CAN 总线。
+
+- 插件 ID：`can`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `can.devices`（`*`）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`can`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件获取开发板上没有被其他插件占用的每个 `Can` 控制器，主总线排在最前，并安装 `can` Lua 包。它使用的是语义层面的外设能力，从不直接操作 CAN 控制器或它的引脚。
+
+在脚本按总线的位速率启动控制器之前，控制器不会接入总线，因此设备不会干扰它还不了解的总线。
+
+Lua API：
+
+- `can.list() -> { name, ... }`：各 CAN 总线在开发板上的名称，主总线排在最前
+- `can.available([name]) -> boolean`
+- `can.start(bitrate[, name]) -> true` 以 `bitrate` 位每秒接入总线，例如 125000、250000、500000 或 1000000；再次启动可以更改速率
+- `can.stop([name]) -> true` 离开总线
+- `can.bitrate([name]) -> integer | nil` 返回启动后的位速率
+- `can.state([name]) -> string` 返回 `"stopped"`、`"error-active"`、`"error-passive"` 或 `"bus-off"`
+- `can.send(id, data[, name]) -> true` 发送 0 到 8 字节的数据帧，总线传送完成后返回；标识符大于 0x7FF 时按 29 位扩展标识符发送
+- `can.send_extended(id, data[, name]) -> true` 即使标识符能放进 11 位，也按扩展标识符发送
+- `can.request(id, length[, name]) -> true` 和 `can.request_extended(id, length[, name])` 发送请求 `length` 字节的远程帧
+- `can.receive([timeout_ms[, name]]) -> frame` 等待下一帧，`\{id = ..., extended = false, remote = false, data = "...", length = 3\}`；超过 `timeout_ms` 时返回 `nil, "timeout"`
+
+`name` 是 `list` 返回的开发板设备名；不给出时调用使用主总线，所以为单个总线写的脚本在有多个总线的开发板上无需修改。只想指定总线而不给出它前面的可选参数时，这些参数传 `nil`。
+
+控制器无法实现的位速率、超出范围的帧、在停止或离线时收发，或在另一次调用进行期间调用，都会返回 `nil, error`。没有其他节点应答的帧会在控制器进入 error-passive 状态时失败。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2。没有 CAN 总线的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
+
+```lua
+local can = require("can")
+can.start(500000)
+can.send(0x123, "\x01\x02\x03")
+local frame = can.receive(1000)
+if frame then print(frame.id, #frame.data) end
+```

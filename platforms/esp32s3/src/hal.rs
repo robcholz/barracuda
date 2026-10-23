@@ -1,18 +1,25 @@
 //! ESP32-S3 adaptation from Board-selected tokens to hardware resources.
 
+mod camera;
 mod capacitive_touch;
 mod i2s_stream;
 mod parallel_output;
 mod pdm_stream;
 mod pulse_counter;
 mod sdmmc;
+mod twai;
 
+pub use camera::{
+    camera_capture, camera_capture_without_master_clock, camera_dma_buffer_from_bulk_memory,
+    CameraCaptureError, CameraConfigError, CameraReceiver, CAMERA_DMA_ALIGNMENT,
+};
 pub use capacitive_touch::{capacitive_touch_buttons, CapacitiveTouchButtons};
 pub use i2s_stream::{
     i2s_stream, i2s_stream_with_mclk, I2sConfigError, I2sDevice, I2sTransferError,
 };
 pub use pdm_stream::{pdm_i2s_stream, PdmDmaChannel, PdmI2sStream};
 pub use pulse_counter::{quadrature_counter, QuadratureCounter};
+pub use twai::{twai_controller, TwaiController, TwaiError};
 
 /// The SD host slot a Board's microSD card uses; both slots reach any pin
 /// through the GPIO matrix.
@@ -28,17 +35,9 @@ pub use sdmmc::{sdmmc_device_1bit, SdmmcConfigError, SdmmcDevice};
 include!("../../esp32/src/hal.rs");
 
 use barracuda_board_hal::QuadSpiBus;
-use barracuda_peripheral::camera::{FrameReceiver, FrameReceiverErrorType};
 use esp_hal::{
-    dma::{DmaBufError, DmaError, DmaRxBuf, DmaTxBuf},
+    dma::{DmaRxBuf, DmaTxBuf},
     gpio::NoPin,
-    lcd_cam::{
-        cam::{
-            Camera as VendorCamera, Config as VendorCameraConfig,
-            ConfigError as VendorCameraConfigError,
-        },
-        CamDmaRxChannel, LcdCam,
-    },
     spi::master::{Address as SpiAddress, Command as SpiCommand, DataMode},
 };
 
@@ -108,15 +107,6 @@ pub fn quad_spi_device(
     Ok(QuadSpiDevice { spi })
 }
 
-/// Statically allocates one ESP32-S3 DVP DMA buffer at the generated Board call site.
-#[macro_export]
-macro_rules! __barracuda_esp32s3_camera_dma_buffer {
-    ($bytes:expr) => {
-        $crate::hal::__vendor::dma_rx_buffer!($bytes)
-            .map_err($crate::hal::CameraConfigError::DmaBuffer)
-    };
-}
-
 /// Statically allocates independent transmit and receive I2S DMA buffers.
 #[macro_export]
 macro_rules! __barracuda_esp32s3_i2s_dma_buffers {
@@ -161,7 +151,7 @@ macro_rules! __barracuda_esp32s3_sdmmc_slot_binding {
 }
 
 #[doc(hidden)]
-pub use __barracuda_esp32s3_camera_dma_buffer as camera_dma_buffer;
+pub use crate::__barracuda_esp32s3_camera_dma_buffer as camera_dma_buffer;
 #[doc(hidden)]
 pub use __barracuda_esp32s3_i2s_dma_buffers as i2s_dma_buffers;
 #[doc(hidden)]
@@ -172,135 +162,6 @@ pub use __barracuda_esp32s3_parallel_output_dma_buffer as parallel_output_dma_bu
 pub use __barracuda_esp32s3_sdmmc_slot_binding as sdmmc_slot_binding;
 #[doc(hidden)]
 pub use __barracuda_esp32s3_sdmmc_slot_binding_type as sdmmc_slot_binding_type;
-
-/// ESP32-S3 camera receiver construction failure.
-#[derive(Debug)]
-pub enum CameraConfigError {
-    /// The Board-selected DMA storage cannot be used by the controller.
-    DmaBuffer(DmaBufError),
-    /// The requested camera clock or signal configuration is unsupported.
-    Peripheral(VendorCameraConfigError),
-}
-
-impl core::fmt::Display for CameraConfigError {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::DmaBuffer(_) => formatter.write_str("invalid camera DMA buffer"),
-            Self::Peripheral(_) => formatter.write_str("invalid ESP32-S3 camera configuration"),
-        }
-    }
-}
-
-impl core::error::Error for CameraConfigError {}
-
-/// ESP32-S3 frame-capture failure.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CameraCaptureError {
-    /// A capture is already in progress or the receiver lost ownership state.
-    Busy,
-    /// The caller supplied no destination storage.
-    EmptyBuffer,
-    /// The ESP32-S3 DMA engine rejected or aborted the transfer.
-    Dma(DmaError),
-}
-
-impl core::fmt::Display for CameraCaptureError {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Busy => formatter.write_str("camera receiver is busy"),
-            Self::EmptyBuffer => formatter.write_str("camera destination buffer is empty"),
-            Self::Dma(_) => formatter.write_str("camera DMA transfer failed"),
-        }
-    }
-}
-
-impl core::error::Error for CameraCaptureError {}
-
-/// ESP32-S3 LCD_CAM receiver and its statically allocated DMA storage.
-pub struct CameraReceiver {
-    camera: Option<VendorCamera<'static>>,
-    buffer: Option<DmaRxBuf>,
-}
-
-impl FrameReceiverErrorType for CameraReceiver {
-    type Error = CameraCaptureError;
-}
-
-impl FrameReceiver for CameraReceiver {
-    async fn receive(&mut self, frame: &mut [u8]) -> Result<usize, Self::Error> {
-        if frame.is_empty() {
-            return Err(CameraCaptureError::EmptyBuffer);
-        }
-        let Some(camera) = self.camera.take() else {
-            return Err(CameraCaptureError::Busy);
-        };
-        let Some(mut buffer) = self.buffer.take() else {
-            self.camera = Some(camera);
-            return Err(CameraCaptureError::Busy);
-        };
-        buffer.set_length(frame.len().min(buffer.capacity()));
-
-        let transfer = match camera.receive(buffer) {
-            Ok(transfer) => transfer,
-            Err((error, camera, buffer)) => {
-                self.camera = Some(camera);
-                self.buffer = Some(buffer);
-                return Err(CameraCaptureError::Dma(error));
-            }
-        };
-        let (result, camera, buffer) = transfer.wait();
-        self.camera = Some(camera);
-        let received = buffer.number_of_received_bytes().min(frame.len());
-        buffer.read_received_data(&mut frame[..received]);
-        self.buffer = Some(buffer);
-        result.map_err(CameraCaptureError::Dma)?;
-        Ok(received)
-    }
-}
-
-/// Constructs the ESP32-S3 DVP receiver from Board-selected resources.
-#[allow(clippy::too_many_arguments)]
-pub fn camera_capture(
-    controller: esp_hal::peripherals::LCD_CAM<'static>,
-    dma: impl CamDmaRxChannel<'static>,
-    xclk: impl PeripheralOutput<'static>,
-    pclk: impl PeripheralInput<'static>,
-    vsync: impl PeripheralInput<'static>,
-    href: impl PeripheralInput<'static>,
-    data0: impl PeripheralInput<'static>,
-    data1: impl PeripheralInput<'static>,
-    data2: impl PeripheralInput<'static>,
-    data3: impl PeripheralInput<'static>,
-    data4: impl PeripheralInput<'static>,
-    data5: impl PeripheralInput<'static>,
-    data6: impl PeripheralInput<'static>,
-    data7: impl PeripheralInput<'static>,
-    xclk_frequency_hz: u32,
-    buffer: DmaRxBuf,
-) -> Result<CameraReceiver, CameraConfigError> {
-    let camera = VendorCamera::new(
-        LcdCam::new(controller).cam,
-        dma,
-        VendorCameraConfig::default().with_frequency(Rate::from_hz(xclk_frequency_hz)),
-    )
-    .map_err(CameraConfigError::Peripheral)?
-    .with_master_clock(xclk)
-    .with_pixel_clock(pclk)
-    .with_vsync(vsync)
-    .with_h_enable(href)
-    .with_data0(data0)
-    .with_data1(data1)
-    .with_data2(data2)
-    .with_data3(data3)
-    .with_data4(data4)
-    .with_data5(data5)
-    .with_data6(data6)
-    .with_data7(data7);
-    Ok(CameraReceiver {
-        camera: Some(camera),
-        buffer: Some(buffer),
-    })
-}
 
 /// Error surfaced while generated runtime I2S DMA storage is created.
 pub type RuntimeI2sResourceError = I2sConfigError;

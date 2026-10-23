@@ -11,7 +11,7 @@ The M5Stack ATOM Display is an ESP32 Board from M5Stack.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-atom-display/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,14 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-atom-display/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | HDMI output, 1280 x 720 at 60 Hz (GW1NR-9C FPGA, LT8618SX transmitter) | [`display`](/plugins/vm-display) |
+
+The FPGA keeps no configuration over power loss. At start-up the display
+loads M5Stack's FPGA design (from M5GFX) over JTAG on the FPGA's SPI lines,
+unless the FPGA still holds it after a reset, then sets the video mode and
+starts the LT8618SX. Drawing goes to the FPGA's frame memory at once; a
+smaller drawing size, set with the display's `width` and `height`, is scaled
+up to 720p and takes less of the SPI bus to draw.
+

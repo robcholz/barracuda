@@ -1,0 +1,49 @@
+id: st25r3916-nfc-reader
+api-version: 1
+peripheral: nfc-reader
+implementation:
+  package: barracuda-st25r3916-nfc-reader
+  crate: barracuda_st25r3916_nfc_reader
+  factory: "::{{crate}}::St25r3916NfcReaderImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "{{binding.i2c.value}}"
+  config-expression: "::{{crate}}::St25r3916NfcReaderConfig::new({{parameter.address}}, {{parameter.m5ioe1-power-pin}}, {{parameter.m5ioe1-address}}, {{parameter.power-settle-ms}})"
+# An ST25R3916 NFC reader on I2C, polled through its FIFO status, so its
+# interrupt line is not needed. A product that switches the reader's supply
+# with an M5IOE1 expander output names that pin; the implementation drives
+# it high and waits before talking to the reader.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 50h (M5Stack PaperMono and StackChan pin maps).
+    default: 80
+  m5ioe1-power-pin:
+    type: enum
+    values: [none, g1, g2, g3, g4, g5, g6, g7, g8, g9, g10, g11, g12, g13, g14]
+    rust-values:
+      none: "None"
+      g1: "Some(1)"
+      g2: "Some(2)"
+      g3: "Some(3)"
+      g4: "Some(4)"
+      g5: "Some(5)"
+      g6: "Some(6)"
+      g7: "Some(7)"
+      g8: "Some(8)"
+      g9: "Some(9)"
+      g10: "Some(10)"
+      g11: "Some(11)"
+      g12: "Some(12)"
+      g13: "Some(13)"
+      g14: "Some(14)"
+    default: none
+  m5ioe1-address:
+    type: integer
+    # 4Fh, the M5IOE1's factory address.
+    default: 79
+  # How long the reader's supply settles before the first transfer.
+  power-settle-ms:
+    type: integer
+    default: 0

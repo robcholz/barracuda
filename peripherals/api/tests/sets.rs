@@ -8,15 +8,21 @@ use barracuda_peripheral::{
     buttons::{ButtonSnapshot, Buttons},
     buzzer::{Buzzer, Note, Volume},
     camera::{Camera, CameraDescriptor, CameraPixelFormat, CapturedFrame},
+    can::{BusState, Can, Frame, Id},
+    digital_io::{DigitalIo, Levels},
+    eeprom::{Eeprom, EepromGeometry},
     environment::{EnvironmentReading, EnvironmentSensor, Quantities, Quantity},
     imu::{Imu, ImuDescriptor, ImuSample, Vector3},
     indicator::Indicator,
     infrared::{Carrier, Infrared, NecCommand, Received},
     keyboard::{Key, KeyEvent, KeyState, Keyboard, Modifiers},
     led_strip::{LedStrip, Rgb8},
+    lora::{Lora, LoraConfig, RadioLimits, Received as LoraReceived},
+    nfc_reader::{BLOCK_BYTES, Card, NfcReader, Uid},
     power::{BatteryState, PowerMeasurement, PowerMonitor},
     real_time_clock::{DateTime, RealTimeClock},
     rotary_encoder::RotaryEncoder,
+    secure_element::{KeySlot, P256PublicKey, P256Signature, SecureElement, SerialNumber},
     touch::{Touch, TouchDescriptor, TouchFrame},
     vibration::{Pulse, Strength, Vibration},
 };
@@ -329,7 +335,7 @@ impl Buzzer for Good {
     }
 
     async fn play_note(&mut self, note: Note, volume: Volume) -> Result<(), Self::Error> {
-        self.start(note.frequency_hz(), volume)
+        Buzzer::start(self, note.frequency_hz(), volume)
     }
 }
 
@@ -789,5 +795,436 @@ fn an_environment_sensor_set_forwards_to_its_sensor() {
     assert!(matches!(
         ready(Sensors::Outdoor(Broken).read()),
         Err(SensorsError::Outdoor(Failure))
+    ));
+}
+
+impl Eeprom for Good {
+    type Error = core::convert::Infallible;
+
+    fn geometry(&self) -> EepromGeometry {
+        EepromGeometry::new(u32::from(self.0), 8)
+    }
+
+    async fn read<'a>(&'a mut self, _offset: u32, buffer: &'a mut [u8]) -> Result<(), Self::Error> {
+        buffer.fill(self.0);
+        Ok(())
+    }
+
+    async fn write<'a>(&'a mut self, _offset: u32, data: &'a [u8]) -> Result<(), Self::Error> {
+        self.0 = data.first().copied().unwrap_or(0);
+        Ok(())
+    }
+}
+
+impl Eeprom for Broken {
+    type Error = Failure;
+
+    fn geometry(&self) -> EepromGeometry {
+        EepromGeometry::new(0, 1)
+    }
+
+    async fn read<'a>(
+        &'a mut self,
+        _offset: u32,
+        _buffer: &'a mut [u8],
+    ) -> Result<(), Self::Error> {
+        Err(Failure)
+    }
+
+    async fn write<'a>(&'a mut self, _offset: u32, _data: &'a [u8]) -> Result<(), Self::Error> {
+        Err(Failure)
+    }
+}
+
+barracuda_peripheral::eeprom_set! {
+    pub enum Memories, MemoriesError { Main(Good), Spare(Broken) }
+}
+
+#[test]
+fn an_eeprom_set_forwards_to_its_memory() {
+    let mut main = Memories::Main(Good(32));
+    assert_eq!(main.geometry().capacity(), 32);
+    assert!(ready(main.write(0, &[7])).is_ok());
+    let mut buffer = [0_u8; 2];
+    assert!(ready(main.read(0, &mut buffer)).is_ok());
+    assert_eq!(buffer, [7, 7]);
+    assert!(matches!(
+        ready(Memories::Spare(Broken).read(0, &mut buffer)),
+        Err(MemoriesError::Spare(Failure))
+    ));
+}
+
+impl SecureElement for Good {
+    type Error = core::convert::Infallible;
+
+    async fn serial_number(&mut self) -> Result<SerialNumber, Self::Error> {
+        Ok(SerialNumber::new(&[self.0]).unwrap_or_else(|| panic!("a serial number")))
+    }
+
+    async fn fill_random<'a>(&'a mut self, buffer: &'a mut [u8]) -> Result<(), Self::Error> {
+        buffer.fill(self.0);
+        Ok(())
+    }
+
+    async fn public_key(&mut self, slot: KeySlot) -> Result<P256PublicKey, Self::Error> {
+        Ok(P256PublicKey::new([slot.index(); 64]))
+    }
+
+    async fn sign_digest<'a>(
+        &'a mut self,
+        _slot: KeySlot,
+        digest: &'a [u8; 32],
+    ) -> Result<P256Signature, Self::Error> {
+        let mut signature = [0; 64];
+        signature[..32].copy_from_slice(digest);
+        Ok(P256Signature::new(signature))
+    }
+}
+
+impl SecureElement for Broken {
+    type Error = Failure;
+
+    async fn serial_number(&mut self) -> Result<SerialNumber, Self::Error> {
+        Err(Failure)
+    }
+
+    async fn fill_random<'a>(&'a mut self, _buffer: &'a mut [u8]) -> Result<(), Self::Error> {
+        Err(Failure)
+    }
+
+    async fn public_key(&mut self, _slot: KeySlot) -> Result<P256PublicKey, Self::Error> {
+        Err(Failure)
+    }
+
+    async fn sign_digest<'a>(
+        &'a mut self,
+        _slot: KeySlot,
+        _digest: &'a [u8; 32],
+    ) -> Result<P256Signature, Self::Error> {
+        Err(Failure)
+    }
+}
+
+barracuda_peripheral::secure_element_set! {
+    pub enum Elements, ElementsError { Main(Good), Spare(Broken) }
+}
+
+#[test]
+fn a_secure_element_set_forwards_to_its_element() {
+    let mut main = Elements::Main(Good(9));
+    assert_eq!(
+        ready(main.serial_number())
+            .ok()
+            .map(|serial| serial.as_bytes().to_vec()),
+        Some(vec![9])
+    );
+    let mut random = [0_u8; 3];
+    assert!(ready(main.fill_random(&mut random)).is_ok());
+    assert_eq!(random, [9; 3]);
+    assert_eq!(
+        ready(main.public_key(KeySlot::new(2)))
+            .ok()
+            .map(|key| key.as_bytes()[0]),
+        Some(2)
+    );
+    assert_eq!(
+        ready(main.sign_digest(KeySlot::new(0), &[5; 32]))
+            .ok()
+            .map(|signature| signature.as_bytes()[0]),
+        Some(5)
+    );
+    assert!(matches!(
+        ready(Elements::Spare(Broken).serial_number()),
+        Err(ElementsError::Spare(Failure))
+    ));
+}
+
+impl NfcReader for Good {
+    type Error = core::convert::Infallible;
+
+    async fn poll(&mut self) -> Result<Option<Card>, Self::Error> {
+        Ok(Uid::new(&[self.0, 1, 2, 3]).map(|uid| Card::new(uid, 0x44, 0)))
+    }
+
+    async fn read_block(&mut self, block: u8) -> Result<[u8; BLOCK_BYTES], Self::Error> {
+        Ok([block; BLOCK_BYTES])
+    }
+}
+
+impl NfcReader for Broken {
+    type Error = Failure;
+
+    async fn poll(&mut self) -> Result<Option<Card>, Self::Error> {
+        Err(Failure)
+    }
+
+    async fn read_block(&mut self, _block: u8) -> Result<[u8; BLOCK_BYTES], Self::Error> {
+        Err(Failure)
+    }
+}
+
+barracuda_peripheral::nfc_reader_set! {
+    pub enum Readers, ReadersError { Main(Good), Side(Broken) }
+}
+
+#[test]
+fn an_nfc_reader_set_forwards_to_its_reader() {
+    let mut main = Readers::Main(Good(4));
+    assert_eq!(
+        ready(main.poll())
+            .ok()
+            .flatten()
+            .map(|card| card.uid().as_bytes().to_vec()),
+        Some(vec![4, 1, 2, 3])
+    );
+    assert_eq!(ready(main.read_block(6)).ok(), Some([6; BLOCK_BYTES]));
+    assert!(matches!(
+        ready(Readers::Side(Broken).poll()),
+        Err(ReadersError::Side(Failure))
+    ));
+}
+
+impl Lora for Good {
+    type Error = core::convert::Infallible;
+
+    fn limits(&self) -> RadioLimits {
+        RadioLimits {
+            min_frequency_hz: u32::from(self.0),
+            max_frequency_hz: 930_000_000,
+            min_tx_power_dbm: -9,
+            max_tx_power_dbm: 22,
+        }
+    }
+
+    async fn configure(&mut self, _config: LoraConfig) -> Result<(), Self::Error> {
+        self.0 = 1;
+        Ok(())
+    }
+
+    async fn transmit(&mut self, payload: &[u8]) -> Result<(), Self::Error> {
+        self.0 = u8::try_from(payload.len()).unwrap_or(u8::MAX);
+        Ok(())
+    }
+
+    async fn receive(&mut self, buffer: &mut [u8]) -> Result<LoraReceived, Self::Error> {
+        buffer.fill(self.0);
+        Ok(LoraReceived {
+            len: buffer.len(),
+            rssi_dbm: -60,
+            snr_centi_db: 700,
+        })
+    }
+}
+
+impl Lora for Broken {
+    type Error = Failure;
+
+    fn limits(&self) -> RadioLimits {
+        RadioLimits {
+            min_frequency_hz: 0,
+            max_frequency_hz: 0,
+            min_tx_power_dbm: 0,
+            max_tx_power_dbm: 0,
+        }
+    }
+
+    async fn configure(&mut self, _config: LoraConfig) -> Result<(), Self::Error> {
+        Err(Failure)
+    }
+
+    async fn transmit(&mut self, _payload: &[u8]) -> Result<(), Self::Error> {
+        Err(Failure)
+    }
+
+    async fn receive(&mut self, _buffer: &mut [u8]) -> Result<LoraReceived, Self::Error> {
+        Err(Failure)
+    }
+}
+
+barracuda_peripheral::lora_set! {
+    pub enum Radios, RadiosError { Main(Good), Side(Broken) }
+}
+
+#[test]
+fn a_lora_set_forwards_to_its_radio() {
+    let mut main = Radios::Main(Good(8));
+    assert_eq!(main.limits().min_frequency_hz, 8);
+    assert!(ready(main.configure(LoraConfig::new(868_000_000))).is_ok());
+    assert!(ready(main.transmit(&[1, 2, 3])).is_ok());
+    let mut buffer = [0_u8; 2];
+    assert_eq!(
+        ready(main.receive(&mut buffer))
+            .ok()
+            .map(|received| received.len),
+        Some(2)
+    );
+    assert_eq!(buffer, [3, 3]);
+    assert!(matches!(
+        ready(Radios::Side(Broken).transmit(&[1])),
+        Err(RadiosError::Side(Failure))
+    ));
+}
+
+impl Can for Good {
+    type Error = core::convert::Infallible;
+
+    fn supports_bitrate(&self, bitrate: u32) -> bool {
+        bitrate == 500_000
+    }
+
+    fn start(&mut self, _bitrate: u32) -> Result<(), Self::Error> {
+        self.0 = 1;
+        Ok(())
+    }
+
+    fn stop(&mut self) -> Result<(), Self::Error> {
+        self.0 = 0;
+        Ok(())
+    }
+
+    fn bitrate(&self) -> Option<u32> {
+        (self.0 != 0).then_some(500_000)
+    }
+
+    fn state(&self) -> BusState {
+        if self.0 == 0 {
+            BusState::Stopped
+        } else {
+            BusState::ErrorActive
+        }
+    }
+
+    async fn transmit(&mut self, frame: &Frame) -> Result<(), Self::Error> {
+        self.0 = frame.data().first().copied().unwrap_or(0);
+        Ok(())
+    }
+
+    async fn receive(&mut self) -> Result<Frame, Self::Error> {
+        Id::standard(0x10)
+            .and_then(|id| Frame::new(id, &[self.0]))
+            .ok_or_else(|| panic!("a frame"))
+    }
+}
+
+impl Can for Broken {
+    type Error = Failure;
+
+    fn supports_bitrate(&self, _bitrate: u32) -> bool {
+        false
+    }
+
+    fn start(&mut self, _bitrate: u32) -> Result<(), Self::Error> {
+        Err(Failure)
+    }
+
+    fn stop(&mut self) -> Result<(), Self::Error> {
+        Err(Failure)
+    }
+
+    fn bitrate(&self) -> Option<u32> {
+        None
+    }
+
+    fn state(&self) -> BusState {
+        BusState::BusOff
+    }
+
+    async fn transmit(&mut self, _frame: &Frame) -> Result<(), Self::Error> {
+        Err(Failure)
+    }
+
+    async fn receive(&mut self) -> Result<Frame, Self::Error> {
+        Err(Failure)
+    }
+}
+
+barracuda_peripheral::can_set! {
+    pub enum Buses, BusesError { Main(Good), Side(Broken) }
+}
+
+#[test]
+fn a_can_set_forwards_to_its_controller() {
+    let mut main = Buses::Main(Good(0));
+    assert!(main.supports_bitrate(500_000));
+    assert_eq!(main.state(), BusState::Stopped);
+    assert!(main.start(500_000).is_ok());
+    assert_eq!(main.bitrate(), Some(500_000));
+    let frame = Id::standard(0x20).and_then(|id| Frame::new(id, &[9]));
+    assert!(frame.is_some_and(|frame| ready(main.transmit(&frame)).is_ok()));
+    assert_eq!(
+        ready(main.receive()).ok().map(|frame| frame.data()[0]),
+        Some(9)
+    );
+    assert!(main.stop().is_ok());
+    let mut side = Buses::Side(Broken);
+    assert_eq!(side.state(), BusState::BusOff);
+    assert!(matches!(side.start(1), Err(BusesError::Side(Failure))));
+}
+
+impl DigitalIo for Good {
+    type Error = core::convert::Infallible;
+
+    fn output_count(&self) -> usize {
+        usize::from(self.0)
+    }
+
+    fn input_count(&self) -> usize {
+        2
+    }
+
+    fn set_output(&mut self, index: usize, on: bool) -> Result<(), Self::Error> {
+        if on {
+            self.0 = u8::try_from(index).unwrap_or(u8::MAX);
+        }
+        Ok(())
+    }
+
+    fn outputs(&self) -> Levels {
+        Levels::default().with(usize::from(self.0), true)
+    }
+
+    fn read_inputs(&mut self) -> Result<Levels, Self::Error> {
+        Ok(Levels::default().with(1, true))
+    }
+}
+
+impl DigitalIo for Broken {
+    type Error = Failure;
+
+    fn output_count(&self) -> usize {
+        0
+    }
+
+    fn input_count(&self) -> usize {
+        0
+    }
+
+    fn set_output(&mut self, _index: usize, _on: bool) -> Result<(), Self::Error> {
+        Err(Failure)
+    }
+
+    fn outputs(&self) -> Levels {
+        Levels::default()
+    }
+
+    fn read_inputs(&mut self) -> Result<Levels, Self::Error> {
+        Err(Failure)
+    }
+}
+
+barracuda_peripheral::digital_io_set! {
+    pub enum Banks, BanksError { Main(Good), Side(Broken) }
+}
+
+#[test]
+fn a_digital_io_set_forwards_to_its_bank() {
+    let mut main = Banks::Main(Good(4));
+    assert_eq!((main.output_count(), main.input_count()), (4, 2));
+    assert!(main.set_output(3, true).is_ok());
+    assert!(main.outputs().is_on(3));
+    assert!(main.read_inputs().is_ok_and(|levels| levels.is_on(1)));
+    assert!(matches!(
+        Banks::Side(Broken).read_inputs(),
+        Err(BanksError::Side(Failure))
     ));
 }

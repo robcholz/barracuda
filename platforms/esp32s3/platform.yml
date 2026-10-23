@@ -17,7 +17,7 @@ build:
       cargo install espup
       espup install --toolchain-version 1.98.1.0
 hal:
-  bindings: [digital-input, digital-output, gpio, spi-device, quad-spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, camera-capture, parallel-output, i2s-stream, pdm-i2s-stream, capacitive-touch, analog-input, pulse-counter, power-hold, rmt-output, rmt-input, pwm-output]
+  bindings: [digital-input, digital-output, gpio, spi-device, quad-spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, camera-capture, parallel-output, i2s-stream, pdm-i2s-stream, capacitive-touch, analog-input, pulse-counter, power-hold, rmt-output, rmt-input, pwm-output, twai]
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2, SPI3]
   runtime-uart-controllers: [UART1]

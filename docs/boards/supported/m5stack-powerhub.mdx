@@ -28,9 +28,25 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 | Device | What it is | Lua package |
 | --- | --- | --- |
-| `buttons` | Button A (GPIO11) | — |
+| `buttons` | Button A (GPIO11) and button B (power co-processor) | — |
+| `can` | CAN bus (TWAI, SIT1044 transceiver, TX GPIO39, RX GPIO40) | [`can`](/plugins/vm-can) |
+| `led-strip` | 8 RGB LEDs (WS2812C, power co-processor) | [`light`](/plugins/vm-led-strip) |
+| `power-monitor` | Battery voltage and current (power co-processor) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `real-time-clock` | Real-time clock (RX8130CE, power co-processor) | — |
 
-Button B is read through the STM32 co-processor and is not declared.
+The STM32G031 power co-processor at `50h` on the internal I2C bus (SDA
+`GPIO45`, SCL `GPIO48`, 100 kHz) relays the real-time clock, the battery
+monitor, the LEDs, and button B, which sit on its own bus. Each device
+touches only its own registers of it, as M5Unified uses them; M5Stack
+publishes no register map. The battery readings come from the PowerHub Kit's
+2S pack; without one, the monitor reports no battery.
+
+The co-processor's port power switches (USB, Port A, Port C, RS485/CAN), its
+per-port voltage and current readings, and the six INA226 monitors behind it
+are not declared.
+
+The CAN controller stays off the bus until a script starts it at the bus's bit
+rate.
 
 ## Exposed pins
 
@@ -56,7 +72,9 @@ Lua scripts open these pins by name.
 
 The `header-*` pins are on the EXT 2.54-16P header. `rs485-tx`, `rs485-rx`,
 and `rs485-dir` are the UART and direction pins of the on-board RS485
-transceiver.
+transceiver. Open them as one RS485 port, with `rs485-dir` as the
+driver-enable pin, and the port drives the bus only while it writes:
+`uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")`.
 
 ```lua
 local gpio = require("gpio")

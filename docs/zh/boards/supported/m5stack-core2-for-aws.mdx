@@ -37,6 +37,7 @@ cargo image deploy
 | `audio` | 音频（NS4168 功放、SPM1423 PDM 麦克风） | [`audio`](/zh/plugins/vm-audio) |
 | `micro-sd` | microSD 卡槽（FAT，SPI） | — |
 | `vibration` | 振动马达（AXP192 LDO3 或 AXP2101 DLDO1） | [`vibration`](/zh/plugins/vm-vibration) |
+| `secure-element` | 安全芯片（ATECC608B Trust&GO，`35h`） | [`secure_element`](/zh/plugins/vm-secure-element) |
 
 触摸屏报告的范围是 320x280：屏幕下方的一条区域是三个触摸按键。显示屏实现的 PMIC 上电过程会连同面板一起复位触摸控制器。
 
@@ -45,6 +46,8 @@ cargo image deploy
 v1.1 单元的 AXP2101 不测量电流，改由 `40h` 的 INA3221 检测电池电流。
 
 microSD 卡通过自己的片选与显示屏共用 SPI 总线。
+
+内部 I2C 总线以 100 kHz 运行：ATECC608B 只有在 SDA 上的低电平脉冲长于 400 kHz 总线所能产生的脉冲时才会唤醒。它的设备密钥位于槽位 0。
 
 ## 可用引脚
 

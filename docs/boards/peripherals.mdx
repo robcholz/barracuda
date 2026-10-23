@@ -123,6 +123,26 @@ A directly driven e-paper panel's source driver uses the same binding without
 is `chip-select`. Its display implementation drives the gate and latch lines
 as ordinary digital outputs and keeps each line within one burst.
 
+A parallel camera sensor is a `camera-capture`: the camera controller and
+its DMA channel, the pixel clock, VSYNC, HREF, eight data lines in bit order,
+the master clock and its frequency, and the DMA storage for one frame. The
+Platform hands it to the camera implementation as a `FrameReceiver`, which
+receives one whole frame per call. A sensor module with its own oscillator
+takes no master clock: the Board leaves out `xclk` and `xclk-frequency-hz`.
+The M5Stack CoreS3's GC0308, one 320x240 RGB565 frame:
+
+~~~yaml
+camera-capture:
+  camera-data:
+    peripheral: LCD_CAM
+    dma: DMA_CH0
+    pclk: GPIO45
+    vsync: GPIO46
+    href: GPIO38
+    data: [GPIO39, GPIO40, GPIO41, GPIO42, GPIO15, GPIO16, GPIO48, GPIO47]
+    dma-buffer-bytes: 153600
+~~~
+
 A microSD card is an `sdmmc-device`: the SD host, the `slot` of it the card
 is wired to (0 when left out), the clock, command and data pins in order, the
 `bus-width` (1 or 4), the clock the card runs at once identified
@@ -181,6 +201,24 @@ A microSD card on SPI (`spi-sd-fat-removable-storage`) also changes its
 device's clock and clocks it with the chip select released, which the SD
 specification asks for while it identifies the card; the Platform's SPI device
 types provide that through `SpiDeviceControl`.
+
+An `spi-bus` is an SPI controller with no chip select: the implementation
+drives its device's select line itself, as a `digital-output`. The ESP
+Platforms' bus also implements `SpiBusControl`, which sets the clock and mode
+and clocks out fewer than eight bits through the controller's command phase.
+The ATOM Display's `m5hdmi-display` uses it to load its FPGA over JTAG on the
+same four lines (TCK on SCK, TDI on MOSI, TDO on MISO, TMS on the select line)
+before talking SPI to it:
+
+~~~yaml
+spi-bus:
+  fpga-spi:
+    peripheral: SPI3
+    sck: GPIO5
+    mosi: GPIO19
+    miso: GPIO22
+    frequency-hz: 40000000
+~~~
 
 An `spi-output`, the data line of an LED strip clocked out of an SPI
 controller, takes a whole controller of its own: one that no `spi-device`
@@ -258,6 +296,21 @@ pulse-counter:
     peripheral: PCNT
     a: GPIO41
     b: GPIO40
+~~~
+
+A `twai` is the chip's own classic CAN controller (the ESP TWAI) and the pins
+of its transceiver: `tx` drives the transceiver's TXD input and `rx` reads its
+RXD output. The transceiver needs no driver. The implementation receives a
+`CanController`, which stays off the bus until the application chooses the
+bit rate, so a Board never disturbs a bus whose rate it does not know. The
+M5Stack StamPLC's CAN port:
+
+~~~yaml
+twai:
+  can-bus:
+    peripheral: TWAI0
+    tx: GPIO42
+    rx: GPIO43
 ~~~
 
 A `pdm-i2s-stream` is a PDM microphone and an I2S amplifier on one I2S
@@ -427,6 +480,14 @@ regulator's voltage field and enable bit beside them, and
 only their own M5PM1 or expander pins next to the display implementations
 that use the others.
 
+The M5Stack PowerHub's STM32G031 power co-processor relays four semantic
+peripherals, so four implementations share it the same way:
+`powerhub-buttons` reads only its button register, `powerhub-led-strip`
+writes only the LED supply, color, and brightness registers,
+`powerhub-power-monitor` only the metering enable and the battery registers,
+and `powerhub-rtc` only the clock registers. All four use
+`drivers/chips/m5powerhub`.
+
 ## Stable construction and runtime behavior
 
 `PeripheralImplementation` declares move-only `Bindings`, validated `Config`,
@@ -464,7 +525,9 @@ neighbours:
    every trait method, default methods included, and awaits the async ones;
    it declares one set error type per associated error type.
 2. `boards/hal`: re-export the macro, and add the kind's `Unavailable<Kind>`
-   type and its `NoPeripherals` implementation.
+   type and its `NoPeripherals` implementation; `core/system` adds the
+   `<Kind>Peripheral` bound, with its device's `Send` and error `Debug`
+   bounds, to the peripherals it hands Plugins.
 3. `peripherals/config`: register the kind in `PERIPHERAL_APIS` and add one
    `ClaimableKind` entry to `CLAIMABLE_KINDS`, naming the trait, the take
    function, the associated type, the unavailable type, the set macro, and

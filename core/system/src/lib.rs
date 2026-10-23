@@ -21,16 +21,22 @@ use barracuda_board_hal::{
     audio::AudioCodecPeripheral,
     buzzer::BuzzerPeripheral,
     camera::CameraPeripheral,
+    can::CanPeripheral,
+    digital_io::DigitalIoPeripheral,
     display::DisplayPeripheral,
+    eeprom::EepromPeripheral,
     environment::EnvironmentSensorPeripheral,
     imu::ImuPeripheral,
     infrared::InfraredPeripheral,
     keyboard::KeyboardPeripheral,
     led_strip::LedStripPeripheral,
+    lora::LoraPeripheral,
+    nfc_reader::NfcReaderPeripheral,
     power::PowerMonitorPeripheral,
     real_time_clock::RealTimeClockPeripheral,
     removable_storage::{RemovableStorage, RemovableStorageEvent, RemovableStoragePeripheral},
     rotary_encoder::RotaryEncoderPeripheral,
+    secure_element::SecureElementPeripheral,
     touch::TouchPeripheral,
     vibration::VibrationPeripheral,
     AnalogProvider, BoardResources, DigitalProvider, ExposedIo, I2cProvider, I2sProvider,
@@ -220,6 +226,7 @@ where
         + BuzzerPeripheral
         + CameraPeripheral
         + DisplayPeripheral
+        + EepromPeripheral
         + EnvironmentSensorPeripheral
         + ImuPeripheral
         + InfraredPeripheral
@@ -229,8 +236,13 @@ where
         + RealTimeClockPeripheral
         + RemovableStoragePeripheral
         + RotaryEncoderPeripheral
+        + SecureElementPeripheral
         + TouchPeripheral
         + VibrationPeripheral
+        + NfcReaderPeripheral
+        + LoraPeripheral
+        + CanPeripheral
+        + DigitalIoPeripheral
         + Unpin,
     Peripherals::AudioCodec: Send + 'static,
     <Peripherals::AudioCodec as barracuda_board_hal::audio::AudioCodec>::Error: core::fmt::Debug,
@@ -257,6 +269,19 @@ where
     Peripherals::RotaryEncoder: Send + 'static,
     <Peripherals::RotaryEncoder as barracuda_board_hal::rotary_encoder::RotaryEncoder>::Error:
         core::fmt::Debug,
+    Peripherals::Eeprom: Send + 'static,
+    <Peripherals::Eeprom as barracuda_board_hal::eeprom::Eeprom>::Error: core::fmt::Debug,
+    Peripherals::SecureElement: Send + 'static,
+    <Peripherals::SecureElement as barracuda_board_hal::secure_element::SecureElement>::Error:
+        core::fmt::Debug,
+    Peripherals::NfcReader: Send + 'static,
+    <Peripherals::NfcReader as barracuda_board_hal::nfc_reader::NfcReader>::Error: core::fmt::Debug,
+    Peripherals::Lora: Send + 'static,
+    <Peripherals::Lora as barracuda_board_hal::lora::Lora>::Error: core::fmt::Debug,
+    Peripherals::Can: Send + 'static,
+    <Peripherals::Can as barracuda_board_hal::can::Can>::Error: core::fmt::Debug,
+    Peripherals::DigitalIo: Send + 'static,
+    <Peripherals::DigitalIo as barracuda_board_hal::digital_io::DigitalIo>::Error: core::fmt::Debug,
     Peripherals::PowerMonitor: Send + 'static,
     Peripherals::RealTimeClock: 'static,
     Peripherals::RemovableStorage: Send + 'static,

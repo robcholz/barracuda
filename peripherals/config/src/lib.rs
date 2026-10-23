@@ -23,17 +23,23 @@ pub const PERIPHERAL_APIS: &[&str] = &[
     "buttons",
     "buzzer",
     "camera",
+    "can",
+    "digital-io",
     "display",
+    "eeprom",
     "environment-sensor",
     "indicator",
     "inertial-measurement",
     "infrared",
     "keyboard",
     "led-strip",
+    "lora",
+    "nfc-reader",
     "power-monitor",
     "real-time-clock",
     "removable-storage",
     "rotary-encoder",
+    "secure-element",
     "touch",
     "vibration",
 ];
@@ -240,6 +246,8 @@ pub enum BindingKind {
     PdmI2sStream,
     /// One pulse-counter unit decoding a quadrature encoder.
     PulseCounter,
+    /// One on-chip CAN controller and its transceiver's pins.
+    Twai,
     /// One pulse-train output channel of a shared remote-control transceiver.
     RmtOutput,
     /// One pulse-train input channel of a shared remote-control transceiver.
@@ -1017,6 +1025,8 @@ pub fn resolve_board<'a>(
                         && board.peripheral_io().pdm_i2s_stream(resource).is_none())
                     || (schema.kind() == BindingKind::PulseCounter
                         && board.peripheral_io().pulse_counter(resource).is_none())
+                    || (schema.kind() == BindingKind::Twai
+                        && board.peripheral_io().twai(resource).is_none())
                     || (schema.kind() == BindingKind::RmtOutput
                         && board.peripheral_io().rmt_output(resource).is_none())
                     || (schema.kind() == BindingKind::RmtInput
@@ -1314,6 +1324,7 @@ const fn hal_binding(kind: BindingKind) -> Option<HalBinding> {
         BindingKind::AnalogInput => Some(HalBinding::AnalogInput),
         BindingKind::PdmI2sStream => Some(HalBinding::PdmI2sStream),
         BindingKind::PulseCounter => Some(HalBinding::PulseCounter),
+        BindingKind::Twai => Some(HalBinding::Twai),
         BindingKind::RmtOutput => Some(HalBinding::RmtOutput),
         BindingKind::RmtInput => Some(HalBinding::RmtInput),
         BindingKind::PwmOutput => Some(HalBinding::PwmOutput),
@@ -1386,6 +1397,24 @@ const CLAIMABLE_KINDS: &[ClaimableKind] = &[
         set_errors: &["Error"],
     },
     ClaimableKind {
+        kind: "can",
+        peripheral_trait: "can::CanPeripheral",
+        take: "take_can",
+        associated: "Can",
+        unavailable: "UnavailableCan",
+        set_macro: "can_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "digital-io",
+        peripheral_trait: "digital_io::DigitalIoPeripheral",
+        take: "take_digital_io",
+        associated: "DigitalIo",
+        unavailable: "UnavailableDigitalIo",
+        set_macro: "digital_io_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
         kind: "display",
         peripheral_trait: "display::DisplayPeripheral",
         take: "take_display",
@@ -1393,6 +1422,15 @@ const CLAIMABLE_KINDS: &[ClaimableKind] = &[
         unavailable: "UnavailableDisplay",
         set_macro: "display_set",
         set_errors: &["ControlError", "RenderError"],
+    },
+    ClaimableKind {
+        kind: "eeprom",
+        peripheral_trait: "eeprom::EepromPeripheral",
+        take: "take_eeprom",
+        associated: "Eeprom",
+        unavailable: "UnavailableEeprom",
+        set_macro: "eeprom_set",
+        set_errors: &["Error"],
     },
     ClaimableKind {
         kind: "environment-sensor",
@@ -1449,6 +1487,24 @@ const CLAIMABLE_KINDS: &[ClaimableKind] = &[
         set_errors: &["Error"],
     },
     ClaimableKind {
+        kind: "lora",
+        peripheral_trait: "lora::LoraPeripheral",
+        take: "take_lora",
+        associated: "Lora",
+        unavailable: "UnavailableLora",
+        set_macro: "lora_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "nfc-reader",
+        peripheral_trait: "nfc_reader::NfcReaderPeripheral",
+        take: "take_nfc_reader",
+        associated: "NfcReader",
+        unavailable: "UnavailableNfcReader",
+        set_macro: "nfc_reader_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
         kind: "power-monitor",
         peripheral_trait: "power::PowerMonitorPeripheral",
         take: "take_power_monitor",
@@ -1473,6 +1529,15 @@ const CLAIMABLE_KINDS: &[ClaimableKind] = &[
         associated: "RotaryEncoder",
         unavailable: "UnavailableRotaryEncoder",
         set_macro: "rotary_encoder_set",
+        set_errors: &["Error"],
+    },
+    ClaimableKind {
+        kind: "secure-element",
+        peripheral_trait: "secure_element::SecureElementPeripheral",
+        take: "take_secure_element",
+        associated: "SecureElement",
+        unavailable: "UnavailableSecureElement",
+        set_macro: "secure_element_set",
         set_errors: &["Error"],
     },
     ClaimableKind {
@@ -3079,12 +3144,13 @@ fn render_binding(
                 ),
             ));
             let mut pins = Vec::new();
-            for (name, pin) in [
-                ("xclk", camera.xclk()),
-                ("pclk", camera.pclk()),
-                ("vsync", camera.vsync()),
-                ("href", camera.href()),
-            ] {
+            let named = [
+                camera.xclk().map(|xclk| ("xclk", xclk)),
+                Some(("pclk", camera.pclk())),
+                Some(("vsync", camera.vsync())),
+                Some(("href", camera.href())),
+            ];
+            for (name, pin) in named.into_iter().flatten() {
                 validate_hardware_identifier(pin)?;
                 let field =
                     checked_identifier(&format!("{prefix}_{name}"), &mut state.identifiers)?;
@@ -3122,11 +3188,17 @@ fn render_binding(
                 .map(|field| format!("bindings.{field}"))
                 .collect::<Vec<_>>()
                 .join(", ");
+            // A sensor with its own oscillator takes no master clock and has
+            // its own constructor, as a parallel output without a data/command
+            // line does.
+            let (constructor, clock) = match camera.xclk_frequency_hz() {
+                Some(frequency_hz) => ("camera_capture", format!("{frequency_hz}, ")),
+                None => ("camera_capture_without_master_clock", String::new()),
+            };
             Ok((
                 String::from("::barracuda_platform_selected::__platform::hal::CameraReceiver"),
                 format!(
-                    "::barracuda_platform_selected::__platform::hal::camera_capture(bindings.{controller}, bindings.{dma}, {pin_values}, {}, ::barracuda_platform_selected::__platform::hal::camera_dma_buffer!({}).map_err(GeneratedBoardError::{variant})?).map_err(GeneratedBoardError::{variant})?",
-                    camera.xclk_frequency_hz(),
+                    "::barracuda_platform_selected::__platform::hal::{constructor}(bindings.{controller}, bindings.{dma}, {pin_values}, {clock}::barracuda_platform_selected::__platform::hal::camera_dma_buffer!({}).map_err(GeneratedBoardError::{variant})?).map_err(GeneratedBoardError::{variant})?",
                     camera.dma_buffer_bytes()
                 ),
             ))
@@ -3362,6 +3434,51 @@ fn render_binding(
                 ),
                 format!(
                     "::barracuda_platform_selected::__platform::hal::capacitive_touch_buttons(bindings.{controller}, bindings.{rtc_control}, bindings.{rtc_io}, bindings.{pin0}, bindings.{pin1})"
+                ),
+            ))
+        }
+        BindingKind::Twai => {
+            let controller = board.peripheral_io().twai(resource).ok_or_else(|| {
+                GenerateError::UnsupportedResolvedValue {
+                    peripheral: peripheral.name().to_owned(),
+                    parameter: format!("{role} binding"),
+                }
+            })?;
+            validate_hardware_identifier(controller.peripheral())?;
+            validate_hardware_identifier(controller.tx())?;
+            validate_hardware_identifier(controller.rx())?;
+            let prefix = format!("{}_{}", peripheral.name(), role);
+            let field =
+                checked_identifier(&format!("{prefix}_controller"), &mut state.identifiers)?;
+            let tx = checked_identifier(&format!("{prefix}_tx"), &mut state.identifiers)?;
+            let rx = checked_identifier(&format!("{prefix}_rx"), &mut state.identifiers)?;
+            state.raw_fields.extend([
+                (
+                    field.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::controller_binding_type!({})",
+                        controller.peripheral()
+                    ),
+                ),
+                (
+                    tx.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+                        controller.tx()
+                    ),
+                ),
+                (
+                    rx.clone(),
+                    format!(
+                        "::barracuda_platform_selected::__platform::hal::pin_binding_type!({})",
+                        controller.rx()
+                    ),
+                ),
+            ]);
+            Ok((
+                String::from("::barracuda_platform_selected::__platform::hal::TwaiController"),
+                format!(
+                    "::barracuda_platform_selected::__platform::hal::twai_controller(bindings.{field}, bindings.{tx}, bindings.{rx})"
                 ),
             ))
         }

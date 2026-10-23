@@ -95,6 +95,15 @@ peripherals:
       bindings: { i2c: internal-i2c }
       parameters:
         address: 68
+    # FM24C02, 256 bytes in 8-byte pages, at 50h on the internal bus
+    # (docs.m5stack.com M5Paper: "FM24C02 ... 2K-bit (256x8) EEPROM", internal
+    # I2C G21/G22; Espressif m5stack_paper board_peripherals.yaml: 0x50).
+    eeprom:
+      implementation: at24c-eeprom
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 80
+        density: 24c02
     # The rocker's up, press, and down on GPIO37, GPIO38, GPIO39, active low
     # with the Board's pull-ups (M5Unified `M5Unified::update`).
     buttons:

@@ -7,7 +7,10 @@ use core::{cell::RefCell, fmt};
 
 use embedded_hal::spi::Mode;
 
-use crate::{audio, AnalogInput, AnalogOutput, ConfigurableDigitalPin, LeaseError, ResourceKind};
+use crate::{
+    audio, AnalogInput, AnalogOutput, ConfigurableDigitalPin, LeaseError, OutputConfig,
+    ResourceKind,
+};
 
 /// Platform adapter used by the Board-generated runtime I/O owner.
 ///
@@ -379,6 +382,10 @@ pub enum RuntimeOpenError<E> {
     MissingUartData,
     /// I2S was requested without either data signal.
     MissingI2sData,
+    /// A UART driver-enable pin was requested without a transmit pin.
+    DriverEnableWithoutTx,
+    /// The UART driver-enable pin could not be made an output.
+    DriverEnable,
     /// The selected physical resource cannot implement the requested function.
     Unsupported {
         /// Function rejected by the Platform.
@@ -401,6 +408,12 @@ impl<E: fmt::Display> fmt::Display for RuntimeOpenError<E> {
             Self::MissingSpiData => formatter.write_str("SPI requires MOSI or MISO"),
             Self::MissingUartData => formatter.write_str("UART requires TX or RX"),
             Self::MissingI2sData => formatter.write_str("I2S requires DOUT or DIN"),
+            Self::DriverEnableWithoutTx => {
+                formatter.write_str("a UART driver-enable pin needs a TX pin")
+            }
+            Self::DriverEnable => {
+                formatter.write_str("the UART driver-enable pin could not be made an output")
+            }
             Self::Unsupported { function } => {
                 write!(formatter, "the selected pin does not support {function}")
             }
@@ -420,6 +433,8 @@ impl<E: core::error::Error + 'static> core::error::Error for RuntimeOpenError<E>
             | Self::MissingSpiData
             | Self::MissingUartData
             | Self::MissingI2sData
+            | Self::DriverEnableWithoutTx
+            | Self::DriverEnable
             | Self::Unsupported { .. } => None,
         }
     }
@@ -692,7 +707,7 @@ impl<
         const T: usize,
     > UartProvider for RuntimeIo<H, P, I, S, U, A, W, T>
 {
-    type Port = H::Uart;
+    type Port = DirectedUart<H::Uart, H::DigitalPin>;
     type Error = RuntimeOpenError<H::UartError>;
 
     fn uart_available(&self, tx: Option<&str>, rx: Option<&str>) -> bool {
@@ -725,6 +740,9 @@ impl<
         if request.tx.is_none() && request.rx.is_none() {
             return Err(RuntimeOpenError::MissingUartData);
         }
+        if request.driver_enable.is_some() && request.tx.is_none() {
+            return Err(RuntimeOpenError::DriverEnableWithoutTx);
+        }
         let tx_index = request
             .tx
             .map(|name| self.resolve_pin(name).map(|index| (name, index)))
@@ -733,12 +751,17 @@ impl<
             .rx
             .map(|name| self.resolve_pin(name).map(|index| (name, index)))
             .transpose()?;
+        let de_index = request
+            .driver_enable
+            .map(|name| self.resolve_pin(name).map(|index| (name, index)))
+            .transpose()?;
         let mut roles = alloc::vec![];
         roles.extend(tx_index);
         roles.extend(rx_index);
+        roles.extend(de_index);
         self.ensure_distinct(&roles)?;
 
-        let (controller, tx, rx) = critical_section::with(|section| {
+        let (controller, tx, rx, de) = critical_section::with(|section| {
             let mut state = self.state.borrow(section).borrow_mut();
             for (_, index) in &roles {
                 let pin = &state.pins[*index];
@@ -768,15 +791,31 @@ impl<
                 .ok_or(RuntimeOpenError::NoController { protocol: "UART" })?;
             let tx = tx_index.and_then(|(_, index)| state.pins[index].token.take());
             let rx = rx_index.and_then(|(_, index)| state.pins[index].token.take());
+            let de = de_index.and_then(|(_, index)| state.pins[index].token.take());
             if let Some((_, index)) = tx_index {
                 state.pins[index].owner = Some("UART TX");
             }
             if let Some((_, index)) = rx_index {
                 state.pins[index].owner = Some("UART RX");
             }
-            Ok((controller, tx, rx))
+            if let Some((_, index)) = de_index {
+                state.pins[index].owner = Some("UART DE");
+            }
+            Ok((controller, tx, rx, de))
         })?;
-        H::uart(controller, tx, rx, request.config).map_err(RuntimeOpenError::Platform)
+        // The transceiver listens until the first write: the line rests low
+        // before the UART drives its TX pin.
+        let driver_enable = de
+            .map(|token| {
+                let mut pin = H::digital(token);
+                pin.configure_output(OutputConfig::default())
+                    .map(|()| pin)
+                    .map_err(|_| RuntimeOpenError::DriverEnable)
+            })
+            .transpose()?;
+        let port =
+            H::uart(controller, tx, rx, request.config).map_err(RuntimeOpenError::Platform)?;
+        Ok(DirectedUart::new(port, driver_enable))
     }
 }
 
@@ -1227,6 +1266,9 @@ pub struct UartRequest<'a> {
     pub tx: Option<&'a str>,
     /// Optional Board-visible receive pin.
     pub rx: Option<&'a str>,
+    /// Optional Board-visible driver-enable pin of an RS485 transceiver,
+    /// high while the port transmits; it needs a transmit pin.
+    pub driver_enable: Option<&'a str>,
     /// Portable line configuration.
     pub config: UartConfig,
 }
@@ -1320,4 +1362,142 @@ pub trait SpiProvider {
     /// Selects a compatible free controller, then atomically claims and
     /// configures that controller and the selected signal pins.
     fn open_spi(&self, request: SpiRequest<'_>) -> Result<Self::Bus, Self::Error>;
+}
+
+/// A UART stream that switches an RS485 transceiver's driver on while it
+/// transmits.
+///
+/// With a driver-enable pin, each write raises the pin, hands the bytes to the
+/// UART, waits until the last stop bit has left it (`flush`), and lowers the
+/// pin again, so this end drives the bus only while it talks: the half-duplex
+/// direction control ESP-IDF's `UART_MODE_RS485_HALF_DUPLEX` performs. A write
+/// whose future is dropped lowers the pin as it ends. Without a pin, the stream
+/// is the plain UART.
+pub struct DirectedUart<Port, Pin> {
+    port: Port,
+    driver_enable: Option<Pin>,
+}
+
+impl<Port, Pin> DirectedUart<Port, Pin> {
+    /// Wraps a UART stream and, for RS485, the driver-enable pin, which must
+    /// already be a low output.
+    #[must_use]
+    pub const fn new(port: Port, driver_enable: Option<Pin>) -> Self {
+        Self {
+            port,
+            driver_enable,
+        }
+    }
+
+    /// Returns whether a driver-enable pin directs the stream.
+    #[must_use]
+    pub const fn is_directed(&self) -> bool {
+        self.driver_enable.is_some()
+    }
+
+    /// Returns the UART stream.
+    #[must_use]
+    pub const fn port(&self) -> &Port {
+        &self.port
+    }
+}
+
+/// Failure of a [`DirectedUart`]: the UART's own, or the driver-enable pin's.
+#[derive(Debug)]
+pub enum DirectedUartError<PortError, PinError> {
+    /// The UART failed.
+    Port(PortError),
+    /// The driver-enable pin could not be switched.
+    DriverEnable(PinError),
+}
+
+impl<PortError: fmt::Display, PinError: fmt::Debug> fmt::Display
+    for DirectedUartError<PortError, PinError>
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Port(error) => error.fmt(formatter),
+            Self::DriverEnable(error) => {
+                write!(formatter, "the UART driver-enable pin failed: {error:?}")
+            }
+        }
+    }
+}
+
+impl<PortError: core::error::Error, PinError: fmt::Debug> core::error::Error
+    for DirectedUartError<PortError, PinError>
+{
+}
+
+impl<PortError: embedded_io::Error, PinError: fmt::Debug> embedded_io::Error
+    for DirectedUartError<PortError, PinError>
+{
+    fn kind(&self) -> embedded_io::ErrorKind {
+        match self {
+            Self::Port(error) => error.kind(),
+            Self::DriverEnable(_) => embedded_io::ErrorKind::Other,
+        }
+    }
+}
+
+impl<Port, Pin> embedded_io::ErrorType for DirectedUart<Port, Pin>
+where
+    Port: embedded_io::ErrorType,
+    Pin: embedded_hal::digital::ErrorType,
+{
+    type Error = DirectedUartError<Port::Error, Pin::Error>;
+}
+
+impl<Port, Pin> embedded_io_async::Read for DirectedUart<Port, Pin>
+where
+    Port: embedded_io_async::Read,
+    Pin: embedded_hal::digital::ErrorType,
+{
+    async fn read(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        self.port
+            .read(buffer)
+            .await
+            .map_err(DirectedUartError::Port)
+    }
+}
+
+/// Lowers a driver-enable pin when a transmission ends, however it ends.
+struct DriverOn<'a, Pin: embedded_hal::digital::OutputPin>(&'a mut Pin);
+
+impl<Pin: embedded_hal::digital::OutputPin> Drop for DriverOn<'_, Pin> {
+    fn drop(&mut self) {
+        // A failure here has no caller to report to; the next write raises
+        // the pin again and reports its own failure.
+        self.0.set_low().unwrap_or(());
+    }
+}
+
+impl<Port, Pin> embedded_io_async::Write for DirectedUart<Port, Pin>
+where
+    Port: embedded_io_async::Write,
+    Pin: embedded_hal::digital::OutputPin,
+{
+    async fn write(&mut self, buffer: &[u8]) -> Result<usize, Self::Error> {
+        let Some(pin) = self.driver_enable.as_mut() else {
+            return self
+                .port
+                .write(buffer)
+                .await
+                .map_err(DirectedUartError::Port);
+        };
+        pin.set_high().map_err(DirectedUartError::DriverEnable)?;
+        let driver = DriverOn(pin);
+        let written = self
+            .port
+            .write(buffer)
+            .await
+            .map_err(DirectedUartError::Port)?;
+        self.port.flush().await.map_err(DirectedUartError::Port)?;
+        drop(driver);
+        Ok(written)
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.port.flush().await.map_err(DirectedUartError::Port)
+    }
 }

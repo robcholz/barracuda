@@ -24,6 +24,7 @@ pub use providers::{
     RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SpiProvider, SpiRequest, UartConfig,
     UartDataBits, UartParity, UartProvider, UartRequest, UartStopBits, UnsupportedFunction,
 };
+pub use providers::{DirectedUart, DirectedUartError};
 pub use runtime::{LeaseError, ResourceKind};
 
 /// Stable attached audio peripheral API.
@@ -34,8 +35,14 @@ pub use barracuda_peripheral::buttons;
 pub use barracuda_peripheral::buzzer;
 /// Stable attached camera peripheral API.
 pub use barracuda_peripheral::camera;
+/// Stable attached CAN bus API.
+pub use barracuda_peripheral::can;
+/// Stable attached fixed-function digital I/O API.
+pub use barracuda_peripheral::digital_io;
 /// Stable attached display peripheral API.
 pub use barracuda_peripheral::display;
+/// Stable attached EEPROM peripheral API.
+pub use barracuda_peripheral::eeprom;
 /// Stable attached environment-sensor peripheral API.
 pub use barracuda_peripheral::environment;
 /// Stable attached inertial-measurement peripheral API.
@@ -48,6 +55,10 @@ pub use barracuda_peripheral::infrared;
 pub use barracuda_peripheral::keyboard;
 /// Stable attached LED-strip peripheral API.
 pub use barracuda_peripheral::led_strip;
+/// Stable attached LoRa radio API.
+pub use barracuda_peripheral::lora;
+/// Stable attached NFC card-reader API.
+pub use barracuda_peripheral::nfc_reader;
 /// Stable attached electrical-power monitoring API.
 pub use barracuda_peripheral::power;
 /// Stable real-time clock API.
@@ -56,6 +67,8 @@ pub use barracuda_peripheral::real_time_clock;
 pub use barracuda_peripheral::removable_storage;
 /// Stable attached rotary-encoder peripheral API.
 pub use barracuda_peripheral::rotary_encoder;
+/// Stable attached secure-element peripheral API.
+pub use barracuda_peripheral::secure_element;
 /// Stable touch-input API.
 pub use barracuda_peripheral::touch;
 /// Stable attached vibration-motor API.
@@ -63,9 +76,10 @@ pub use barracuda_peripheral::vibration;
 /// One statically dispatched type over a Board's devices of one kind, used by
 /// the generated Board HAL when a Board declares several devices of a kind.
 pub use barracuda_peripheral::{
-    audio_codec_set, buttons_set, buzzer_set, camera_set, display_set, environment_sensor_set,
-    imu_set, indicator_set, infrared_set, keyboard_set, led_strip_set, power_monitor_set,
-    real_time_clock_set, rotary_encoder_set, touch_set, vibration_set,
+    audio_codec_set, buttons_set, buzzer_set, camera_set, can_set, digital_io_set, display_set,
+    eeprom_set, environment_sensor_set, imu_set, indicator_set, infrared_set, keyboard_set,
+    led_strip_set, lora_set, nfc_reader_set, power_monitor_set, real_time_clock_set,
+    rotary_encoder_set, secure_element_set, touch_set, vibration_set,
 };
 /// Stable factory contract implemented by every peripheral implementation.
 pub use barracuda_peripheral::{Instance, PeripheralImplementation};
@@ -254,6 +268,27 @@ pub trait SpiDeviceControl: embedded_hal::spi::ErrorType {
     fn write_deselected(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
 }
 
+/// Bus control a bit-oriented protocol on an SPI controller needs beyond
+/// `embedded-hal`'s `SpiBus`: the clock and mode, and transfers shorter than
+/// a byte.
+///
+/// A JTAG test-access port driven through an SPI controller (TCK on SCK, TDI
+/// on MOSI, TDO on MISO, TMS on a GPIO the implementation owns) moves between
+/// states one clock at a time, which a byte-oriented `SpiBus` cannot clock.
+/// A Platform's `spi-bus` type implements this where its controller can.
+pub trait SpiBusControl: embedded_hal::spi::ErrorType {
+    /// Applies `frequency_hz` and `mode` to the following transfers.
+    fn configure(
+        &mut self,
+        frequency_hz: u32,
+        mode: embedded_hal::spi::Mode,
+    ) -> Result<(), Self::Error>;
+
+    /// Clocks out the low `bits` bits of `value`, 1 through 8, most
+    /// significant first, and returns once the last has been clocked.
+    fn write_bits(&mut self, value: u8, bits: u8) -> Result<(), Self::Error>;
+}
+
 /// One half of a pulse symbol: an output level held for a number of ticks.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PulseLevel {
@@ -389,6 +424,35 @@ pub trait PwmFrequencyControl: embedded_hal::pwm::SetDutyCycle {
 
     /// Retunes the output to `frequency_hz`.
     fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error>;
+}
+
+/// An on-chip classic CAN controller (the ESP TWAI) wired to a transceiver.
+///
+/// `embedded-can` defines frames and a polling `nb` contract but no awaitable
+/// transfers, so the Platform supplies this narrow one. The controller stays
+/// off the bus until [`CanController::start`].
+pub trait CanController {
+    /// Controller or bus failure.
+    type Error: core::fmt::Debug;
+
+    /// Returns whether the controller can run at `bitrate` bits per second.
+    fn supports_bitrate(&self, bitrate: u32) -> bool;
+
+    /// Joins the bus at `bitrate` bits per second, leaving it first when
+    /// already started.
+    fn start(&mut self, bitrate: u32) -> Result<(), Self::Error>;
+
+    /// Leaves the bus.
+    fn stop(&mut self);
+
+    /// Returns the controller's part in the bus.
+    fn state(&self) -> can::BusState;
+
+    /// Sends one frame and returns once the bus carried it.
+    fn transmit(&mut self, frame: &can::Frame) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Waits for the next frame.
+    fn receive(&mut self) -> impl Future<Output = Result<can::Frame, Self::Error>>;
 }
 
 /// One Board-exposed analog output channel.
@@ -964,6 +1028,218 @@ impl infrared::InfraredPeripheral for NoPeripherals {
     type Infrared = UnavailableInfrared;
 
     fn take_infrared(&mut self, _instance: Instance) -> Option<Self::Infrared> {
+        None
+    }
+}
+
+/// Uninhabited EEPROM used when a Board has none.
+pub struct UnavailableEeprom {
+    never: Infallible,
+}
+
+impl eeprom::Eeprom for UnavailableEeprom {
+    type Error = Infallible;
+
+    fn geometry(&self) -> eeprom::EepromGeometry {
+        match self.never {}
+    }
+
+    async fn read(&mut self, _offset: u32, _buffer: &mut [u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn write(&mut self, _offset: u32, _data: &[u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl eeprom::EepromPeripheral for NoPeripherals {
+    type Eeprom = UnavailableEeprom;
+
+    fn take_eeprom(&mut self, _instance: Instance) -> Option<Self::Eeprom> {
+        None
+    }
+}
+
+/// Uninhabited secure element used when a Board has none.
+pub struct UnavailableSecureElement {
+    never: Infallible,
+}
+
+impl secure_element::SecureElement for UnavailableSecureElement {
+    type Error = Infallible;
+
+    async fn serial_number(&mut self) -> Result<secure_element::SerialNumber, Self::Error> {
+        match self.never {}
+    }
+
+    async fn fill_random(&mut self, _buffer: &mut [u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn public_key(
+        &mut self,
+        _slot: secure_element::KeySlot,
+    ) -> Result<secure_element::P256PublicKey, Self::Error> {
+        match self.never {}
+    }
+
+    async fn sign_digest(
+        &mut self,
+        _slot: secure_element::KeySlot,
+        _digest: &[u8; 32],
+    ) -> Result<secure_element::P256Signature, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl secure_element::SecureElementPeripheral for NoPeripherals {
+    type SecureElement = UnavailableSecureElement;
+
+    fn take_secure_element(&mut self, _instance: Instance) -> Option<Self::SecureElement> {
+        None
+    }
+}
+
+/// Uninhabited NFC card reader used when a Board has none.
+pub struct UnavailableNfcReader {
+    never: Infallible,
+}
+
+impl nfc_reader::NfcReader for UnavailableNfcReader {
+    type Error = Infallible;
+
+    async fn poll(&mut self) -> Result<Option<nfc_reader::Card>, Self::Error> {
+        match self.never {}
+    }
+
+    async fn read_block(
+        &mut self,
+        _block: u8,
+    ) -> Result<[u8; nfc_reader::BLOCK_BYTES], Self::Error> {
+        match self.never {}
+    }
+}
+
+impl nfc_reader::NfcReaderPeripheral for NoPeripherals {
+    type NfcReader = UnavailableNfcReader;
+
+    fn take_nfc_reader(&mut self, _instance: Instance) -> Option<Self::NfcReader> {
+        None
+    }
+}
+
+/// Uninhabited LoRa radio used when a Board has none.
+pub struct UnavailableLora {
+    never: Infallible,
+}
+
+impl lora::Lora for UnavailableLora {
+    type Error = Infallible;
+
+    fn limits(&self) -> lora::RadioLimits {
+        match self.never {}
+    }
+
+    async fn configure(&mut self, _config: lora::LoraConfig) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn transmit(&mut self, _payload: &[u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn receive(&mut self, _buffer: &mut [u8]) -> Result<lora::Received, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl lora::LoraPeripheral for NoPeripherals {
+    type Lora = UnavailableLora;
+
+    fn take_lora(&mut self, _instance: Instance) -> Option<Self::Lora> {
+        None
+    }
+}
+
+/// Uninhabited CAN controller used when a Board has none.
+pub struct UnavailableCan {
+    never: Infallible,
+}
+
+impl can::Can for UnavailableCan {
+    type Error = Infallible;
+
+    fn supports_bitrate(&self, _bitrate: u32) -> bool {
+        match self.never {}
+    }
+
+    fn start(&mut self, _bitrate: u32) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn stop(&mut self) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn bitrate(&self) -> Option<u32> {
+        match self.never {}
+    }
+
+    fn state(&self) -> can::BusState {
+        match self.never {}
+    }
+
+    async fn transmit(&mut self, _frame: &can::Frame) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn receive(&mut self) -> Result<can::Frame, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl can::CanPeripheral for NoPeripherals {
+    type Can = UnavailableCan;
+
+    fn take_can(&mut self, _instance: Instance) -> Option<Self::Can> {
+        None
+    }
+}
+
+/// Uninhabited digital I/O bank used when a Board has none.
+pub struct UnavailableDigitalIo {
+    never: Infallible,
+}
+
+impl digital_io::DigitalIo for UnavailableDigitalIo {
+    type Error = Infallible;
+
+    fn output_count(&self) -> usize {
+        match self.never {}
+    }
+
+    fn input_count(&self) -> usize {
+        match self.never {}
+    }
+
+    fn set_output(&mut self, _index: usize, _on: bool) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn outputs(&self) -> digital_io::Levels {
+        match self.never {}
+    }
+
+    fn read_inputs(&mut self) -> Result<digital_io::Levels, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl digital_io::DigitalIoPeripheral for NoPeripherals {
+    type DigitalIo = UnavailableDigitalIo;
+
+    fn take_digital_io(&mut self, _instance: Instance) -> Option<Self::DigitalIo> {
         None
     }
 }

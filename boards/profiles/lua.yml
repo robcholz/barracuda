@@ -6,7 +6,10 @@ enable:
   - audio
   - buzzer
   - camera
+  - can
+  - digital-io
   - display
+  - eeprom
   - environment-sensor
   - gpio
   - i2c
@@ -15,10 +18,13 @@ enable:
   - infrared
   - keyboard
   - led-strip
+  - lora
   - message-queue
+  - nfc
   - power-monitor
   - pwm
   - rotary-encoder
+  - secure-element
   - spi
   - uart
   - vibration

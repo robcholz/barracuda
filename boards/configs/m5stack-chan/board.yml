@@ -47,6 +47,20 @@ peripherals:
         channels: 2
         bits-per-sample: 16
         dma-buffer-bytes: 4096
+    camera-capture:
+      camera-data:
+        # M5Stack CoreS3 pin map and Espressif's m5stack_cores3
+        # board_devices.yaml (`camera`, dvp_config): PCLK GPIO45, VSYNC
+        # GPIO46, HREF (DE) GPIO38, D0-D7 in bit order. No XCLK
+        # (`xclk_io: -1`, esp-bsp BSP_CAMERA_GPIO_XCLK not connected): the
+        # camera module clocks itself. One 320x240 RGB565 frame.
+        peripheral: LCD_CAM
+        dma: DMA_CH0
+        pclk: GPIO45
+        vsync: GPIO46
+        href: GPIO38
+        data: [GPIO39, GPIO40, GPIO41, GPIO42, GPIO15, GPIO16, GPIO48, GPIO47]
+        dma-buffer-bytes: 153600
   devices:
     audio-codec:
       # AW88298 amplifier (36h) and ES7210 microphone ADC (40h) on the internal
@@ -54,6 +68,13 @@ peripherals:
       # amplifier's reset.
       implementation: aw88298-es7210-audio-codec
       bindings: { control: internal-i2c, stream: audio-stream }
+    camera:
+      # GC0308 at 21h on the internal bus (M5Stack CoreS3 pin map). AXP2101
+      # ALDO3 supplies it and AW9523B P1_0 is its reset (CAM_RST).
+      implementation: gc0308-camera
+      bindings: { capture: camera-data, control: internal-i2c }
+      parameters:
+        power-layout: cores3
     display:
       # ILI9342C 320x240. AW9523B P1_1 resets it and AXP2101 DLDO1 lights it.
       implementation: m5stack-pmic-display
@@ -89,6 +110,14 @@ peripherals:
     real-time-clock:
       implementation: bm8563-rtc
       bindings: { i2c: internal-i2c }
+    # The body's ST25R3916 NFC reader at 50h on the internal bus (UIFlow
+    # `hardware/nfc.py`: StackChan on I2C1, SCL G11 / SDA G12). Its interrupt
+    # is not wired to a known pin; the implementation polls.
+    nfc-reader:
+      implementation: st25r3916-nfc-reader
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 80
     # The battery behind the AXP2101 the display also uses.
     power-monitor:
       implementation: axp192-axp2101-power-monitor

@@ -1,9 +1,10 @@
 //! Low-level Driver for one Awinic AW9523B I2C 16-bit I/O expander.
 //!
 //! Register layout follows the AW9523B datasheet: REG00H/01H inputs,
-//! REG02H/03H outputs, REG04H/05H direction (1 = input), REG10H ID (23h),
-//! REG11H global control (bit 4 selects push-pull for port 0), and
-//! REG12H/13H mode switch (1 = GPIO, 0 = LED current sink).
+//! REG02H/03H outputs, REG04H/05H direction (1 = input), REG06H/07H interrupt
+//! enable (1 = disabled), REG10H ID (23h), REG11H global control (bit 4
+//! selects push-pull for port 0), and REG12H/13H mode switch (1 = GPIO,
+//! 0 = LED current sink).
 //!
 //! Pins are numbered 0 through 15: P0_0 through P0_7 are 0 through 7, and
 //! P1_0 through P1_7 are 8 through 15.
@@ -15,6 +16,7 @@ use embedded_hal::{delay::DelayNs, i2c::I2c};
 const INPUT_P0: u8 = 0x00;
 const OUTPUT_P0: u8 = 0x02;
 const CONFIG_P0: u8 = 0x04;
+const INTERRUPT_P0: u8 = 0x06;
 const ID: u8 = 0x10;
 const ID_AW9523B: u8 = 0x23;
 const GLOBAL_CONTROL: u8 = 0x11;
@@ -126,6 +128,46 @@ where
         Ok(self.read(INPUT_P0 | offset)? & mask != 0)
     }
 
+    /// Reads both input ports at once: P0 in the low byte, P1 in the high
+    /// byte. Reading a port also clears its pending interrupt.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn read_inputs(&mut self) -> Result<u16, Error<I2C::Error>> {
+        let low = self.read(INPUT_P0)?;
+        let high = self.read(INPUT_P0 | 1)?;
+        Ok(u16::from_le_bytes([low, high]))
+    }
+
+    /// Returns whether one pin is configured as an input.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-pin or I2C register error.
+    pub fn is_input(&mut self, pin: u8) -> Result<bool, Error<I2C::Error>> {
+        let (offset, mask) = pin_location(pin)?;
+        Ok(self.read(CONFIG_P0 | offset)? & mask != 0)
+    }
+
+    /// Enables or disables the interrupt a level change of one input raises
+    /// on the shared INTN line.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-pin or I2C register error.
+    pub fn set_interrupt_enabled(
+        &mut self,
+        pin: u8,
+        enabled: bool,
+    ) -> Result<(), Error<I2C::Error>> {
+        let (offset, mask) = pin_location(pin)?;
+        // A set bit masks the pin's interrupt.
+        self.update(INTERRUPT_P0 | offset, |value| {
+            set_bits(value, mask, !enabled)
+        })
+    }
+
     /// Pulses an active-low reset output and leaves it released high.
     ///
     /// # Errors
@@ -197,7 +239,7 @@ mod tests {
         i2c::{ErrorType, I2c, Operation},
     };
 
-    use super::{Aw9523, CONFIG_P0, Error, GLOBAL_CONTROL, MODE_P0, OUTPUT_P0};
+    use super::{Aw9523, CONFIG_P0, Error, GLOBAL_CONTROL, INTERRUPT_P0, MODE_P0, OUTPUT_P0};
 
     const ADDRESS: u8 = 0x58;
 
@@ -330,5 +372,23 @@ mod tests {
             Aw9523::new(&mut bus, 0x80),
             Err(Error::InvalidAddress)
         ));
+    }
+
+    #[test]
+    fn reads_both_ports_and_masks_interrupts() {
+        let mut bus = Bus::default();
+        bus.registers[0x00] = 0xa0;
+        bus.registers[0x01] = 0x50;
+        {
+            let mut expander = Aw9523::new(&mut bus, ADDRESS).expect("valid address");
+            assert_eq!(expander.read_inputs().expect("read"), 0x50a0);
+            expander.configure_input(12).expect("input");
+            assert!(expander.is_input(12).expect("direction"));
+            assert!(!expander.is_input(0).expect("direction"));
+            expander.set_interrupt_enabled(12, false).expect("mask");
+            expander.set_interrupt_enabled(4, true).expect("unmask");
+        }
+        assert_eq!(bus.registers[usize::from(INTERRUPT_P0) + 1], 0x10);
+        assert_eq!(bus.registers[usize::from(INTERRUPT_P0)], 0x00);
     }
 }

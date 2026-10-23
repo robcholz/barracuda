@@ -35,8 +35,11 @@ cargo image deploy
 | `buttons` | 按键 A（旋钮按下）和 B（GPIO42、GPIO0） | — |
 | `rotary-encoder` | 旋钮编码器（A GPIO41、B GPIO40，脉冲计数器） | [`encoder`](/zh/plugins/vm-rotary-encoder) |
 | `buzzer` | 无源蜂鸣器（GPIO3） | [`buzzer`](/zh/plugins/vm-buzzer) |
+| `nfc-reader` | RFID / NFC 读卡器（WS1850S，兼容 MFRC522，`28h`） | [`nfc`](/zh/plugins/vm-nfc) |
 
 Dial v1.1 搭载 Stamp-S3A，其 RGB LED 经 GPIO38 供电；LED 在启动时把 GPIO38 置高。v1.0 的 StampS3 不使用 GPIO38。
+
+读卡器像 M5Stack 的 M5Dial 库那样以软复位启动，并以轮询方式工作；它的复位线和中断线没有使用。
 
 ## 可用引脚
 

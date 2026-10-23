@@ -68,6 +68,9 @@ pub enum HalBinding {
     /// Retunable PWM output construction, one timer and channel of a PWM
     /// controller the runtime PWM pool may share.
     PwmOutput,
+    /// Classic CAN controller construction (the ESP TWAI) on the pins of a
+    /// Board's transceiver.
+    Twai,
 }
 
 /// One ADC channel route owned by a Platform ADC controller pool.

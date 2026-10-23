@@ -738,3 +738,274 @@ macro_rules! environment_sensor_set {
         }
     };
 }
+
+/// Declares one Board's EEPROMs as a single statically dispatched
+/// [`eeprom::Eeprom`](crate::eeprom::Eeprom).
+#[macro_export]
+macro_rules! eeprom_set {
+    ($vis:vis enum $name:ident, $error:ident { $($variant:ident($device:ty)),+ $(,)? }) => {
+        $crate::__peripheral_set_enum!($vis $name, "EEPROM", [$($variant($device)),+]);
+        $crate::__peripheral_set_error!(
+            $vis $error, "EEPROM", <$crate::eeprom::Eeprom>::Error,
+            [$($variant($device)),+]
+        );
+
+        impl $crate::eeprom::Eeprom for $name {
+            type Error = $error;
+
+            fn geometry(&self) -> $crate::eeprom::EepromGeometry {
+                $crate::__peripheral_set_forward!(plain self, $name [$($variant),+] |device| {
+                    $crate::eeprom::Eeprom::geometry(device)
+                })
+            }
+
+            async fn read<'a>(
+                &'a mut self,
+                offset: u32,
+                buffer: &'a mut [u8],
+            ) -> Result<(), Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::eeprom::Eeprom::read(device, offset, buffer).await
+                })
+            }
+
+            async fn write<'a>(&'a mut self, offset: u32, data: &'a [u8]) -> Result<(), Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::eeprom::Eeprom::write(device, offset, data).await
+                })
+            }
+        }
+    };
+}
+
+/// Declares one Board's secure elements as a single statically dispatched
+/// [`secure_element::SecureElement`](crate::secure_element::SecureElement).
+#[macro_export]
+macro_rules! secure_element_set {
+    ($vis:vis enum $name:ident, $error:ident { $($variant:ident($device:ty)),+ $(,)? }) => {
+        $crate::__peripheral_set_enum!($vis $name, "secure element", [$($variant($device)),+]);
+        $crate::__peripheral_set_error!(
+            $vis $error, "secure element", <$crate::secure_element::SecureElement>::Error,
+            [$($variant($device)),+]
+        );
+
+        impl $crate::secure_element::SecureElement for $name {
+            type Error = $error;
+
+            async fn serial_number(
+                &mut self,
+            ) -> Result<$crate::secure_element::SerialNumber, Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::secure_element::SecureElement::serial_number(device).await
+                })
+            }
+
+            async fn fill_random<'a>(&'a mut self, buffer: &'a mut [u8]) -> Result<(), Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::secure_element::SecureElement::fill_random(device, buffer).await
+                })
+            }
+
+            async fn public_key(
+                &mut self,
+                slot: $crate::secure_element::KeySlot,
+            ) -> Result<$crate::secure_element::P256PublicKey, Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::secure_element::SecureElement::public_key(device, slot).await
+                })
+            }
+
+            async fn sign_digest<'a>(
+                &'a mut self,
+                slot: $crate::secure_element::KeySlot,
+                digest: &'a [u8; 32],
+            ) -> Result<$crate::secure_element::P256Signature, Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::secure_element::SecureElement::sign_digest(device, slot, digest).await
+                })
+            }
+        }
+    };
+}
+
+/// Declares one Board's NFC readers as a single statically dispatched
+/// [`nfc_reader::NfcReader`](crate::nfc_reader::NfcReader).
+#[macro_export]
+macro_rules! nfc_reader_set {
+    ($vis:vis enum $name:ident, $error:ident { $($variant:ident($device:ty)),+ $(,)? }) => {
+        $crate::__peripheral_set_enum!($vis $name, "NFC reader", [$($variant($device)),+]);
+        $crate::__peripheral_set_error!(
+            $vis $error, "NFC reader", <$crate::nfc_reader::NfcReader>::Error,
+            [$($variant($device)),+]
+        );
+
+        impl $crate::nfc_reader::NfcReader for $name {
+            type Error = $error;
+
+            async fn poll(&mut self) -> Result<Option<$crate::nfc_reader::Card>, Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::nfc_reader::NfcReader::poll(device).await
+                })
+            }
+
+            async fn read_block(
+                &mut self,
+                block: u8,
+            ) -> Result<[u8; $crate::nfc_reader::BLOCK_BYTES], Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::nfc_reader::NfcReader::read_block(device, block).await
+                })
+            }
+        }
+    };
+}
+
+/// Declares one Board's LoRa radios as a single statically dispatched
+/// [`lora::Lora`](crate::lora::Lora).
+#[macro_export]
+macro_rules! lora_set {
+    ($vis:vis enum $name:ident, $error:ident { $($variant:ident($device:ty)),+ $(,)? }) => {
+        $crate::__peripheral_set_enum!($vis $name, "LoRa radio", [$($variant($device)),+]);
+        $crate::__peripheral_set_error!(
+            $vis $error, "LoRa radio", <$crate::lora::Lora>::Error,
+            [$($variant($device)),+]
+        );
+
+        impl $crate::lora::Lora for $name {
+            type Error = $error;
+
+            fn limits(&self) -> $crate::lora::RadioLimits {
+                $crate::__peripheral_set_forward!(plain self, $name [$($variant),+] |device| {
+                    $crate::lora::Lora::limits(device)
+                })
+            }
+
+            async fn configure(&mut self, config: $crate::lora::LoraConfig) -> Result<(), Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::lora::Lora::configure(device, config).await
+                })
+            }
+
+            async fn transmit(&mut self, payload: &[u8]) -> Result<(), Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::lora::Lora::transmit(device, payload).await
+                })
+            }
+
+            async fn receive(
+                &mut self,
+                buffer: &mut [u8],
+            ) -> Result<$crate::lora::Received, Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::lora::Lora::receive(device, buffer).await
+                })
+            }
+        }
+    };
+}
+
+/// Declares one Board's CAN controllers as a single statically dispatched
+/// [`can::Can`](crate::can::Can).
+#[macro_export]
+macro_rules! can_set {
+    ($vis:vis enum $name:ident, $error:ident { $($variant:ident($device:ty)),+ $(,)? }) => {
+        $crate::__peripheral_set_enum!($vis $name, "CAN controller", [$($variant($device)),+]);
+        $crate::__peripheral_set_error!(
+            $vis $error, "CAN controller", <$crate::can::Can>::Error,
+            [$($variant($device)),+]
+        );
+
+        impl $crate::can::Can for $name {
+            type Error = $error;
+
+            fn supports_bitrate(&self, bitrate: u32) -> bool {
+                $crate::__peripheral_set_forward!(plain self, $name [$($variant),+] |device| {
+                    $crate::can::Can::supports_bitrate(device, bitrate)
+                })
+            }
+
+            fn start(&mut self, bitrate: u32) -> Result<(), Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::can::Can::start(device, bitrate)
+                })
+            }
+
+            fn stop(&mut self) -> Result<(), Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::can::Can::stop(device)
+                })
+            }
+
+            fn bitrate(&self) -> Option<u32> {
+                $crate::__peripheral_set_forward!(plain self, $name [$($variant),+] |device| {
+                    $crate::can::Can::bitrate(device)
+                })
+            }
+
+            fn state(&self) -> $crate::can::BusState {
+                $crate::__peripheral_set_forward!(plain self, $name [$($variant),+] |device| {
+                    $crate::can::Can::state(device)
+                })
+            }
+
+            async fn transmit(&mut self, frame: &$crate::can::Frame) -> Result<(), Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::can::Can::transmit(device, frame).await
+                })
+            }
+
+            async fn receive(&mut self) -> Result<$crate::can::Frame, Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::can::Can::receive(device).await
+                })
+            }
+        }
+    };
+}
+
+/// Declares one Board's digital I/O devices as a single statically dispatched
+/// [`digital_io::DigitalIo`](crate::digital_io::DigitalIo).
+#[macro_export]
+macro_rules! digital_io_set {
+    ($vis:vis enum $name:ident, $error:ident { $($variant:ident($device:ty)),+ $(,)? }) => {
+        $crate::__peripheral_set_enum!($vis $name, "digital I/O device", [$($variant($device)),+]);
+        $crate::__peripheral_set_error!(
+            $vis $error, "digital I/O device", <$crate::digital_io::DigitalIo>::Error,
+            [$($variant($device)),+]
+        );
+
+        impl $crate::digital_io::DigitalIo for $name {
+            type Error = $error;
+
+            fn output_count(&self) -> usize {
+                $crate::__peripheral_set_forward!(plain self, $name [$($variant),+] |device| {
+                    $crate::digital_io::DigitalIo::output_count(device)
+                })
+            }
+
+            fn input_count(&self) -> usize {
+                $crate::__peripheral_set_forward!(plain self, $name [$($variant),+] |device| {
+                    $crate::digital_io::DigitalIo::input_count(device)
+                })
+            }
+
+            fn set_output(&mut self, index: usize, on: bool) -> Result<(), Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::digital_io::DigitalIo::set_output(device, index, on)
+                })
+            }
+
+            fn outputs(&self) -> $crate::digital_io::Levels {
+                $crate::__peripheral_set_forward!(plain self, $name [$($variant),+] |device| {
+                    $crate::digital_io::DigitalIo::outputs(device)
+                })
+            }
+
+            fn read_inputs(&mut self) -> Result<$crate::digital_io::Levels, Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::digital_io::DigitalIo::read_inputs(device)
+                })
+            }
+        }
+    };
+}

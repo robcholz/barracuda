@@ -20,12 +20,24 @@ peripherals:
     spi-device:
       display-spi:
         # M5GFX `board_M5UnitC6L`: SCLK G20, MOSI G21, OLED CS G6 at 40 MHz.
-        # The bus is shared with the SX1262 LoRa modem, which is not declared.
+        # The bus is shared with the SX1262 LoRa modem below.
         peripheral: SPI2
         sck: GPIO20
         mosi: GPIO21
+        # The SX1262's data out; the OLED only listens.
+        miso: GPIO22
         chip-select: GPIO6
         frequency-hz: 40000000
+      lora-spi:
+        # SX1262 on the same bus: MISO G22, NSS G23 (M5Stack's Meshtastic
+        # variant `m5stack_unitc6l/variant.h` and UIFlow `hardware/lora.py`
+        # agree). 8 MHz, half the chip's 16 MHz limit.
+        peripheral: SPI2
+        sck: GPIO20
+        mosi: GPIO21
+        miso: GPIO22
+        chip-select: GPIO23
+        frequency-hz: 8000000
     rmt-output:
       rgb-led-data:
         # WS2812 on GPIO2 (M5Unified `_pin_table_other0` (RGBLED),
@@ -75,6 +87,29 @@ peripherals:
     buzzer:
       implementation: pwm-buzzer
       bindings: { output: buzzer-tone }
+    # SX1262 LoRa modem (Meshtastic `m5stack_unitc6l`: BUSY G19, DIO1 G7,
+    # DIO2 drives the antenna switch, 3.0 V TCXO on DIO3; UIFlow
+    # `hardware/lora.py` has the same pins). Its reset, RF switch, and LNA
+    # enable are P7, P6, and P5 of the PI4IOE5V6408 at 43h the button also
+    # uses (M5Unified `Power_Class::begin` and the Meshtastic `c6l_init`,
+    # which turns the RF switch and LNA on). UIFlow supplies the TCXO with
+    # 3.3 V and Meshtastic with 3.0 V; this uses Meshtastic's, the lower.
+    # The front end passes 850-930 MHz (UIFlow `LoRa.set_freq`).
+    lora:
+      implementation: sx1262-pi4ioe5v6408-lora
+      bindings:
+        spi: lora-spi
+        busy: GPIO19
+        dio1: GPIO7
+        expander: internal-i2c
+      parameters:
+        reset-pin: p7
+        rf-switch-pin: p6
+        lna-pin: p5
+        tcxo-voltage: 3.0v
+        dio2-rf-switch: true
+        min-frequency-hz: 850000000
+        max-frequency-hz: 930000000
 exposed-io:
   pins:
     # Grove port G4/G5 (M5Unified `_pin_table_port_bc`).
