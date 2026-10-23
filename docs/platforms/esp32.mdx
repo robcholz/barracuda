@@ -198,6 +198,18 @@ transfer engine in the order they ask, with no priority between them. One
 card transfer moves at most 4 KiB, so a large file never holds Wi-Fi up for
 longer than one such transfer, about 0.2 ms at 40 MHz.
 
+The ESP32, ESP32-S3, ESP32-C3, and ESP32-C6 drive their Wi-Fi radio with
+esp-radio: a station, whose IP stack runs DHCP, and the setup access point on
+a second stack. A firmware builds the radio only when an enabled Plugin takes
+the Platform's Wi-Fi, as the `wifi` Plugin does in every profile with network.
+Without one, the firmware links no Wi-Fi driver, radio firmware, or radio
+task, the IP stack has no link, and the radio stays off. The random number
+generator is true-random only while noise feeds it: with the radio, the radio
+does. Without it, the Platform runs the SAR ADC noise source at start-up,
+before the Board takes the ADC, seeds a ChaCha20 generator from 128 bytes of
+it, and stops it, so the ADC stays free for runtime and Board channels; the
+generator re-keys itself after every fill.
+
 The ESP32-P4 has no radio. Its IP stack runs on whichever network link the
 Board declares:
 
@@ -218,7 +230,9 @@ Board declares:
   point is a second stack on the co-processor.
 
 On a Board with neither, the stack has no link and the Wi-Fi Plugin opens no
-setup hotspot.
+setup hotspot. The co-processor is the Platform's radio, so a firmware without
+a Plugin that takes Wi-Fi leaves it unpowered and builds no ESP-Hosted driver:
+the stack then runs over Ethernet alone, or has no link.
 
 The ESP32-P4's entropy is its random number generator fed by SAR ADC noise,
 started the way ESP-IDF starts it on this radio-less chip: at startup the

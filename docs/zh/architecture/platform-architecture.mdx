@@ -106,7 +106,9 @@ pub struct PlatformResources<Partitions, Wifi, Entropy> {
 
 `wifi` 是一个独立的通信机制，不属于 `ip_stack`。没有无线电的平台提供一个显式标明不受支持的实现，System 把这个机制交给唯一一个取走它并拥有其策略的插件。
 
-`entropy` 是平台的不可预测字节来源，适用于密码学用途：在主机平台上是操作系统的生成器，在设备上是由物理噪声驱动的真随机数生成器。没有熵源的平台提供 `UnavailableEntropy`，永远不提供更弱的生成器。System 把它的类型擦除到 `PluginContext::entropy` 中，每个需要随机性的插件都克隆它；无线电则擦除到 `PluginContext::wifi` 中。
+平台只为有插件取走无线电的固件构建无线电。这个插件在它的 `plugin.toml` 中声明 `[platform] wifi = true`；只要有启用的插件这样声明，生成的插件选择就会启用所选平台的 `wifi` Cargo 特性。没有这个特性时，有无线电的平台提供不受支持的实现，不启动无线电，也不链接任何无线电代码：在 ESP 芯片上，IP 协议栈因此没有链路，因为没有插件能加入网络；在 ESP32-P4 上，Wi-Fi 协处理器保持断电，而以太网仍然承载协议栈。没有无线电的平台不声明这个特性。
+
+`entropy` 是平台的不可预测字节来源，适用于密码学用途：在主机平台上是操作系统的生成器，在设备上是由物理噪声驱动的真随机数生成器。如果设备的噪声源不能与它共用的硬件同时运行，例如没有无线电的 ESP 芯片，其 SAR ADC 噪声源会占住 ADC，那么它只在启动时运行噪声源，并用它为一个 ChaCha20 生成器播种，这正是乐鑫为这种情况推荐的软件 DRBG；生成器在每次填充后重新生成密钥，所以它的状态不会泄露之前的输出。没有熵源的平台提供 `UnavailableEntropy`，永远不提供更弱的生成器。System 把它的类型擦除到 `PluginContext::entropy` 中，每个需要随机性的插件都克隆它；无线电则擦除到 `PluginContext::wifi` 中。
 
 这是架构上的指导，而不是冻结的 Rust 签名。不变量是分区始终是一个集合。业务角色永远不会成为 filesystem_partition、resources_partition 或 database_partition 这样的字段。IP 能力同样始终是 `ip_stack`，而不是 web_network 或 database_network。TLS 不是平台资源；拥有 HTTP 的插件在平台边界之上构建它（见“TLS 和 HTTP 客户端”）。
 

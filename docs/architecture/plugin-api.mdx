@@ -246,6 +246,23 @@ with a required slot keeps the `Option` from construction and returns
 empty; Plugin Manager logs that, leaves the Plugin and every Plugin depending
 on it out, and registers the rest.
 
+### Platform mechanisms
+
+The one Plugin that takes the Platform's Wi-Fi radio, `PluginContext::wifi`,
+declares it:
+
+```toml
+[platform]
+wifi = true
+```
+
+A firmware builds the radio only when an enabled Plugin declares it: the
+generated Plugin selection then enables the selected Platform's `wifi`
+feature. Without one, `wifi` in the context is the Platform's unsupported
+implementation and no radio code is linked. `cargo plugin sync --check`
+requires a Plugin page's Context resources to name `wifi` exactly when the
+Plugin declares it.
+
 ### Host tasks
 
 A Plugin that generates files declares a named host task:
@@ -348,14 +365,16 @@ impl ExamplePlugin {
 - The Plugin never stores the context or a reference to it.
 
 `PluginContext` carries only raw resources of the Platform and Board, which
-exist whether or not any Plugin uses them:
+exist whether or not any Plugin uses them, except the Wi-Fi radio, which a
+firmware builds only for a Plugin that declares it (see
+[Platform mechanisms](#platform-mechanisms)):
 
 | Field | Use |
 | --- | --- |
 | `target_identity` | Copy |
 | `ip_stack` | Copy |
 | `entropy` | Clone the `SharedEntropy` |
-| `wifi` | `take()` by the one Plugin that owns Wi-Fi policy |
+| `wifi` | `take()` by the one Plugin that owns Wi-Fi policy, which declares `[platform] wifi = true` |
 | `hal.peripherals` | `take_<peripheral>(instance)` with the Plugin's `config::peripherals` constants |
 | `hal.exposed_io` | Clone the `Arc` |
 

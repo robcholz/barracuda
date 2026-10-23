@@ -55,7 +55,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-check-cfg=cfg(barracuda_esp32p4_sd_card)");
     let active = board.hardware().chip() == "esp32p4";
     let ethernet = board.hardware().ethernet().filter(|_| active);
-    let coprocessor = board.hardware().wifi_coprocessor().filter(|_| active);
+    // The co-processor is the Platform's Wi-Fi radio, built only with the
+    // `wifi` feature, which the Plugin selection enables when an enabled
+    // Plugin takes the Platform's Wi-Fi. Without it the co-processor stays
+    // unpowered and the IP stack runs over Ethernet alone, or has no link.
+    let wifi = env::var_os("CARGO_FEATURE_WIFI").is_some();
+    let coprocessor = board
+        .hardware()
+        .wifi_coprocessor()
+        .filter(|_| active && wifi);
     if ethernet.is_some() {
         println!("cargo:rustc-cfg=barracuda_esp32p4_ethernet");
     }

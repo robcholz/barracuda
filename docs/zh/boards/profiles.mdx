@@ -37,6 +37,8 @@ profile 是分层的。每个 profile 在它所扩展的 profile 之上添加插
        screen-offline = lua + ui
 ```
 
+不带 Wi-Fi 的配置也不构建无线电：取走平台无线电的是 `wifi` 插件，所以没有它时，ESP 固件不链接 Wi-Fi 驱动、无线电固件和网络任务，IP 协议栈也没有链路。
+
 `ui` 是一个层，而不是一个产品：它没有用于硬件的 Lua 包，也无法联网。带屏幕的开发板应指定 `screen` 或 `screen-offline`。
 
 `screen-offline` 没有 Settings 和 Sessions 应用：Settings 依赖 Wi-Fi，Sessions 依赖 Agent。音量和亮度在控制中心里调节。
