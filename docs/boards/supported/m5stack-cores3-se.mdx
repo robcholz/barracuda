@@ -48,7 +48,8 @@ The microSD slot is not declared: its MISO, GPIO35, is also the display's D/C li
 
 The power button is read through the PMIC, which latches a short press when the
 key is released and a long press once it has been held for the long-press time;
-the button reads pressed in one sample for each. It sets and clears only the
+the button reads pressed in one sample for each, and its events report
+a short press as a click and a long press as a long press. It sets and clears only the
 key's own interrupt bits of the PMIC.
 
 ## Exposed pins
