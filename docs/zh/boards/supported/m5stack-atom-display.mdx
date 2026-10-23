@@ -31,4 +31,3 @@ cargo image deploy
 | `display` | HDMI 输出，1280 x 720，60 Hz（GW1NR-9C FPGA、LT8618SX 发送器） | [`display`](/zh/plugins/vm-display) |
 
 FPGA 断电后不保留配置。启动时，除非 FPGA 在复位后仍保留着设计，显示屏会通过 FPGA 的 SPI 线以 JTAG 加载 M5Stack 的 FPGA 设计（来自 M5GFX），然后设置视频模式并启动 LT8618SX。绘制内容会立即写入 FPGA 的帧存储；用显示屏的 `width` 和 `height` 设置更小的绘制尺寸时，画面会放大到 720p，绘制占用的 SPI 总线也更少。
-
