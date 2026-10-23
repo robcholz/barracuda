@@ -43,6 +43,9 @@ static_cell.workspace = true
 nb = "1"
 sdio = "0.5.1"
 
+[dev-dependencies]
+esp-idf-part = "0.6.0"
+
 [build-dependencies]
 barracuda-board-config.workspace = true
 esp-idf-part = "0.6.0"

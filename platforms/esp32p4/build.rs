@@ -5,7 +5,10 @@
 use std::{env, error::Error, fs, path::PathBuf};
 
 use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
-use esp_idf_part::{AppType, DataType, Flags, Partition, PartitionTable, SubType, Type};
+use esp_idf_part::{DataType, Flags, Partition, PartitionTable, SubType};
+
+#[path = "../esp32/build_app_slots.rs"]
+mod app_slots;
 
 #[path = "../esp32/build_power_hold.rs"]
 mod power_hold;
@@ -85,27 +88,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let table_path = bundle.join(board.native_layout().artifact());
     println!("cargo:rerun-if-changed={}", table_path.display());
+    println!("cargo:rerun-if-changed=../esp32/build_app_slots.rs");
     let table = PartitionTable::try_from_str(fs::read_to_string(table_path)?)?;
     table.validate()?;
-    for slot in [AppType::Ota_0, AppType::Ota_1] {
-        if table
-            .find_by_subtype(Type::App, SubType::App(slot))
-            .is_none()
-        {
-            return Err(format!("ESP32 native table is missing `{slot:?}`").into());
-        }
-    }
-    let ota_slots = table
-        .partitions()
-        .iter()
-        .filter(|partition| {
-            partition.ty() == Type::App
-                && matches!(
-                    partition.subtype(),
-                    SubType::App(slot) if slot != AppType::Factory && slot != AppType::Test
-                )
-        })
-        .count();
+    let ota_slots = app_slots::app_slot_count(&table)
+        .map_err(|error| format!("ESP32-P4 native table {error}"))?;
 
     let mut generated = String::from("const BOARD_ESP32P4_REGIONS: &[Esp32P4Region] = &[\n");
     for partition in table.partitions() {
