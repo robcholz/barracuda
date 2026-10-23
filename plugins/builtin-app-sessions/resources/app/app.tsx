@@ -11,7 +11,7 @@ export default function Sessions() {
       <Text class="shrink-0 text-sm font-bold text-[#FAFAFA] mt-[16px]">{clock()}</Text>
 
       <Show when={page() === 0}>
-        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-hidden">
+        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-y-auto">
           <For each={sessions()} by={(session) => session.id}>
             {(session) => (
               <View class="shrink-0 w-full flex-col" focusable onPress={() => open(session().id)}>
@@ -37,8 +37,8 @@ export default function Sessions() {
       </Show>
 
       <Show when={page() === 1}>
-        {/* The latest messages, the newest at the bottom; older ones go off the top. */}
-        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col justify-end gap-[12px] mt-[12px] overflow-hidden">
+        {/* The latest messages, the newest at the bottom; drag down for older ones. */}
+        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col justify-end gap-[12px] mt-[12px] overflow-y-auto">
           <For each={messages()} by={(message) => message.id}>
             {(message) => (
               <View class={message().mine ? "shrink-0 w-full flex-row justify-end pl-[40px]" : "shrink-0 w-full flex-col gap-[6px]"}>

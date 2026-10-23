@@ -39,7 +39,7 @@ export default function Settings() {
       <Text class="shrink-0 text-sm font-bold text-[#FAFAFA] mt-[16px]">{clock()}</Text>
 
       <Show when={page() === 0}>
-        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-hidden">
+        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-y-auto">
           <For each={rows()} by={(row) => row.id}>
             {(row) => (
               <View class="shrink-0 w-full flex-col" focusable onPress={() => open(row().id)}>
@@ -57,7 +57,7 @@ export default function Settings() {
       </Show>
 
       <Show when={page() === 1}>
-        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-hidden">
+        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-y-auto">
           <View class="shrink-0 w-full min-h-[57px] flex-row flex-wrap items-center gap-3 px-3 py-[6px]">
             <Text class={connected() ? "shrink-0 text-lg font-bold text-[#FAFAFA]" : "shrink-0 text-lg font-bold text-[#FF7878]"}>
               {connected() ? "" : ""}
@@ -101,7 +101,7 @@ export default function Settings() {
       </Show>
 
       <Show when={page() === 2}>
-        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-hidden">
+        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-y-auto">
           <View class="shrink-0 w-full flex-col px-3 pt-[10px] pb-[4px]">
             <View class="flex-row flex-wrap justify-between items-center gap-2">
               <Text class="basis-[72px] grow min-w-0 text-lg text-[#FAFAFA]">Volume</Text>
@@ -180,7 +180,7 @@ export default function Settings() {
       </Show>
 
       <Show when={page() === 3}>
-        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-hidden">
+        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-y-auto">
           <For each={apps()} by={(app) => app.id}>
             {(app) => (
               <View class="shrink-0 w-full flex-col">
@@ -206,7 +206,7 @@ export default function Settings() {
       </Show>
 
       <Show when={page() === 4}>
-        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-hidden">
+        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-y-auto">
           <View class="shrink-0 w-full flex-col px-3 pt-[6px] pb-[14px]">
             <Text class="text-2xl font-bold text-[#FAFAFA]">{used()}</Text>
             <Text class="text-sm text-[#A1A1AA]">{usedNote()}</Text>
@@ -233,7 +233,7 @@ export default function Settings() {
       </Show>
 
       <Show when={page() === 5}>
-        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col items-center mt-[16px] overflow-hidden">
+        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col items-center mt-[16px] overflow-y-auto">
           <View class="shrink-0 w-[60px] h-[48px] relative mt-[2px]">
             <Text class="absolute left-0 top-0 text-4xl text-[#CCFF00]">{""}</Text>
           </View>

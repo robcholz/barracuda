@@ -142,6 +142,22 @@ impl Preview {
         Some(Json::Object(call))
     }
 
+    /// A pointer that went down at (`x`, `y`) set off vertically: answers
+    /// whether the view scrolls there, and takes the drag if it does.
+    pub fn drag_start(&mut self, x: f32, y: f32) -> bool {
+        self.document.drag_start(x, y)
+    }
+
+    /// The dragging pointer moved `dy` view pixels down since the last frame.
+    pub fn drag_by(&mut self, dy: f32) {
+        self.document.drag_by(dy);
+    }
+
+    /// The dragging pointer lifted: the content carries on and settles.
+    pub fn drag_end(&mut self) {
+        self.document.drag_end();
+    }
+
     /// The text on screen, in document order.
     #[must_use]
     pub fn texts(&self) -> Vec<String> {

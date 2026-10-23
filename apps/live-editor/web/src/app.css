@@ -137,7 +137,7 @@ body {
 .le-bezel--square { border-radius: 28px; }
 .le-screen { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 50%; background: #09090b; color: #fafafa; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 11px; font-family: var(--font-sans); }
 .le-bezel--square .le-screen { border-radius: 18px; }
-.le-screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; image-rendering: auto; }
+.le-screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; image-rendering: auto; touch-action: none; }
 .le-screen-text { position: relative; font-size: 13px; color: #a1a1aa; text-align: center; padding: 0 32px; }
 .le-screen-title { position: relative; font-size: 15px; font-weight: 500; }
 .le-key { position: relative; border: 0; padding: 8px 16px; border-radius: 6px; font: inherit; font-size: 14px; cursor: pointer; }

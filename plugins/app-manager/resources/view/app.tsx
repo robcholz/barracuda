@@ -226,7 +226,7 @@ export default function System() {
         }
       >
         <Text class="shrink-0 text-sm font-bold text-[#FAFAFA] mt-[16px]">Running</Text>
-        <View class="flex-1 min-h-0 w-full max-w-[284px] flex-col gap-2 mt-[20px] overflow-hidden">
+        <View class="flex-1 min-h-0 w-full max-w-[284px] flex-col gap-2 mt-[20px] overflow-y-auto">
           <For each={running()} by={(app) => app.id}>
             {(app) => (
               <View class="shrink-0 w-full min-h-[60px] rounded-lg border border-[#27272A] bg-[#09090B] flex-row flex-wrap items-center gap-[10px] pl-[16px] pr-[6px]">
@@ -304,7 +304,7 @@ export default function System() {
           <Show when={screen() === 8}>
             <Text class="shrink-0 text-lg font-bold text-[#FAFAFA] text-center mt-[8px]">{title()}</Text>
             <Text class="shrink-0 text-sm text-[#A1A1AA] text-center">{detail()}</Text>
-            <View class="min-h-0 w-full max-w-[256px] flex-col mt-[8px] overflow-hidden">
+            <View class="min-h-0 w-full max-w-[256px] flex-col mt-[8px] overflow-y-auto">
               <For each={lines()} by={(line) => line.id}>
                 {(line) => (
                   <View class="shrink-0 w-full flex-col">
@@ -347,7 +347,7 @@ export default function System() {
         }
       >
         <Text class="shrink-0 text-lg font-bold text-[#FAFAFA] mt-[22px]">Notifications</Text>
-        <View class="flex-1 min-h-0 w-full max-w-[252px] flex-col gap-2 mt-[12px] overflow-hidden">
+        <View class="flex-1 min-h-0 w-full max-w-[252px] flex-col gap-2 mt-[12px] overflow-y-auto">
           <Show when={done() !== ""}>
             <View class="shrink-0 w-full rounded-lg border border-[#27272A] flex-row items-center gap-2 px-[14px] py-[10px]">
               <Text class="shrink-0 text-base text-[#FAFAFA]">{"\uE020"}</Text>
@@ -431,7 +431,7 @@ export default function System() {
               </View>
             </View>
           </Show>
-          <View class="flex-1 min-h-0 w-full flex-col items-center overflow-hidden">
+          <View class="flex-1 min-h-0 w-full flex-col items-center overflow-y-auto">
             <View class="flex-1 min-h-0" />
             <View class="w-full max-w-[272px] flex-row flex-wrap justify-center gap-2">
               <For each={tiles()} by={(tile) => tile.id}>

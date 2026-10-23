@@ -94,6 +94,10 @@ A view is laid out at the display's size in view pixels, from 135 px wide to
 - Center a column with a `flex-1 min-h-0` spacer above and below its content:
   on a short display the spacers give way first and the bottom is cut, not
   the title.
+- Put a list that can run longer than the display in a
+  `flex-1 min-h-0 overflow-y-auto` box with `shrink-0` rows: a vertical drag
+  scrolls it. With `justify-end` it starts at its last item, as a chat does,
+  and scrolls up to the first.
 
 Fixed sizes stay as written. `view.size` is the smallest display the view
 still fits. The device judges a view by its size alone: whether the

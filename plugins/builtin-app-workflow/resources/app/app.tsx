@@ -9,7 +9,7 @@ export default function Workflows() {
   return (
     <View class="w-full h-full flex-col items-center px-[16px] overflow-hidden bg-[#09090B]">
       <Text class="shrink-0 text-sm font-bold text-[#FAFAFA] mt-[16px]">{clock()}</Text>
-      <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-hidden">
+      <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-y-auto">
         <For each={flows()} by={(flow) => flow.id}>
           {(flow) => (
             <View class="shrink-0 w-full flex-col">

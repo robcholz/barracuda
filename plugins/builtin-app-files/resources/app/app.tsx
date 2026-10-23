@@ -11,7 +11,7 @@ export default function Files() {
       <Text class="shrink-0 text-sm font-bold text-[#FAFAFA] mt-[16px]">{clock()}</Text>
 
       <Show when={page() === 0}>
-        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-hidden">
+        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-y-auto">
           <For each={areas()} by={(item) => item.id}>
             {(item) => (
               <View class="shrink-0 w-full flex-col" focusable onPress={() => open(item().id)}>
@@ -28,7 +28,7 @@ export default function Files() {
       </Show>
 
       <Show when={page() === 1}>
-        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-hidden">
+        <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-y-auto">
           <View class="shrink-0 w-full flex-row flex-wrap items-end justify-between gap-2 px-3 pb-[8px]">
             <Text class="shrink-0 text-lg font-bold text-[#FAFAFA]">{area()}</Text>
             <Text class="min-w-0 text-sm text-[#A1A1AA]">{summary()}</Text>
