@@ -18,7 +18,7 @@ Barracuda 设备上的每项能力都是一个插件。每个插件页面都会�
 | [Wi-Fi](/zh/plugins/wifi) | 拥有 Wi-Fi 策略：站点（station）和配置接入点的生命周期、持久保存的站点凭据，以及配网页面和 API。 |
 | [System Wi-Fi](/zh/plugins/system-wifi) | 在系统界面中显示 Wi-Fi：状态栏上的连接、主屏幕的离线卡片、控制中心的 Wi-Fi 磁贴，以及门户磁贴打开的设置热点。 |
 | [Captive Portal](/zh/plugins/captive-portal) | 把可插拔的网页入口和资源提供者汇集到门户外壳中。 |
-| [Power](/zh/plugins/power) | 拥有开发板的主电源监测器，并把它的读数和电池电量以 `Power` 的形式发布给其他插件。 |
+| [Power](/zh/plugins/power) | 拥有开发板的电源监测器，并把它们的读数和电池电量以 `Power` 的形式发布给其他插件。 |
 | [Sound](/zh/plugins/sound) | 拥有开发板的主音频编解码器，以 `Sound` 的形式一次只把它借给一个使用者，并以 `Volume` 的形式保存设备的输出音量，这个音量由用户为所有声音统一设置。 |
 | [Time](/zh/plugins/time) | Time 插件通过 SNTP 同步 UTC 时间，维护开发板的实时时钟，并把时间作为类型化的只读时钟能力发布出去。 |
 | [Scheduler](/zh/plugins/scheduler) | Scheduler 插件拥有持久的计划，并在某个计划到期时发出一个 Workflow Event。 |
@@ -90,7 +90,7 @@ Barracuda 设备上的每项能力都是一个插件。每个插件页面都会�
 | [LoRa](/zh/plugins/vm-lora) | 基于开发板的 LoRa 射频模块安装 `lora` Lua 包，默认使用主模块。 |
 | [Message Queue](/zh/plugins/vm-message-queue) | 安装只能 require 的 `message_queue` Lua 包：一组有界的共享 FIFO 队列，相互独立的 Lua 执行用它们交换消息。 |
 | [NFC](/zh/plugins/vm-nfc) | 基于开发板的 NFC 读卡器安装 `nfc` Lua 包，默认使用主读卡器。 |
-| [Power Monitor](/zh/plugins/vm-power-monitor) | 基于开发板的电源监测器（由 `power` 插件拥有）安装 `power_monitor` Lua 包。 |
+| [Power Monitor](/zh/plugins/vm-power-monitor) | 基于开发板的电源监测器（由 `power` 插件拥有）安装 `power_monitor` Lua 包，默认使用主监测器。 |
 | [Secure Element](/zh/plugins/vm-secure-element) | 基于开发板的安全芯片安装 `secure_element` Lua 包，默认使用主安全芯片。 |
 | [PWM](/zh/plugins/vm-pwm) | 基于开发板的可用 I/O 引脚安装 `pwm` Lua 包。 |
 | [SPI](/zh/plugins/vm-spi) | 基于开发板的可用 I/O 引脚安装只能 require 的 `spi` Lua 包。 |

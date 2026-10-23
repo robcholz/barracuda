@@ -32,12 +32,12 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `power-monitor` | Battery gauge (AXP192) | [`power_monitor`](/plugins/vm-power-monitor) |
-| `port-a1-power` | Port A1 5 V output (INA3221 `40h` CH1, 10 mΩ shunt) | — |
-| `port-a2-power` | Port A2 5 V output (INA3221 `40h` CH2, 10 mΩ shunt) | — |
-| `port-b1-power` | Port B1 5 V output (INA3221 `40h` CH3, 10 mΩ shunt) | — |
-| `port-b2-power` | Port B2 5 V output (INA3221 `41h` CH1, 10 mΩ shunt) | — |
-| `port-c1-power` | Port C1 5 V output (INA3221 `41h` CH2, 10 mΩ shunt) | — |
-| `port-c2-power` | Port C2 5 V output (INA3221 `41h` CH3, 10 mΩ shunt) | — |
+| `port-a1-power` | Port A1 5 V output (INA3221 `40h` CH1, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-a2-power` | Port A2 5 V output (INA3221 `40h` CH2, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-b1-power` | Port B1 5 V output (INA3221 `40h` CH3, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-b2-power` | Port B2 5 V output (INA3221 `41h` CH1, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-c1-power` | Port C1 5 V output (INA3221 `41h` CH2, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-c2-power` | Port C2 5 V output (INA3221 `41h` CH3, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `buttons` | Buttons A, B, C (GPIO37, GPIO38, GPIO39) | [`buttons`](/plugins/vm-buttons) |
 | `power-button` | Power button (AXP192 power key) | [`buttons`](/plugins/vm-buttons) |
 
@@ -46,8 +46,9 @@ measurement registers, and the display keeps its regulators.
 
 Each Grove port's 5 V output passes a 10 mΩ shunt into one INA3221 channel,
 and its current reads positive into the port. `power-monitor`, the battery, is
-the primary power monitor; the `power_monitor` Lua package reads only the
-primary one, so no Lua package reads the port monitors yet.
+the primary power monitor: the system UI's battery reads it, and so does the
+`power_monitor` Lua package when a script names no monitor. A script opens a
+port's monitor by its name, such as `power_monitor.open("port-a1-power")`.
 
 The power button is read through the PMIC, which latches a short press when the
 key is released and a long press once it has been held for the long-press time;
