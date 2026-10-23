@@ -1,4 +1,5 @@
 name: m5stack-nanoc6
+profile: connected
 hardware:
   chip: esp32c6
   # ESP32-C6FH4.

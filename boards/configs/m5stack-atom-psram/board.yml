@@ -1,4 +1,5 @@
 name: m5stack-atom-psram
+profile: connected
 hardware:
   chip: esp32
   # ESP32-PICO-V3-02.

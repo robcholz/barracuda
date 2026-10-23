@@ -24,27 +24,38 @@ the dependencies of every listed Plugin come along on their own.
 | `lua` | `minimal` | the VM and the Lua packages that need no network, among them those for the Board's hardware | no | yes |
 | `network` | `minimal` | Wi-Fi, the web server, the captive portal, HTTP, the portal's file manager | yes | no |
 | `ai` | `network` | the Agent, its tools, and the message gateways | yes | no |
-| `headless` | `lua`, `ai` | the Lua packages that need the network or the Agent | yes | yes |
+| `connected` | `lua`, `network` | the Lua packages that need the network but not the Agent: HTTP and the web server | yes | yes |
+| `headless` | `connected`, `ai` | the Lua packages that need the Agent | yes | yes |
 | `ui` | — | the app manager with the system UI, the system fonts, the Files and Workflows apps | no | yes |
 | `screen-offline` | `lua`, `ui` | nothing more | no | yes |
-| `screen` | `headless`, `ui` | Wi-Fi in the system UI, the Sessions and Settings apps | yes | yes |
+| `screen-connected` | `connected`, `ui` | Wi-Fi in the system UI, the Settings app | yes | yes |
+| `screen` | `headless`, `screen-connected` | the Sessions app | yes | yes |
 
 ```text
                  minimal
                 /       \
              lua         network
-              |  \          |
-              |   \         ai
-              |    \       /
-              |    headless          (the default)
-              |        \
-              |       screen = headless + ui + …
+              | \        /    |
+              |  connected    ai
+              |    |     \    |
+              |    |     headless               (the default)
+              |    |         |
+              |  screen-connected = connected + ui + …
+              |          \   |
+              |          screen = headless + screen-connected + …
               |
        screen-offline = lua + ui
 ```
 
 `ui` is a layer, not a product: it has no Lua packages for the hardware and
-no way online. A Board with a screen names `screen` or `screen-offline`.
+no way online. A Board with a screen names `screen`, `screen-connected`, or
+`screen-offline`.
+
+`connected` and `screen-connected` are `headless` and `screen` without the
+Agent: online, with Lua scripts that make and serve HTTP requests, but
+without the Agent, its tools, the message gateways, or the Sessions app.
+They are for Boards whose flash cannot hold the Agent. Their names say what
+sets them apart from `lua` and `screen-offline`: the device goes online.
 
 `screen-offline` has no Settings or Sessions app: Settings depends on Wi-Fi
 and Sessions on the Agent. Volume and brightness are in the control center.
@@ -60,12 +71,31 @@ plugins:
     enabled: false
 ```
 
-- A product with a screen names `screen`, or `screen-offline` when it never
-  goes online.
+- A product with a screen names `screen`, `screen-connected` when its flash
+  cannot hold the Agent, or `screen-offline` when it never goes online.
 - A product without one names nothing and builds `headless`, or a narrower
-  layer: `minimal`, `lua`, `network`, or `ai`.
+  layer: `connected` when its flash cannot hold the Agent, `minimal`, `lua`,
+  `network`, or `ai`.
 - One Plugin more or less goes in `plugins.<id>.enabled` on the Board, not in
   a new profile.
+
+## Fitting the flash
+
+The firmware has to fit the Board's app slot (see
+[ESP flash layout](/boards/overview#esp-flash-layout)): 2816 KiB on 4 MiB of
+flash. On the ESP32 it also has to fit the 3 MiB the chip maps for code.
+Release builds of `headless` take about 4 MiB on the ESP32-C3, ESP32-C6, and
+ESP32-S3, and `screen` about 5 MiB on the ESP32-S3; on the ESP32, `ai` alone
+overflows the code window. So the Boards build:
+
+| Chip | Flash | Without a screen | With a screen |
+| --- | --- | --- | --- |
+| ESP32 | any | `connected` | `screen-connected` |
+| ESP32-C3 | 4 MiB | `connected` | — |
+| ESP32-C6 | 4 MiB | `connected` | — |
+| ESP32-C6 | 8 MiB, 16 MiB | `headless` | `screen` |
+| ESP32-S3 | 8 MiB, 16 MiB | `headless` | `screen` |
+| ESP32-P4 | 16 MiB | `headless` | `screen` |
 
 ## Adding one
 

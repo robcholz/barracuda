@@ -1,4 +1,5 @@
 name: m5stack-stamp-c3-mate
+profile: connected
 hardware:
   chip: esp32c3
   # Stamp-C3 (ESP32-C3, 4 MB flash).

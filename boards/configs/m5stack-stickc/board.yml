@@ -1,5 +1,5 @@
 name: m5stack-stickc
-profile: screen
+profile: screen-connected
 hardware:
   chip: esp32
   # ESP32-PICO-D4.

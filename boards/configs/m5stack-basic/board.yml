@@ -1,5 +1,5 @@
 name: m5stack-basic
-profile: screen
+profile: screen-connected
 hardware:
   chip: esp32
   # ESP32-D0WDQ6-V3 with 16 MB flash (units before 2020.6 had 4 MB).

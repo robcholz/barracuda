@@ -1,4 +1,5 @@
 name: esp32-devkitc-v4
+profile: connected
 hardware:
   chip: esp32
   # ESP32-WROOM-32E-N4 (DevKitC-32E).

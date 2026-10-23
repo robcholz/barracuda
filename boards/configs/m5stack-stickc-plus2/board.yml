@@ -1,5 +1,5 @@
 name: m5stack-stickc-plus2
-profile: screen
+profile: screen-connected
 hardware:
   chip: esp32
   # ESP32-PICO-V3-02.

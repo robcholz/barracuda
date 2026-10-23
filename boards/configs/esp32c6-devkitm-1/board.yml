@@ -1,4 +1,5 @@
 name: esp32c6-devkitm-1
+profile: connected
 hardware:
   chip: esp32c6
   # ESP32-C6-MINI-1-N4.

@@ -1,4 +1,5 @@
 name: m5stack-timercam
+profile: connected
 hardware:
   chip: esp32
   # ESP32-D0WDQ6-V3.
