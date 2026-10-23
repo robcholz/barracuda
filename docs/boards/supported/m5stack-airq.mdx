@@ -32,7 +32,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `display` | E-paper display, 1.54-inch 200 x 200 (GDEH0154D67 or GDEW0154M09, identified at start-up) | [`display`](/plugins/vm-display) |
 | `environment-sensor` | Air-quality sensors: SEN55 (particulate matter, VOC and NOx indices, temperature, humidity) and SCD40 (CO2), as one device | [`environment`](/plugins/vm-environment-sensor) |
 | `real-time-clock` | Real-time clock (BM8563) | — |
-| `buttons` | Buttons A and B (GPIO0, GPIO8) | — |
+| `buttons` | Buttons A and B (GPIO0, GPIO8) | [`buttons`](/plugins/vm-buttons) |
 | `buzzer` | Passive buzzer (GPIO9) | [`buzzer`](/plugins/vm-buzzer) |
 
 The Platform entry drives `GPIO46`, the battery power latch (`hardware.power-hold`), high before anything else is built, so the Board stays on without USB power once its power button is released.

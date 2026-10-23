@@ -68,6 +68,7 @@ The [Plugin API](/architecture/plugin-api) defines what a Plugin may own and how
 | [VM](/plugins/vm) | The VM Plugin owns isolated Lua execution: it publishes the typed `Vm` capability, the `LuaPackageRegistry` that VM package Plugins extend, and the Workflow Actions that run Lua scripts. |
 | [VM Agent](/plugins/vm-agent) | The VM Agent Plugin exposes isolated, non-persistent Agent asks to Lua code as the require-only `agent` Lua package. |
 | [Analog](/plugins/vm-analog) | The Analog Plugin exposes analog input and output on the Board's exposed pins to Lua code as the `analog` Lua package. |
+| [Buttons](/plugins/vm-buttons) | Installs the `buttons` Lua package over the Board's buttons, the primary device by default. |
 | [Buzzer](/plugins/vm-buzzer) | Installs the `buzzer` Lua package over the Board's buzzers, the primary one by default. |
 | [Audio](/plugins/vm-audio) | The Audio Plugin exposes playback and recording on the Board's audio codec, which the `sound` Plugin owns, to Lua code as the `audio` Lua package. |
 | [Camera](/plugins/vm-camera) | The Camera Plugin owns the Board's cameras and exposes frame capture to Lua code as the `camera` Lua package, the primary camera by default. |

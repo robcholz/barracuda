@@ -38,8 +38,8 @@ cargo image deploy
 | `port-b2-power` | Port B2 的 5 V 输出（INA3221 `41h` CH1，10 mΩ 分流电阻） | — |
 | `port-c1-power` | Port C1 的 5 V 输出（INA3221 `41h` CH2，10 mΩ 分流电阻） | — |
 | `port-c2-power` | Port C2 的 5 V 输出（INA3221 `41h` CH3，10 mΩ 分流电阻） | — |
-| `buttons` | 按键 A、B、C（GPIO37、GPIO38、GPIO39） | — |
-| `power-button` | 电源键（AXP192） | — |
+| `buttons` | 按键 A、B、C（GPIO37、GPIO38、GPIO39） | [`buttons`](/zh/plugins/vm-buttons) |
+| `power-button` | 电源键（AXP192） | [`buttons`](/zh/plugins/vm-buttons) |
 
 电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。
 

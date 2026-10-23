@@ -175,6 +175,7 @@ barracuda-vm-plugin = { path = "plugins/vm/crates/plugin" }
 barracuda-vm-agent-plugin = { path = "plugins/vm-agent/crates/plugin" }
 barracuda-analog-plugin = { path = "plugins/vm-analog/crates/plugin" }
 barracuda-audio-plugin = { path = "plugins/vm-audio/crates/plugin" }
+barracuda-buttons-plugin = { path = "plugins/vm-buttons/crates/plugin" }
 barracuda-buzzer-plugin = { path = "plugins/vm-buzzer/crates/plugin" }
 barracuda-camera-plugin = { path = "plugins/vm-camera/crates/plugin" }
 barracuda-can-plugin = { path = "plugins/vm-can/crates/plugin" }

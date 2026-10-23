@@ -38,8 +38,8 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `port-b2-power` | Port B2 5 V output (INA3221 `41h` CH1, 10 mΩ shunt) | — |
 | `port-c1-power` | Port C1 5 V output (INA3221 `41h` CH2, 10 mΩ shunt) | — |
 | `port-c2-power` | Port C2 5 V output (INA3221 `41h` CH3, 10 mΩ shunt) | — |
-| `buttons` | Buttons A, B, C (GPIO37, GPIO38, GPIO39) | — |
-| `power-button` | Power button (AXP192 power key) | — |
+| `buttons` | Buttons A, B, C (GPIO37, GPIO38, GPIO39) | [`buttons`](/plugins/vm-buttons) |
+| `power-button` | Power button (AXP192 power key) | [`buttons`](/plugins/vm-buttons) |
 
 The battery gauge shares the PMIC with the display: it reads only the PMIC's
 measurement registers, and the display keeps its regulators.

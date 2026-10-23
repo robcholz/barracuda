@@ -1151,6 +1151,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-buttons-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vm-plugin",
+ "barracuda-vm-runtime",
+ "critical-section",
+ "embassy-time",
+ "futures-lite",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
 name = "barracuda-buzzer-plugin"
 version = "0.1.0"
 dependencies = [
@@ -3246,6 +3262,7 @@ dependencies = [
  "barracuda-builtin-app-sessions-plugin",
  "barracuda-builtin-app-settings-plugin",
  "barracuda-builtin-app-workflow-plugin",
+ "barracuda-buttons-plugin",
  "barracuda-buzzer-plugin",
  "barracuda-camera-plugin",
  "barracuda-can-plugin",

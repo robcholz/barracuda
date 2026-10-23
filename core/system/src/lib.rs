@@ -19,6 +19,7 @@ use core::pin::Pin;
 
 use barracuda_board_hal::{
     audio::AudioCodecPeripheral,
+    buttons::ButtonsPeripheral,
     buzzer::BuzzerPeripheral,
     camera::CameraPeripheral,
     can::CanPeripheral,
@@ -223,6 +224,7 @@ where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
     Peripherals: AudioCodecPeripheral
+        + ButtonsPeripheral
         + BuzzerPeripheral
         + CameraPeripheral
         + DisplayPeripheral
@@ -251,6 +253,8 @@ where
     <Peripherals::Display as barracuda_board_hal::display::Display>::RenderError: core::fmt::Debug,
     Peripherals::Camera: Send + 'static,
     <Peripherals::Camera as barracuda_board_hal::camera::Camera>::Error: core::fmt::Debug,
+    Peripherals::Buttons: Send + 'static,
+    <Peripherals::Buttons as barracuda_board_hal::buttons::Buttons>::Error: core::fmt::Debug,
     Peripherals::Buzzer: Send + 'static,
     <Peripherals::Buzzer as barracuda_board_hal::buzzer::Buzzer>::Error: core::fmt::Debug,
     Peripherals::Infrared: Send + 'static,

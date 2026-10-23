@@ -4,6 +4,7 @@ extends: minimal
 enable:
   - analog
   - audio
+  - buttons
   - buzzer
   - camera
   - can
