@@ -6,7 +6,7 @@ implementation:
   crate: barracuda_pi4ioe5v6408_buttons
   factory: "::{{crate}}::Pi4ioe5v6408ButtonsImplementation<{{binding.i2c.type}}>"
   bindings-expression: "::{{crate}}::Pi4ioe5v6408ButtonsBindings::new({{binding.i2c.value}})"
-  config-expression: "::{{crate}}::Pi4ioe5v6408ButtonsConfig::new({{parameter.address}}, {{parameter.button-1}}, [{{parameter.button-2}}, {{parameter.button-3}}, {{parameter.button-4}}, {{parameter.button-5}}, {{parameter.button-6}}, {{parameter.button-7}}, {{parameter.button-8}}], {{parameter.active-level}}, {{parameter.pull}}, {{parameter.debounce-ms}})"
+  config-expression: "::{{crate}}::Pi4ioe5v6408ButtonsConfig::new({{parameter.address}}, {{parameter.button-1}}, [{{parameter.button-2}}, {{parameter.button-3}}, {{parameter.button-4}}, {{parameter.button-5}}, {{parameter.button-6}}, {{parameter.button-7}}, {{parameter.button-8}}], {{parameter.active-level}}, {{parameter.pull}}, {{parameter.debounce-ms}}, {{parameter.long-press-ms}})"
 # Buttons on input pins of a PI4IOE5V6408 I/O expander. The implementation
 # configures only its own pins as inputs; other pins of the same expander
 # stay with the implementations that own them, such as a display backlight.
@@ -154,3 +154,9 @@ parameters:
   debounce-ms:
     type: integer
     default: 10
+  # How long a press lasts before it is a long press, reported while the
+  # button is still down; a shorter press is a click. 500 ms is M5Unified's
+  # `Button_Class` hold time.
+  long-press-ms:
+    type: integer
+    default: 500

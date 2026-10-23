@@ -315,6 +315,14 @@ macro_rules! buttons_set {
                     $crate::buttons::Buttons::read(device)
                 })
             }
+
+            fn poll_event(
+                &mut self,
+            ) -> Result<Option<$crate::buttons::ButtonEvent>, Self::Error> {
+                $crate::__peripheral_set_forward!(map $error: self, $name [$($variant),+] |device| {
+                    $crate::buttons::Buttons::poll_event(device)
+                })
+            }
         }
     };
 }

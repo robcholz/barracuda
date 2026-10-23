@@ -5,7 +5,7 @@
 
 use barracuda_peripheral::{
     audio::{AudioCodec, AudioDescriptor},
-    buttons::{ButtonSnapshot, Buttons},
+    buttons::{ButtonEvent, ButtonEventKind, ButtonSnapshot, Buttons},
     buzzer::{Buzzer, Note, Volume},
     camera::{Camera, CameraDescriptor, CameraPixelFormat, CapturedFrame},
     can::{BusState, Can, Frame, Id},
@@ -210,12 +210,20 @@ impl Buttons for Good {
     fn read(&mut self) -> Result<ButtonSnapshot, Self::Error> {
         Ok(ButtonSnapshot::new(&[self.0 != 0]))
     }
+
+    fn poll_event(&mut self) -> Result<Option<ButtonEvent>, Self::Error> {
+        Ok((self.0 != 0).then_some(ButtonEvent::new(0, ButtonEventKind::Click)))
+    }
 }
 
 impl Buttons for Broken {
     type Error = Failure;
 
     fn read(&mut self) -> Result<ButtonSnapshot, Self::Error> {
+        Err(Failure)
+    }
+
+    fn poll_event(&mut self) -> Result<Option<ButtonEvent>, Self::Error> {
         Err(Failure)
     }
 }
@@ -235,6 +243,14 @@ fn a_buttons_set_forwards_to_its_buttons() {
     );
     assert!(matches!(
         ButtonGroups::Side(Broken).read(),
+        Err(ButtonGroupsError::Side(Failure))
+    ));
+    assert_eq!(
+        ButtonGroups::Front(Good(1)).poll_event().ok().flatten(),
+        Some(ButtonEvent::new(0, ButtonEventKind::Click))
+    );
+    assert!(matches!(
+        ButtonGroups::Side(Broken).poll_event(),
         Err(ButtonGroupsError::Side(Failure))
     ));
 }

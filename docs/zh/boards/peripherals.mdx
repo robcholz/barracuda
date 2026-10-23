@@ -278,6 +278,12 @@ Board peripheral `<name>` (<implementation>) failed to initialize; the Board sta
 
 如果插件的必需槽位因为设备初始化失败而为空，插件在 `register` 中返回 `PluginError::PeripheralUnavailable`。插件管理器记录这条错误，不加载这个插件以及所有依赖它的插件，并启动 System 的其余部分。
 
+## 按键事件
+
+`Buttons::read` 采样每个按键此刻是否按下，`Buttons::poll_event` 按先后顺序返回按键发生过的事件：`Pressed`（按下）、`Released`（松开）、`Click`（在长按时间之前松开的一次单击），以及 `LongPress`（按住达到长按时间时、按键仍按下时报告）。每个事件用按键在快照中的序号指明按键。读取状态不会消耗事件，取走事件也不会让下一次状态读取漏掉按下。
+
+采样按键电平的实现（`gpio-buttons`、`pi4ioe5v6408-buttons`、`powerhub-buttons`、`adc-ladder-buttons`、`capacitive-touch-buttons` 和 `m5pm1-buttons`）用 `peripherals/api` 中的 `ButtonTracker` 生成事件：轮询时若没有待取事件就采样一次。它沿用 M5Unified `Button_Class` 的规则：新电平保持消抖时间后才算数，若上一次采样早于消抖时间则立即算数。每个实现都有 `debounce-ms`（10 ms）和 `long-press-ms`（500 ms）参数，即 M5Unified 的默认值；`m5pm1-buttons` 只有 `long-press-ms`，因为 M5PM1 报告的是已稳定的电平，两次采样之间发生又结束的一次按下报告为 `Pressed`、`Released`、`Click`。`axp192-axp2101-buttons` 在 PMIC 锁存按下后一次性报告：短按为 `Pressed`、`Released`、`Click`，长按为 `Pressed`、`LongPress`、`Released`，长按时间由 PMIC 自己决定。每个实现最多保存 16 个事件，读取跟不上时丢弃最早的事件。
+
 ## 实现清单
 
 每个可选的实现都拥有 `peripherals/impl/<peripheral>/<implementation-id>/peripheral.yml`。父目录等于 `peripheral`，叶目录等于 `id`。版本 1 的清单声明：
@@ -305,7 +311,7 @@ Board peripheral `<name>` (<implementation>) failed to initialize; the Board sta
 
 在 M5Stack CoreP4X 上，`corep4x-dsi-display` 以同样的方式隐藏位于 `0x4F` 的 M5IOE1 扩展芯片（面板电源、复位和 PWM 背光）和位于 `0x6E` 的 M5PM1 电源控制器（5 V 升压），分别通过 `drivers/chips/m5ioe1` 和 `drivers/chips/m5pm1`。Paper Mono 的 `paper-mono-display` 用同样两个驱动控制面板电源、复位和前光；`paper-color-display` 和 `paper-diy-display` 用 M5PM1 控制电子墨水屏电源。
 
-如果辅助芯片同时提供一个语义外设，就按寄存器共享，绝不让两个所有者拥有同一个寄存器。在 Core2、Tough、Station、StickC 和 CoreS3 上，`m5stack-pmic-display` 控制 AXP192 或 AXP2101 的稳压器，而 `axp192-axp2101-power-monitor` 通过自己的总线视图读取同一个 PMIC 的电池数据，只访问状态、ADC 和电量计寄存器。`axp192-axp2101-vibration` 在它们旁边只写 Core2 振动马达稳压器的电压字段和使能位，`m5ioe1-vibration` 只写 StopWatch 上 M5IOE1 的 PWM 通道及其引脚。`axp192-axp2101-buttons` 只设置电源键的两个中断使能位，只清除它的两个状态位；这些状态位写 1 清除，所以其他中断的状态保持不变。`m5pm1-power-monitor` 和 `pi4ioe5v6408-buttons` 同样只配置自己的 M5PM1 或扩展芯片引脚，其他引脚仍归使用它们的显示实现；`m5pm1-buttons` 只读取 M5PM1 的按键状态寄存器。同一颗 INA3221 各通道上的 `ina3221-power-monitor` 设备只读取各自的通道，从不写这颗芯片。
+如果辅助芯片同时提供一个语义外设，就按寄存器共享，绝不让两个所有者拥有同一个寄存器。在 Core2、Tough、Station、StickC 和 CoreS3 上，`m5stack-pmic-display` 控制 AXP192 或 AXP2101 的稳压器，而 `axp192-axp2101-power-monitor` 通过自己的总线视图读取同一个 PMIC 的电池数据，只访问状态、ADC 和电量计寄存器。`axp192-axp2101-vibration` 在它们旁边只写 Core2 振动马达稳压器的电压字段和使能位，`m5ioe1-vibration` 只写 StopWatch 上 M5IOE1 的 PWM 通道及其引脚。`axp192-axp2101-buttons` 只设置电源键的两个中断使能位，只清除它的两个状态位；这些状态位写 1 清除，所以其他中断的状态保持不变。`m5pm1-power-monitor` 和 `pi4ioe5v6408-buttons` 同样只配置自己的 M5PM1 或扩展芯片引脚，其他引脚仍归使用它们的显示实现；`m5pm1-buttons` 只读取 M5PM1 的按键状态寄存器，只设置按键配置中的单击复位禁用位。同一颗 INA3221 各通道上的 `ina3221-power-monitor` 设备只读取各自的通道，从不写这颗芯片。
 
 M5Stack PowerHub 的 STM32G031 电源协处理器转发四个语义外设，因此四个实现以同样方式共享它：`powerhub-buttons` 只读取它的按键寄存器，`powerhub-led-strip` 只写 LED 电源、颜色和亮度寄存器，`powerhub-power-monitor` 只写计量使能并读取电池寄存器，`powerhub-rtc` 只访问时钟寄存器。四者都使用 `drivers/chips/m5powerhub`。
 

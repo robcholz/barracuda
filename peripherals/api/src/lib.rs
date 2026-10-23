@@ -50,6 +50,7 @@ impl Instance {
     }
 }
 
+mod button_events;
 mod sets;
 
 #[doc(hidden)]
@@ -370,13 +371,35 @@ pub mod buttons {
         }
     }
 
+    pub use crate::button_events::{
+        ButtonEvent, ButtonEventKind, ButtonEventQueue, ButtonTiming, ButtonTracker,
+        EVENT_QUEUE_CAPACITY,
+    };
+
     /// Semantic attached-button input peripheral.
+    ///
+    /// Buttons report their state two ways. [`read`](Self::read) samples
+    /// whether each button is down now. [`poll_event`](Self::poll_event)
+    /// returns what happened to the buttons, in order: each press, release,
+    /// click, and long press. Both see the same sample; reading the state
+    /// does not consume events, and taking events does not hide a press from
+    /// the next state read.
+    ///
+    /// An implementation that samples button levels derives events with a
+    /// [`ButtonTracker`] when polled, so a press and release both shorter
+    /// than the time between polls can go unseen, and a long press is
+    /// reported at the first poll after its time. One whose hardware latches
+    /// presses, such as a PMIC power key, reports each latched press.
     pub trait Buttons {
         /// Concrete sampling failure.
         type Error: core::fmt::Debug;
 
         /// Reads all button states from one hardware sample.
         fn read(&mut self) -> Result<ButtonSnapshot, Self::Error>;
+
+        /// Returns the oldest button event not yet returned, without
+        /// waiting; `None` when no button changed.
+        fn poll_event(&mut self) -> Result<Option<ButtonEvent>, Self::Error>;
     }
 
     /// Move-only access to the Board's attached buttons.

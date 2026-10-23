@@ -7,6 +7,12 @@
 //! from halfway to the next lower level (or 0 V) to halfway to the next
 //! higher level (or the idle voltage), as Espressif's board manager builds
 //! them for its `adc_multi` button groups (`dev_button_sub_adc_multi.c`).
+//!
+//! Readings are debounced with M5Unified's `Button_Class::setRawState` rule,
+//! as for GPIO buttons, and [`Buttons::poll_event`] reports each press,
+//! release, click, and long press through the shared [`ButtonTracker`]. The
+//! tracker starts with every button released, so a button held while the
+//! Board starts reports a press at the first sample.
 
 #![no_std]
 
@@ -15,24 +21,34 @@ use core::marker::PhantomData;
 use barracuda_board_hal::AnalogVoltageInput;
 use barracuda_peripheral::{
     PeripheralImplementation,
-    buttons::{ButtonSnapshot, Buttons, MAX_BUTTONS},
+    buttons::{ButtonEvent, ButtonSnapshot, ButtonTiming, ButtonTracker, Buttons, MAX_BUTTONS},
 };
+use embassy_time::Instant;
 
-/// The ladder's button voltages, as the Board writes them.
+/// The ladder's button voltages, as the Board writes them, and the debounce
+/// and long-press times.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AdcLadderButtonsConfig {
     levels: &'static str,
     idle_millivolts: u32,
+    timing: ButtonTiming,
 }
 
 impl AdcLadderButtonsConfig {
     /// Creates a configuration from space-separated ascending button
-    /// voltages in millivolts and the idle voltage.
+    /// voltages in millivolts, the idle voltage, and the debounce and
+    /// long-press times.
     #[must_use]
-    pub const fn new(levels: &'static str, idle_millivolts: u32) -> Self {
+    pub const fn new(
+        levels: &'static str,
+        idle_millivolts: u32,
+        debounce_ms: u32,
+        long_press_ms: u32,
+    ) -> Self {
         Self {
             levels,
             idle_millivolts,
+            timing: ButtonTiming::new(debounce_ms, long_press_ms),
         }
     }
 }
@@ -104,6 +120,28 @@ impl Windows {
 pub struct AdcLadderButtons<SENSE> {
     sense: SENSE,
     windows: Windows,
+    tracker: ButtonTracker,
+}
+
+impl<SENSE> AdcLadderButtons<SENSE>
+where
+    SENSE: AnalogVoltageInput,
+{
+    fn sample_at(&mut self, now_ms: u64) -> Result<ButtonSnapshot, SENSE::Error> {
+        let millivolts = self.sense.read_millivolts()?;
+        let mut states = [false; MAX_BUTTONS];
+        if let Some(index) = self.windows.pressed(millivolts) {
+            states[index] = true;
+        }
+        Ok(self.tracker.sample(&states[..self.windows.count], now_ms))
+    }
+
+    fn poll_event_at(&mut self, now_ms: u64) -> Result<Option<ButtonEvent>, SENSE::Error> {
+        if !self.tracker.has_events() {
+            self.sample_at(now_ms)?;
+        }
+        Ok(self.tracker.pop_event())
+    }
 }
 
 impl<SENSE> Buttons for AdcLadderButtons<SENSE>
@@ -114,13 +152,11 @@ where
     type Error = SENSE::Error;
 
     fn read(&mut self) -> Result<ButtonSnapshot, Self::Error> {
-        let millivolts = self.sense.read_millivolts()?;
-        let pressed = self.windows.pressed(millivolts);
-        let mut states = [false; MAX_BUTTONS];
-        if let Some(index) = pressed {
-            states[index] = true;
-        }
-        Ok(ButtonSnapshot::new(&states[..self.windows.count]))
+        self.sample_at(Instant::now().as_millis())
+    }
+
+    fn poll_event(&mut self) -> Result<Option<ButtonEvent>, Self::Error> {
+        self.poll_event_at(Instant::now().as_millis())
     }
 }
 
@@ -142,9 +178,16 @@ where
         config: Self::Config,
     ) -> Result<Self::Peripheral, Self::Error> {
         let windows = Windows::parse(config).ok_or(AdcLadderButtonsInitError::InvalidLevels)?;
+        let released = [false; MAX_BUTTONS];
+        let tracker = ButtonTracker::new(
+            &released[..windows.count],
+            Instant::now().as_millis(),
+            config.timing,
+        );
         Ok(AdcLadderButtons {
             sense: bindings.sense,
             windows,
+            tracker,
         })
     }
 }
@@ -152,6 +195,8 @@ where
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    extern crate std;
+
     use super::*;
     use barracuda_board_hal::AnalogErrorType;
 
@@ -169,7 +214,7 @@ mod tests {
 
     /// The ESP32-S3-Korvo-2 ladder (`esp32_s3_korvo_2_3` board manager).
     const KORVO2: AdcLadderButtonsConfig =
-        AdcLadderButtonsConfig::new("380 820 1110 1650 1980 2410", 3000);
+        AdcLadderButtonsConfig::new("380 820 1110 1650 1980 2410", 3000, 10, 500);
 
     fn read(config: AdcLadderButtonsConfig, millivolts: u32) -> ButtonSnapshot {
         let mut buttons =
@@ -178,7 +223,8 @@ mod tests {
                 config,
             ))
             .unwrap();
-        buttons.read().unwrap()
+        // A read the debounce time after start counts the level at once.
+        buttons.sample_at(Instant::now().as_millis() + 100).unwrap()
     }
 
     #[test]
@@ -207,7 +253,7 @@ mod tests {
             let result = embassy_futures::block_on(
                 AdcLadderButtonsImplementation::<FixedInput>::initialize(
                     AdcLadderButtonsBindings::new(FixedInput(0)),
-                    AdcLadderButtonsConfig::new(levels, 3000),
+                    AdcLadderButtonsConfig::new(levels, 3000, 10, 500),
                 ),
             );
             assert!(
@@ -215,5 +261,58 @@ mod tests {
                 "{levels}"
             );
         }
+    }
+
+    /// A ladder pin whose voltage the test sets.
+    struct SharedInput(std::rc::Rc<core::cell::Cell<u32>>);
+
+    impl AnalogErrorType for SharedInput {
+        type Error = core::fmt::Error;
+    }
+
+    impl AnalogVoltageInput for SharedInput {
+        fn read_millivolts(&mut self) -> Result<u32, Self::Error> {
+            Ok(self.0.get())
+        }
+    }
+
+    #[test]
+    fn moving_between_windows_releases_one_button_and_presses_the_next() {
+        use barracuda_peripheral::buttons::ButtonEventKind::{Click, LongPress, Pressed, Released};
+
+        let level = std::rc::Rc::new(core::cell::Cell::new(3000));
+        let mut buttons = embassy_futures::block_on(AdcLadderButtonsImplementation::initialize(
+            AdcLadderButtonsBindings::new(SharedInput(level.clone())),
+            KORVO2,
+        ))
+        .unwrap();
+        let start = Instant::now().as_millis() + 100;
+        let mut events = std::vec::Vec::new();
+        let mut poll = |buttons: &mut AdcLadderButtons<SharedInput>, now: u64| {
+            while let Some(event) = buttons.poll_event_at(now).unwrap() {
+                events.push((event.index(), event.kind()));
+            }
+        };
+        // Button 1 down 100 ms, then straight to button 2, held 600 ms.
+        level.set(820);
+        poll(&mut buttons, start);
+        level.set(1110);
+        poll(&mut buttons, start + 100);
+        for step in 1..=12 {
+            poll(&mut buttons, start + 100 + 50 * step);
+        }
+        level.set(3000);
+        poll(&mut buttons, start + 800);
+        assert_eq!(
+            events,
+            [
+                (1, Pressed),
+                (1, Released),
+                (1, Click),
+                (2, Pressed),
+                (2, LongPress),
+                (2, Released),
+            ]
+        );
     }
 }

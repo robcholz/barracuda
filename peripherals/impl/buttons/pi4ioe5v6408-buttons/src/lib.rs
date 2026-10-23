@@ -7,7 +7,9 @@
 //! [`Buttons::read`] reads the input register once and never writes to the
 //! expander. A new level counts once it has held for the debounce time, or at
 //! once when the previous read is older than that (M5Unified
-//! `Button_Class::setRawState`).
+//! `Button_Class::setRawState`). [`Buttons::poll_event`] samples the inputs
+//! when no event waits and reports each press, release, click, and long
+//! press through the shared [`ButtonTracker`].
 
 #![no_std]
 
@@ -16,7 +18,7 @@ use core::marker::PhantomData;
 use barracuda_driver_pi4ioe5v6408::{Error as ExpanderError, Pi4ioe5v6408};
 use barracuda_peripheral::{
     PeripheralImplementation,
-    buttons::{ButtonSnapshot, Buttons, MAX_BUTTONS},
+    buttons::{ButtonEvent, ButtonSnapshot, ButtonTiming, ButtonTracker, Buttons, MAX_BUTTONS},
 };
 use embassy_time::Instant;
 use embedded_hal::i2c::I2c;
@@ -35,7 +37,8 @@ pub enum ActiveLevel {
     High,
 }
 
-/// Board-owned expander address, button pins, polarity, bias, and debounce.
+/// Board-owned expander address, button pins, polarity, bias, debounce, and
+/// long-press time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pi4ioe5v6408ButtonsConfig {
     address: u8,
@@ -43,7 +46,7 @@ pub struct Pi4ioe5v6408ButtonsConfig {
     rest: [Option<u8>; EXTRA_BUTTONS],
     active_level: ActiveLevel,
     pull: Pull,
-    debounce_ms: u32,
+    timing: ButtonTiming,
 }
 
 impl Pi4ioe5v6408ButtonsConfig {
@@ -57,6 +60,7 @@ impl Pi4ioe5v6408ButtonsConfig {
         active_level: ActiveLevel,
         pull: Pull,
         debounce_ms: u32,
+        long_press_ms: u32,
     ) -> Self {
         Self {
             address,
@@ -64,7 +68,7 @@ impl Pi4ioe5v6408ButtonsConfig {
             rest,
             active_level,
             pull,
-            debounce_ms,
+            timing: ButtonTiming::new(debounce_ms, long_press_ms),
         }
     }
 }
@@ -97,47 +101,14 @@ impl<E> From<ExpanderError<E>> for Pi4ioe5v6408ButtonsError<E> {
     }
 }
 
-/// Per-button debounce state, fed with raw samples and their time.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct Debounce {
-    pressed: bool,
-    raw: bool,
-    raw_since_ms: u64,
-}
-
-impl Debounce {
-    const fn settled(pressed: bool, now_ms: u64) -> Self {
-        Self {
-            pressed,
-            raw: pressed,
-            raw_since_ms: now_ms,
-        }
-    }
-
-    fn sample(&mut self, raw: bool, now_ms: u64, last_read_ms: u64, debounce_ms: u32) -> bool {
-        if raw != self.raw {
-            self.raw = raw;
-            self.raw_since_ms = now_ms;
-        }
-        let debounce = u64::from(debounce_ms);
-        let idle = now_ms.saturating_sub(last_read_ms) > debounce;
-        if idle || now_ms.saturating_sub(self.raw_since_ms) >= debounce {
-            self.pressed = raw;
-        }
-        self.pressed
-    }
-}
-
 /// Initialized expander buttons.
 pub struct Pi4ioe5v6408Buttons<I2C> {
     i2c: I2C,
     address: u8,
     pins: [u8; MAX_BUTTONS],
     count: usize,
-    state: [Debounce; MAX_BUTTONS],
     active_level: ActiveLevel,
-    debounce_ms: u32,
-    last_read_ms: u64,
+    tracker: ButtonTracker,
 }
 
 /// Static factory used by generated Board composition.
@@ -163,20 +134,16 @@ where
             expander.configure_input(pin, config.pull)?;
         }
         let inputs = expander.read_inputs()?;
-        let now_ms = Instant::now().as_millis();
-        let mut state = [Debounce::default(); MAX_BUTTONS];
-        for (&pin, debounce) in pins[..count].iter().zip(&mut state) {
-            *debounce = Debounce::settled(is_pressed(inputs, pin, config.active_level), now_ms);
-        }
+        let initial = levels(inputs, &pins[..count], config.active_level);
+        let tracker =
+            ButtonTracker::new(&initial[..count], Instant::now().as_millis(), config.timing);
         Ok(Pi4ioe5v6408Buttons {
             i2c,
             address: config.address,
             pins,
             count,
-            state,
             active_level: config.active_level,
-            debounce_ms: config.debounce_ms,
-            last_read_ms: now_ms,
+            tracker,
         })
     }
 }
@@ -223,17 +190,18 @@ impl<I2C: I2c> Pi4ioe5v6408Buttons<I2C> {
         now_ms: u64,
     ) -> Result<ButtonSnapshot, Pi4ioe5v6408ButtonsError<I2C::Error>> {
         let inputs = Pi4ioe5v6408::new(&mut self.i2c, self.address)?.read_inputs()?;
-        let mut pressed = [false; MAX_BUTTONS];
-        for ((&pin, debounce), target) in self.pins[..self.count]
-            .iter()
-            .zip(&mut self.state)
-            .zip(&mut pressed)
-        {
-            let raw = is_pressed(inputs, pin, self.active_level);
-            *target = debounce.sample(raw, now_ms, self.last_read_ms, self.debounce_ms);
+        let raw = levels(inputs, &self.pins[..self.count], self.active_level);
+        Ok(self.tracker.sample(&raw[..self.count], now_ms))
+    }
+
+    fn poll_event_at(
+        &mut self,
+        now_ms: u64,
+    ) -> Result<Option<ButtonEvent>, Pi4ioe5v6408ButtonsError<I2C::Error>> {
+        if !self.tracker.has_events() {
+            self.sample_at(now_ms)?;
         }
-        self.last_read_ms = now_ms;
-        Ok(ButtonSnapshot::new(&pressed[..self.count]))
+        Ok(self.tracker.pop_event())
     }
 }
 
@@ -243,6 +211,19 @@ impl<I2C: I2c> Buttons for Pi4ioe5v6408Buttons<I2C> {
     fn read(&mut self) -> Result<ButtonSnapshot, Self::Error> {
         self.sample_at(Instant::now().as_millis())
     }
+
+    fn poll_event(&mut self) -> Result<Option<ButtonEvent>, Self::Error> {
+        self.poll_event_at(Instant::now().as_millis())
+    }
+}
+
+/// Whether each button's pin sits at the active level in `inputs`.
+fn levels(inputs: u8, pins: &[u8], active_level: ActiveLevel) -> [bool; MAX_BUTTONS] {
+    let mut pressed = [false; MAX_BUTTONS];
+    for (&pin, target) in pins.iter().zip(&mut pressed) {
+        *target = is_pressed(inputs, pin, active_level);
+    }
+    pressed
 }
 
 fn is_pressed(inputs: u8, pin: u8, active_level: ActiveLevel) -> bool {
@@ -259,7 +240,10 @@ mod tests {
     use core::convert::Infallible;
     use std::vec::Vec;
 
-    use barracuda_peripheral::{PeripheralImplementation, buttons::Buttons};
+    use barracuda_peripheral::{
+        PeripheralImplementation,
+        buttons::{ButtonEventKind, Buttons},
+    };
     use embassy_futures::block_on;
     use embedded_hal::i2c::{ErrorType, I2c, Operation};
 
@@ -330,6 +314,7 @@ mod tests {
             ActiveLevel::Low,
             Pull::Up,
             10,
+            500,
         )
     }
 
@@ -350,7 +335,8 @@ mod tests {
         buttons.i2c.writes.clear();
         // Button B (P1) held low.
         buttons.i2c.registers[INPUT] = 0b1111_1101;
-        let snapshot = buttons.sample_at(buttons.last_read_ms + 100).expect("read");
+        let later = embassy_time::Instant::now().as_millis() + 100;
+        let snapshot = buttons.sample_at(later).expect("read");
         assert_eq!(snapshot.len(), 3);
         assert_eq!(snapshot.is_pressed(0), Some(false));
         assert_eq!(snapshot.is_pressed(1), Some(true));
@@ -367,7 +353,7 @@ mod tests {
             [Some(8), None, None, None, None, None, None],
         ] {
             let config =
-                Pi4ioe5v6408ButtonsConfig::new(0x43, 2, rest, ActiveLevel::Low, Pull::Up, 10);
+                Pi4ioe5v6408ButtonsConfig::new(0x43, 2, rest, ActiveLevel::Low, Pull::Up, 10, 500);
             let result = block_on(Pi4ioe5v6408ButtonsImplementation::initialize(
                 Pi4ioe5v6408ButtonsBindings::new(Expander::new()),
                 config,
@@ -377,5 +363,44 @@ mod tests {
                 Err(Pi4ioe5v6408ButtonsError::InvalidButtonPins)
             ));
         }
+    }
+
+    #[test]
+    fn polling_reports_a_click_and_a_long_press() {
+        let mut buttons = block_on(Pi4ioe5v6408ButtonsImplementation::initialize(
+            Pi4ioe5v6408ButtonsBindings::new(Expander::new()),
+            stamp_plc(),
+        ))
+        .expect("initialize buttons");
+        let start = embassy_time::Instant::now().as_millis() + 100;
+        let mut events = Vec::new();
+        let mut poll = |buttons: &mut super::Pi4ioe5v6408Buttons<Expander>, now: u64| {
+            while let Some(event) = buttons.poll_event_at(now).expect("poll") {
+                events.push((event.index(), event.kind()));
+            }
+        };
+        // Button A (P2) clicked, then button C (P0) held 600 ms.
+        buttons.i2c.registers[INPUT] = 0b1111_1011;
+        poll(&mut buttons, start);
+        buttons.i2c.registers[INPUT] = 0xff;
+        poll(&mut buttons, start + 50);
+        buttons.i2c.registers[INPUT] = 0b1111_1110;
+        for step in 0..=12 {
+            poll(&mut buttons, start + 100 + 50 * step);
+        }
+        buttons.i2c.registers[INPUT] = 0xff;
+        poll(&mut buttons, start + 800);
+        assert!(buttons.i2c.writes.iter().all(|&(reg, _)| reg != 0x0f));
+        assert_eq!(
+            events,
+            [
+                (0, ButtonEventKind::Pressed),
+                (0, ButtonEventKind::Released),
+                (0, ButtonEventKind::Click),
+                (2, ButtonEventKind::Pressed),
+                (2, ButtonEventKind::LongPress),
+                (2, ButtonEventKind::Released),
+            ]
+        );
     }
 }

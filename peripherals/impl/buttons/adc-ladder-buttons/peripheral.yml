@@ -6,7 +6,7 @@ implementation:
   crate: barracuda_adc_ladder_buttons
   factory: "::{{crate}}::AdcLadderButtonsImplementation<{{binding.sense.type}}>"
   bindings-expression: "::{{crate}}::AdcLadderButtonsBindings::new({{binding.sense.value}})"
-  config-expression: "::{{crate}}::AdcLadderButtonsConfig::new({{parameter.levels-millivolts}}, {{parameter.idle-millivolts}})"
+  config-expression: "::{{crate}}::AdcLadderButtonsConfig::new({{parameter.levels-millivolts}}, {{parameter.idle-millivolts}}, {{parameter.debounce-ms}}, {{parameter.long-press-ms}})"
 bindings:
   # The ADC pin of the resistor ladder the buttons switch.
   sense:
@@ -24,3 +24,14 @@ parameters:
   idle-millivolts:
     type: integer
     default: 3000
+  # How long a new reading must hold before a press or release counts. 10 ms
+  # is M5Unified's `Button_Class` default.
+  debounce-ms:
+    type: integer
+    default: 10
+  # How long a press lasts before it is a long press, reported while the
+  # button is still down; a shorter press is a click. 500 ms is M5Unified's
+  # `Button_Class` hold time.
+  long-press-ms:
+    type: integer
+    default: 500

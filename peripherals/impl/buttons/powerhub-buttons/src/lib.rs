@@ -6,7 +6,9 @@
 //! samples both in one [`Buttons::read`], A as index 0 and B as index 1, and
 //! debounces them with M5Unified's `Button_Class::setRawState` rule: a new
 //! level counts once it has held for the debounce time, or at once when the
-//! previous read is older than that.
+//! previous read is older than that. [`Buttons::poll_event`] samples both
+//! when no event waits and reports each press, release, click, and long
+//! press through the shared [`ButtonTracker`].
 
 #![no_std]
 
@@ -16,25 +18,25 @@ use barracuda_board_hal::{ConfigurableDigitalPin, InputConfig, Pull};
 use barracuda_driver_m5powerhub::M5PowerHub;
 use barracuda_peripheral::{
     PeripheralImplementation,
-    buttons::{ButtonSnapshot, Buttons},
+    buttons::{ButtonEvent, ButtonSnapshot, ButtonTiming, ButtonTracker, Buttons},
 };
 use embassy_time::Instant;
 use embedded_hal::i2c::I2c;
 
-/// Board-owned co-processor address and debounce time.
+/// Board-owned co-processor address, debounce time, and long-press time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PowerHubButtonsConfig {
     address: u8,
-    debounce_ms: u32,
+    timing: ButtonTiming,
 }
 
 impl PowerHubButtonsConfig {
     /// Creates configuration for the co-processor at `address`.
     #[must_use]
-    pub const fn new(address: u8, debounce_ms: u32) -> Self {
+    pub const fn new(address: u8, debounce_ms: u32, long_press_ms: u32) -> Self {
         Self {
             address,
-            debounce_ms,
+            timing: ButtonTiming::new(debounce_ms, long_press_ms),
         }
     }
 }
@@ -64,45 +66,12 @@ pub enum PowerHubButtonsError<BusError, PinError> {
     Pin(PinError),
 }
 
-/// Per-button debounce state.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct Debounce {
-    pressed: bool,
-    raw: bool,
-    raw_since_ms: u64,
-}
-
-impl Debounce {
-    const fn settled(pressed: bool, now_ms: u64) -> Self {
-        Self {
-            pressed,
-            raw: pressed,
-            raw_since_ms: now_ms,
-        }
-    }
-
-    fn sample(&mut self, raw: bool, now_ms: u64, last_read_ms: u64, debounce_ms: u32) -> bool {
-        if raw != self.raw {
-            self.raw = raw;
-            self.raw_since_ms = now_ms;
-        }
-        let debounce = u64::from(debounce_ms);
-        let idle = now_ms.saturating_sub(last_read_ms) > debounce;
-        if idle || now_ms.saturating_sub(self.raw_since_ms) >= debounce {
-            self.pressed = raw;
-        }
-        self.pressed
-    }
-}
-
 /// Initialized buttons.
 pub struct PowerHubButtons<I2C, P> {
     i2c: I2C,
     button_a: P,
     hub: M5PowerHub,
-    state: [Debounce; 2],
-    debounce_ms: u32,
-    last_read_ms: u64,
+    tracker: ButtonTracker,
 }
 
 /// Static factory used by generated Board composition.
@@ -133,14 +102,12 @@ where
             .configure_input(InputConfig { pull: Pull::None })
             .map_err(PowerHubButtonsError::Pin)?;
         let raw = raw_states(&hub, &mut i2c, &mut button_a)?;
-        let now_ms = Instant::now().as_millis();
+        let tracker = ButtonTracker::new(&raw, Instant::now().as_millis(), config.timing);
         Ok(PowerHubButtons {
             i2c,
             button_a,
             hub,
-            state: raw.map(|pressed| Debounce::settled(pressed, now_ms)),
-            debounce_ms: config.debounce_ms,
-            last_read_ms: now_ms,
+            tracker,
         })
     }
 }
@@ -164,12 +131,17 @@ impl<I2C: I2c, P: ConfigurableDigitalPin> PowerHubButtons<I2C, P> {
         now_ms: u64,
     ) -> Result<ButtonSnapshot, PowerHubButtonsError<I2C::Error, P::Error>> {
         let raw = raw_states(&self.hub, &mut self.i2c, &mut self.button_a)?;
-        let mut pressed = [false; 2];
-        for ((debounce, raw), target) in self.state.iter_mut().zip(raw).zip(&mut pressed) {
-            *target = debounce.sample(raw, now_ms, self.last_read_ms, self.debounce_ms);
+        Ok(self.tracker.sample(&raw, now_ms))
+    }
+
+    fn poll_event_at(
+        &mut self,
+        now_ms: u64,
+    ) -> Result<Option<ButtonEvent>, PowerHubButtonsError<I2C::Error, P::Error>> {
+        if !self.tracker.has_events() {
+            self.sample_at(now_ms)?;
         }
-        self.last_read_ms = now_ms;
-        Ok(ButtonSnapshot::new(&pressed))
+        Ok(self.tracker.pop_event())
     }
 }
 
@@ -178,6 +150,10 @@ impl<I2C: I2c, P: ConfigurableDigitalPin> Buttons for PowerHubButtons<I2C, P> {
 
     fn read(&mut self) -> Result<ButtonSnapshot, Self::Error> {
         self.sample_at(Instant::now().as_millis())
+    }
+
+    fn poll_event(&mut self) -> Result<Option<ButtonEvent>, Self::Error> {
+        self.poll_event_at(Instant::now().as_millis())
     }
 }
 
@@ -189,7 +165,7 @@ mod tests {
     use core::convert::Infallible;
 
     use barracuda_board_hal::{ConfigurableDigitalPin, InputConfig, OutputConfig};
-    use barracuda_peripheral::PeripheralImplementation;
+    use barracuda_peripheral::{PeripheralImplementation, buttons::ButtonEventKind};
     use embassy_futures::block_on;
     use embedded_hal::{
         digital::{ErrorType as PinErrorType, InputPin, OutputPin, StatefulOutputPin},
@@ -279,7 +255,7 @@ mod tests {
     fn reads_button_a_from_its_pin_and_b_from_bit_0() {
         let mut buttons = block_on(PowerHubButtonsImplementation::initialize(
             PowerHubButtonsBindings::new(Hub(0xff), Pin { low: false }),
-            PowerHubButtonsConfig::new(0x50, 10),
+            PowerHubButtonsConfig::new(0x50, 10, 500),
         ))
         .expect("start");
         let snapshot = buttons.sample_at(1_000).expect("read");
@@ -298,7 +274,7 @@ mod tests {
     fn a_short_bounce_does_not_count() {
         let mut buttons = block_on(PowerHubButtonsImplementation::initialize(
             PowerHubButtonsBindings::new(Hub(0xff), Pin { low: false }),
-            PowerHubButtonsConfig::new(0x50, 10),
+            PowerHubButtonsConfig::new(0x50, 10, 500),
         ))
         .expect("start");
         buttons.sample_at(1_000).expect("read");
@@ -310,6 +286,42 @@ mod tests {
         assert_eq!(
             buttons.sample_at(1_012).expect("read").is_pressed(1),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn polling_reports_each_buttons_events() {
+        let mut buttons = block_on(PowerHubButtonsImplementation::initialize(
+            PowerHubButtonsBindings::new(Hub(0xff), Pin { low: false }),
+            PowerHubButtonsConfig::new(0x50, 10, 500),
+        ))
+        .expect("start");
+        let mut events = std::vec::Vec::new();
+        let mut poll = |buttons: &mut super::PowerHubButtons<Hub, Pin>, now: u64| {
+            while let Some(event) = buttons.poll_event_at(now).expect("poll") {
+                events.push((event.index(), event.kind()));
+            }
+        };
+        // B clicked, then A held past the long-press time.
+        buttons.i2c.0 = 0xfe;
+        poll(&mut buttons, 1_000);
+        buttons.i2c.0 = 0xff;
+        poll(&mut buttons, 1_100);
+        buttons.button_a.low = true;
+        poll(&mut buttons, 1_200);
+        poll(&mut buttons, 1_750);
+        buttons.button_a.low = false;
+        poll(&mut buttons, 1_800);
+        assert_eq!(
+            events,
+            [
+                (1, ButtonEventKind::Pressed),
+                (1, ButtonEventKind::Released),
+                (1, ButtonEventKind::Click),
+                (0, ButtonEventKind::Pressed),
+                (0, ButtonEventKind::LongPress),
+                (0, ButtonEventKind::Released),
+            ]
         );
     }
 }

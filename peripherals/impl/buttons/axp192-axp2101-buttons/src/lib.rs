@@ -7,9 +7,14 @@
 //! latches a short press when the key is released before the long-press time
 //! and a long press once it has been held that long, which M5Unified
 //! `Power_Class::getKeyState` reads as a click (2) or a hold (1). This
-//! implementation reports either as button 0 pressed in the one
-//! [`Buttons::read`] that takes it, so a reader polling the snapshot sees a
-//! press and a release for each.
+//! implementation reports either as button 0 pressed in the first
+//! [`Buttons::read`] after the PMIC latched it, so a reader polling the
+//! snapshot sees a press and a release for each. [`Buttons::poll_event`]
+//! reports a latched short press as pressed, released, and click, and a long
+//! press as pressed, long press, and released, all at once because the PMIC
+//! tells of a press only once it has happened. The long-press time is the
+//! PMIC's own (AXP192 `36h` bits 5:4, AXP2101 `27h` bits 5:4), which this
+//! implementation leaves as it is.
 //!
 //! # Shared ownership
 //!
@@ -28,7 +33,7 @@ use barracuda_driver_axp192::{Axp192, Error as Axp192Error};
 use barracuda_driver_axp2101::{Axp2101, Error as Axp2101Error};
 use barracuda_peripheral::{
     PeripheralImplementation,
-    buttons::{ButtonSnapshot, Buttons},
+    buttons::{ButtonEvent, ButtonEventQueue, ButtonSnapshot, Buttons},
 };
 use embedded_hal::i2c::I2c;
 
@@ -71,6 +76,9 @@ pub struct AxpPowerKey<I2C> {
     i2c: I2C,
     address: u8,
     pmic: Pmic,
+    events: ButtonEventQueue,
+    /// A press was latched that no [`Buttons::read`] has reported yet.
+    unread_press: bool,
 }
 
 /// Static factory used by generated Board composition.
@@ -102,11 +110,17 @@ where
         } else {
             return Err(AxpPowerKeyError::UnsupportedPmic);
         };
-        let mut key = AxpPowerKey { i2c, address, pmic };
+        let mut key = AxpPowerKey {
+            i2c,
+            address,
+            pmic,
+            events: ButtonEventQueue::new(),
+            unread_press: false,
+        };
         key.enable()?;
         // A press latched before start, such as the one that switched the
         // Board on, is not a press the application made.
-        key.take_press()?;
+        key.latched()?;
         Ok(key)
     }
 }
@@ -129,18 +143,31 @@ impl<I2C: I2c> AxpPowerKey<I2C> {
         }
     }
 
-    /// Takes the latched short and long presses; true when there was either.
-    fn take_press(&mut self) -> Result<bool, AxpPowerKeyError<I2C::Error>> {
+    /// Takes the latched short and long presses, in that order.
+    fn latched(&mut self) -> Result<(bool, bool), AxpPowerKeyError<I2C::Error>> {
         match self.pmic {
             Pmic::Axp192 => Axp192::new(&mut self.i2c, self.address)
                 .and_then(|mut pmic| pmic.take_power_key_presses())
-                .map(|presses| presses.any())
+                .map(|presses| (presses.short_press, presses.long_press))
                 .map_err(AxpPowerKeyError::Axp192),
             Pmic::Axp2101 => Axp2101::new(&mut self.i2c, self.address)
                 .and_then(|mut pmic| pmic.take_power_key_presses())
-                .map(|presses| presses.any())
+                .map(|presses| (presses.short_press, presses.long_press))
                 .map_err(AxpPowerKeyError::Axp2101),
         }
+    }
+
+    /// Takes the latched presses and queues their events.
+    fn take_presses(&mut self) -> Result<(), AxpPowerKeyError<I2C::Error>> {
+        let (short, long) = self.latched()?;
+        if short {
+            self.events.push_latched_press(0, false);
+        }
+        if long {
+            self.events.push_latched_press(0, true);
+        }
+        self.unread_press |= short || long;
+        Ok(())
     }
 }
 
@@ -150,8 +177,17 @@ impl<I2C: I2c> Buttons for AxpPowerKey<I2C> {
     /// Reports the key as button 0, pressed when the PMIC latched a short or
     /// long press since the previous read.
     fn read(&mut self) -> Result<ButtonSnapshot, Self::Error> {
-        let pressed = self.take_press()?;
+        self.take_presses()?;
+        let pressed = core::mem::take(&mut self.unread_press);
         Ok(ButtonSnapshot::new(&[pressed]))
+    }
+
+    /// Reports each latched press of the key as button 0's events.
+    fn poll_event(&mut self) -> Result<Option<ButtonEvent>, Self::Error> {
+        if self.events.is_empty() {
+            self.take_presses()?;
+        }
+        Ok(self.events.pop())
     }
 }
 
@@ -162,11 +198,19 @@ mod tests {
 
     use core::convert::Infallible;
 
-    use barracuda_peripheral::{PeripheralImplementation, buttons::Buttons};
+    use barracuda_peripheral::{
+        PeripheralImplementation,
+        buttons::{
+            ButtonEventKind::{self, Click, LongPress, Pressed, Released},
+            Buttons,
+        },
+    };
     use embassy_futures::block_on;
     use embedded_hal::i2c::{ErrorType, I2c, Operation};
 
-    use super::{AxpPowerKeyConfig, AxpPowerKeyError, AxpPowerKeyImplementation, Pmic};
+    use super::{
+        AxpPowerKey, AxpPowerKeyConfig, AxpPowerKeyError, AxpPowerKeyImplementation, Pmic,
+    };
 
     /// Register file at 34h whose interrupt-status registers clear the bits
     /// written with 1, as both PMICs' do.
@@ -273,6 +317,39 @@ mod tests {
         assert_eq!(key.read().expect("read").is_pressed(0), Some(true));
         assert_eq!(key.read().expect("read").is_pressed(0), Some(false));
         assert_eq!(key.i2c.registers[0x49], 0b1000_0010);
+    }
+
+    fn events(key: &mut AxpPowerKey<Chip>) -> std::vec::Vec<(usize, ButtonEventKind)> {
+        core::iter::from_fn(|| key.poll_event().expect("poll"))
+            .map(|event| (event.index(), event.kind()))
+            .collect()
+    }
+
+    #[test]
+    fn latched_presses_become_events_and_still_read_pressed_once() {
+        for (chip, status, short, long) in [
+            (Chip::axp192(), 0x46, 0b10, 0b01),
+            (Chip::axp2101(), 0x49, 0b1000, 0b0100),
+        ] {
+            let mut key = block_on(AxpPowerKeyImplementation::initialize(
+                chip,
+                AxpPowerKeyConfig::new(0x34),
+            ))
+            .expect("start");
+            assert_eq!(events(&mut key), []);
+            key.i2c.registers[status] |= short;
+            assert_eq!(events(&mut key), [(0, Pressed), (0, Released), (0, Click)]);
+            // The press the events took still reads once.
+            assert_eq!(key.read().expect("read").is_pressed(0), Some(true));
+            assert_eq!(key.read().expect("read").is_pressed(0), Some(false));
+            key.i2c.registers[status] |= long;
+            // A read takes the latch; the events still follow.
+            assert_eq!(key.read().expect("read").is_pressed(0), Some(true));
+            assert_eq!(
+                events(&mut key),
+                [(0, Pressed), (0, LongPress), (0, Released)]
+            );
+        }
     }
 
     #[test]

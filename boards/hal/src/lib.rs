@@ -837,6 +837,10 @@ impl buttons::Buttons for UnavailableButtons {
     fn read(&mut self) -> Result<buttons::ButtonSnapshot, Self::Error> {
         match self.never {}
     }
+
+    fn poll_event(&mut self) -> Result<Option<buttons::ButtonEvent>, Self::Error> {
+        match self.never {}
+    }
 }
 
 impl buttons::ButtonsPeripheral for NoPeripherals {

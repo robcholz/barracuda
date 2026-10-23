@@ -6,13 +6,16 @@ implementation:
   crate: barracuda_m5pm1_buttons
   factory: "::{{crate}}::M5pm1PowerKeyImplementation<{{binding.i2c.type}}>"
   bindings-expression: "::{{crate}}::M5pm1PowerKeyBindings::new({{binding.i2c.value}})"
-  config-expression: "::{{crate}}::M5pm1PowerKeyConfig::new({{parameter.address}}, {{parameter.single-click-reset}})"
+  config-expression: "::{{crate}}::M5pm1PowerKeyConfig::new({{parameter.address}}, {{parameter.single-click-reset}}, {{parameter.long-press-ms}})"
 # The power key on the PWR_BTN input of an M5Stack M5PM1 power controller as
 # one button, read from the M5PM1's button-status register: pressed while the
 # key is down, and in the first read after a press shorter than the time
-# between reads. The implementation reads only that register and, when the
-# Board asks for it, the single-click-reset bit of the button configuration;
-# the rails and pins stay with the implementations that use them.
+# between reads. Its events follow the key's level, and a press that came
+# and went between two reads is a click. The implementation reads only that
+# register and, when the Board asks for it, sets the
+# single-click-reset-disable bit of the button configuration by
+# read-modify-write; the rails and pins stay with the implementations that
+# use them.
 bindings:
   i2c:
     kind: i2c-device
@@ -34,3 +37,10 @@ parameters:
       keep: "::barracuda_m5pm1_buttons::SingleClickReset::Keep"
       disable: "::barracuda_m5pm1_buttons::SingleClickReset::Disable"
     default: keep
+  # How long the key stays down before its events report a long press; a
+  # shorter press is a click. 500 ms is M5Unified's `Button_Class` hold
+  # time, well before the M5PM1's own 2 s download-mode press (BTN_CFG_1
+  # LONG_DLY factory value).
+  long-press-ms:
+    type: integer
+    default: 500

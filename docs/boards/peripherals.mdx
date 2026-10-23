@@ -420,6 +420,31 @@ A Plugin whose required slot is empty because its device failed returns
 leaves that Plugin and every Plugin depending on it out, and starts the rest of
 System.
 
+## Button events
+
+`Buttons::read` samples whether each button is down now, and
+`Buttons::poll_event` returns what happened to the buttons since, oldest
+first: `Pressed`, `Released`, `Click` for a press released before the
+long-press time, and `LongPress` once a press has lasted that long, while the
+button is still down. Each event names the button by its snapshot index.
+Reading the state never consumes events, and taking events never hides a
+press from the next state read.
+
+Implementations that sample button levels (`gpio-buttons`,
+`pi4ioe5v6408-buttons`, `powerhub-buttons`, `adc-ladder-buttons`,
+`capacitive-touch-buttons`, and `m5pm1-buttons`) derive events with the
+`ButtonTracker` in `peripherals/api`, sampling when polled and no event waits.
+It applies M5Unified's `Button_Class` rule: a new level counts once it has
+held for the debounce time, or at once when the previous sample is older than
+that. Each takes `debounce-ms` (10 ms) and `long-press-ms` (500 ms), M5Unified's
+defaults; `m5pm1-buttons` takes only `long-press-ms`, because the M5PM1 reports
+a settled level, and reports a press that came and went between two samples
+as `Pressed`, `Released`, `Click`. `axp192-axp2101-buttons` reports each press
+the PMIC latched, at once: `Pressed`, `Released`, `Click` for a short press and
+`Pressed`, `LongPress`, `Released` for a long one, the long-press time being
+the PMIC's own. Each implementation holds at most 16 events and drops the
+oldest when a reader falls behind.
+
 ## Implementation manifests
 
 Every selectable implementation owns
@@ -481,7 +506,8 @@ bits and clears only its two status bits, which are write-1-to-clear, so
 every other interrupt's status stays as it was. `m5pm1-power-monitor` and
 `pi4ioe5v6408-buttons` likewise configure only their own M5PM1 or expander
 pins next to the display implementations that use the others, and
-`m5pm1-buttons` reads only the M5PM1's button-status register. The
+`m5pm1-buttons` reads only the M5PM1's button-status register and sets
+only the single-click-reset-disable bit of its button configuration. The
 `ina3221-power-monitor` devices on the channels of one INA3221 each read
 only their own channel and never write the chip.
 

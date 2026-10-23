@@ -6,7 +6,7 @@ implementation:
   crate: barracuda_gpio_buttons
   factory: "::{{crate}}::GpioButtonsImplementation<{{binding.button-1.type}}>"
   bindings-expression: "::{{crate}}::GpioButtonsBindings::new({{binding.button-1.value}}, [{{binding.button-2.value}}, {{binding.button-3.value}}, {{binding.button-4.value}}, {{binding.button-5.value}}, {{binding.button-6.value}}, {{binding.button-7.value}}, {{binding.button-8.value}}])"
-  config-expression: "::{{crate}}::GpioButtonsConfig::new({{parameter.active-level}}, {{parameter.pull}}, {{parameter.debounce-ms}})"
+  config-expression: "::{{crate}}::GpioButtonsConfig::new({{parameter.active-level}}, {{parameter.pull}}, {{parameter.debounce-ms}}, {{parameter.long-press-ms}})"
 # One pin per button, numbered in the order the Board documents them. The
 # buttons take the dense indices 0 through 7 of the semantic snapshot, so a
 # Board fills button-1 first and leaves no gap. A `gpio` binding lets the
@@ -59,3 +59,9 @@ parameters:
   debounce-ms:
     type: integer
     default: 10
+  # How long a press lasts before it is a long press, reported while the
+  # button is still down; a shorter press is a click. 500 ms is M5Unified's
+  # `Button_Class` hold time.
+  long-press-ms:
+    type: integer
+    default: 500

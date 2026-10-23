@@ -6,7 +6,9 @@
 //! counts once it has held for the debounce time; when the previous read is
 //! older than that, the line has had time to settle and the new level counts
 //! at once. This is M5Unified's `Button_Class::setRawState` rule, so slow
-//! pollers see presses without an extra read.
+//! pollers see presses without an extra read. [`Buttons::poll_event`]
+//! samples the pins when no event waits and reports each press, release,
+//! click, and long press through the shared [`ButtonTracker`].
 
 #![no_std]
 
@@ -15,7 +17,7 @@ use core::marker::PhantomData;
 use barracuda_board_hal::{ConfigurableDigitalPin, InputConfig, Pull};
 use barracuda_peripheral::{
     PeripheralImplementation,
-    buttons::{ButtonSnapshot, Buttons, MAX_BUTTONS},
+    buttons::{ButtonEvent, ButtonSnapshot, ButtonTiming, ButtonTracker, Buttons, MAX_BUTTONS},
 };
 use embassy_time::Instant;
 
@@ -31,22 +33,27 @@ pub enum ActiveLevel {
     High,
 }
 
-/// Board-owned polarity, bias, and debounce time.
+/// Board-owned polarity, bias, debounce, and long-press time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GpioButtonsConfig {
     active_level: ActiveLevel,
     pull: Pull,
-    debounce_ms: u32,
+    timing: ButtonTiming,
 }
 
 impl GpioButtonsConfig {
     /// Creates a configuration shared by every button.
     #[must_use]
-    pub const fn new(active_level: ActiveLevel, pull: Pull, debounce_ms: u32) -> Self {
+    pub const fn new(
+        active_level: ActiveLevel,
+        pull: Pull,
+        debounce_ms: u32,
+        long_press_ms: u32,
+    ) -> Self {
         Self {
             active_level,
             pull,
-            debounce_ms,
+            timing: ButtonTiming::new(debounce_ms, long_press_ms),
         }
     }
 }
@@ -74,45 +81,12 @@ pub enum GpioButtonsError<E> {
     Pin(E),
 }
 
-/// Per-button debounce state, fed with raw samples and their time.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct Debounce {
-    pressed: bool,
-    raw: bool,
-    raw_since_ms: u64,
-}
-
-impl Debounce {
-    const fn settled(pressed: bool, now_ms: u64) -> Self {
-        Self {
-            pressed,
-            raw: pressed,
-            raw_since_ms: now_ms,
-        }
-    }
-
-    /// Takes one raw sample and returns the debounced state.
-    fn sample(&mut self, raw: bool, now_ms: u64, last_read_ms: u64, debounce_ms: u32) -> bool {
-        if raw != self.raw {
-            self.raw = raw;
-            self.raw_since_ms = now_ms;
-        }
-        let debounce = u64::from(debounce_ms);
-        let idle = now_ms.saturating_sub(last_read_ms) > debounce;
-        if idle || now_ms.saturating_sub(self.raw_since_ms) >= debounce {
-            self.pressed = raw;
-        }
-        self.pressed
-    }
-}
-
 /// Initialized debounced GPIO buttons.
 pub struct GpioButtons<P> {
     pins: [Option<P>; MAX_BUTTONS],
-    state: [Debounce; MAX_BUTTONS],
     count: usize,
-    config: GpioButtonsConfig,
-    last_read_ms: u64,
+    active_level: ActiveLevel,
+    tracker: ButtonTracker,
 }
 
 /// Static factory used by generated Board composition.
@@ -146,19 +120,18 @@ where
                 None => gap = true,
             }
         }
-        let now_ms = Instant::now().as_millis();
-        let mut state = [Debounce::default(); MAX_BUTTONS];
-        for (pin, debounce) in pins.iter_mut().flatten().zip(&mut state) {
+        for pin in pins.iter_mut().flatten() {
             pin.configure_input(InputConfig { pull: config.pull })
                 .map_err(GpioButtonsError::Pin)?;
-            *debounce = Debounce::settled(is_pressed(pin, config.active_level)?, now_ms);
         }
+        let initial = levels(&mut pins, config.active_level)?;
+        let tracker =
+            ButtonTracker::new(&initial[..count], Instant::now().as_millis(), config.timing);
         Ok(GpioButtons {
             pins,
-            state,
             count,
-            config,
-            last_read_ms: now_ms,
+            active_level: config.active_level,
+            tracker,
         })
     }
 }
@@ -171,19 +144,18 @@ impl<P: ConfigurableDigitalPin> GpioButtons<P> {
     }
 
     fn sample_at(&mut self, now_ms: u64) -> Result<ButtonSnapshot, GpioButtonsError<P::Error>> {
-        let mut pressed = [false; MAX_BUTTONS];
-        for ((pin, debounce), target) in self
-            .pins
-            .iter_mut()
-            .flatten()
-            .zip(&mut self.state)
-            .zip(&mut pressed)
-        {
-            let raw = is_pressed(pin, self.config.active_level)?;
-            *target = debounce.sample(raw, now_ms, self.last_read_ms, self.config.debounce_ms);
+        let raw = levels(&mut self.pins, self.active_level)?;
+        Ok(self.tracker.sample(&raw[..self.count], now_ms))
+    }
+
+    fn poll_event_at(
+        &mut self,
+        now_ms: u64,
+    ) -> Result<Option<ButtonEvent>, GpioButtonsError<P::Error>> {
+        if !self.tracker.has_events() {
+            self.sample_at(now_ms)?;
         }
-        self.last_read_ms = now_ms;
-        Ok(ButtonSnapshot::new(&pressed[..self.count]))
+        Ok(self.tracker.pop_event())
     }
 }
 
@@ -193,14 +165,23 @@ impl<P: ConfigurableDigitalPin> Buttons for GpioButtons<P> {
     fn read(&mut self) -> Result<ButtonSnapshot, Self::Error> {
         self.sample_at(Instant::now().as_millis())
     }
+
+    fn poll_event(&mut self) -> Result<Option<ButtonEvent>, Self::Error> {
+        self.poll_event_at(Instant::now().as_millis())
+    }
 }
 
-fn is_pressed<P: ConfigurableDigitalPin>(
-    pin: &mut P,
+/// Reads whether each wired pin sits at the active level.
+fn levels<P: ConfigurableDigitalPin>(
+    pins: &mut [Option<P>; MAX_BUTTONS],
     active_level: ActiveLevel,
-) -> Result<bool, GpioButtonsError<P::Error>> {
-    let high = pin.is_high().map_err(GpioButtonsError::Pin)?;
-    Ok(high == (active_level == ActiveLevel::High))
+) -> Result<[bool; MAX_BUTTONS], GpioButtonsError<P::Error>> {
+    let mut pressed = [false; MAX_BUTTONS];
+    for (pin, target) in pins.iter_mut().flatten().zip(&mut pressed) {
+        let high = pin.is_high().map_err(GpioButtonsError::Pin)?;
+        *target = high == (active_level == ActiveLevel::High);
+    }
+    Ok(pressed)
 }
 
 #[cfg(test)]
@@ -213,12 +194,15 @@ mod tests {
     use std::rc::Rc;
 
     use barracuda_board_hal::{ConfigurableDigitalPin, InputConfig, OutputConfig, Pull};
-    use barracuda_peripheral::{PeripheralImplementation, buttons::Buttons};
+    use barracuda_peripheral::{
+        PeripheralImplementation,
+        buttons::{ButtonEventKind, Buttons},
+    };
     use embassy_futures::block_on;
     use embedded_hal::digital::{ErrorType, InputPin, OutputPin, StatefulOutputPin};
 
     use super::{
-        ActiveLevel, Debounce, GpioButtonsBindings, GpioButtonsConfig, GpioButtonsError,
+        ActiveLevel, GpioButtons, GpioButtonsBindings, GpioButtonsConfig, GpioButtonsError,
         GpioButtonsImplementation,
     };
 
@@ -288,7 +272,7 @@ mod tests {
     }
 
     fn config(active_level: ActiveLevel) -> GpioButtonsConfig {
-        GpioButtonsConfig::new(active_level, Pull::Up, 10)
+        GpioButtonsConfig::new(active_level, Pull::Up, 10, 500)
     }
 
     #[test]
@@ -359,7 +343,9 @@ mod tests {
             config(ActiveLevel::Low),
         ))
         .expect("initialize buttons");
-        let start = buttons.last_read_ms;
+        // A read 100 ms later finds the line settled.
+        let start = embassy_time::Instant::now().as_millis() + 100;
+        buttons.sample_at(start).expect("settle");
 
         // Polled every 2 ms: a press bouncing for 4 ms is reported 10 ms
         // after its last bounce.
@@ -379,14 +365,56 @@ mod tests {
         );
     }
 
+    fn drain(
+        buttons: &mut GpioButtons<TestPin>,
+        now: u64,
+        events: &mut std::vec::Vec<(usize, ButtonEventKind)>,
+    ) {
+        while let Some(event) = buttons.poll_event_at(now).expect("poll") {
+            events.push((event.index(), event.kind()));
+        }
+    }
+
     #[test]
-    fn a_slow_poller_sees_a_new_level_at_once() {
-        let mut debounce = Debounce::settled(false, 0);
-        // The previous read is 50 ms old: the press counts at once.
-        assert!(debounce.sample(true, 50, 0, 10));
-        // Read again within the debounce time: the release must hold.
-        assert!(debounce.sample(false, 52, 50, 10));
-        assert!(debounce.sample(false, 58, 52, 10));
-        assert!(!debounce.sample(false, 62, 58, 10));
+    fn polling_reports_press_long_press_release_and_click() {
+        let a = TestPin::new(true);
+        let b = TestPin::new(true);
+        let mut buttons = block_on(GpioButtonsImplementation::initialize(
+            GpioButtonsBindings::new(
+                a.clone(),
+                [Some(b.clone()), None, None, None, None, None, None],
+            ),
+            config(ActiveLevel::Low),
+        ))
+        .expect("initialize buttons");
+        let start = embassy_time::Instant::now().as_millis() + 100;
+        let mut events = std::vec::Vec::new();
+
+        // Button B clicked: down 100 ms.
+        b.high.set(false);
+        drain(&mut buttons, start, &mut events);
+        b.high.set(true);
+        drain(&mut buttons, start + 100, &mut events);
+        // Button A held 600 ms, polled every 50 ms.
+        a.high.set(false);
+        for step in 0..=12 {
+            drain(&mut buttons, start + 200 + 50 * step, &mut events);
+        }
+        a.high.set(true);
+        drain(&mut buttons, start + 900, &mut events);
+        // The level itself is still read.
+        assert_eq!(buttons.read().expect("read").is_pressed(0), Some(false));
+
+        assert_eq!(
+            events,
+            [
+                (1, ButtonEventKind::Pressed),
+                (1, ButtonEventKind::Released),
+                (1, ButtonEventKind::Click),
+                (0, ButtonEventKind::Pressed),
+                (0, ButtonEventKind::LongPress),
+                (0, ButtonEventKind::Released),
+            ]
+        );
     }
 }

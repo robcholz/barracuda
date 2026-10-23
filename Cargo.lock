@@ -300,6 +300,7 @@ dependencies = [
  "barracuda-board-hal",
  "barracuda-peripheral",
  "embassy-futures",
+ "embassy-time",
 ]
 
 [[package]]
@@ -1202,6 +1203,8 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-peripheral",
+ "embassy-futures",
+ "embassy-time",
  "embedded-hal 1.0.0",
 ]
 
@@ -2496,6 +2499,7 @@ dependencies = [
  "barracuda-driver-m5pm1",
  "barracuda-peripheral",
  "embassy-futures",
+ "embassy-time",
  "embedded-hal 1.0.0",
 ]
 
