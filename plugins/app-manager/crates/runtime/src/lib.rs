@@ -15,6 +15,7 @@ pub mod compiler;
 mod document;
 pub mod format;
 mod program;
+mod scroll;
 mod value;
 mod view;
 

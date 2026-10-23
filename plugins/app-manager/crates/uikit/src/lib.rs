@@ -6,7 +6,8 @@
 //! receives handler calls. [`UiSession::show`] puts the view on its
 //! [`Layer`]; the display shows the system layer over the app layer. [`Ui`]
 //! drives a display and its touch input: taps press the view on the display,
-//! and long presses and swipes go to the system UI through
+//! vertical drags scroll it where it has something to scroll, and long
+//! presses and swipes go to the system UI through
 //! [`UiService::next_gesture`]. This crate knows nothing about apps.
 
 #![no_std]
@@ -142,6 +143,13 @@ impl<Panel: Display, Input: Touch> Ui<Panel, Input> {
                             let _handler = service.press_shown(x, y);
                         }
                         Some(Touched::Gesture(gesture)) => service.post_gesture(gesture),
+                        Some(Touched::DragStart { x, y, dy }) => {
+                            if !service.drag_start(x, y, dy) {
+                                runtime.recognizer.decline_drag();
+                            }
+                        }
+                        Some(Touched::Drag(dy)) => service.drag_by(dy),
+                        Some(Touched::DragEnd) => service.drag_end(),
                         None => {}
                     }
                 }

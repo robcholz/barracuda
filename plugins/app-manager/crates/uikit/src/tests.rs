@@ -673,6 +673,102 @@ mod gestures {
     }
 
     #[test]
+    fn a_vertical_contact_away_from_the_edges_drags_until_it_lifts() {
+        assert_eq!(
+            feed(&[
+                Some((180.0, 200.0)),
+                Some((181.0, 180.0)),
+                Some((182.0, 150.0)),
+                Some((182.0, 150.0)),
+                None,
+            ]),
+            [
+                Touched::DragStart {
+                    x: 180.0,
+                    y: 200.0,
+                    dy: -20.0,
+                },
+                Touched::Drag(-30.0),
+                Touched::Drag(0.0),
+                Touched::DragEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_declined_drag_swipes_and_edges_and_sideways_never_drag() {
+        let mut recognizer = Recognizer::new(DEFAULT_VIEWPORT);
+        assert_eq!(recognizer.sample(Some((180.0, 200.0)), 0), None);
+        assert!(matches!(
+            recognizer.sample(Some((180.0, 170.0)), 16),
+            Some(Touched::DragStart { .. })
+        ));
+        recognizer.decline_drag();
+        assert_eq!(recognizer.sample(Some((180.0, 100.0)), 32), None);
+        assert_eq!(
+            recognizer.sample(None, 48),
+            Some(Touched::Gesture(Gesture::Swipe {
+                direction: Direction::Up,
+                edge: None,
+                x: 180.0,
+                y: 200.0,
+            }))
+        );
+        // Down from the top edge and up from the bottom one are the system's.
+        for (from, to) in [
+            ((180.0, 10.0), (180.0, 60.0)),
+            ((180.0, 350.0), (180.0, 300.0)),
+        ] {
+            assert!(
+                !feed(&[Some(from), Some(to), None])
+                    .iter()
+                    .any(|touched| matches!(touched, Touched::DragStart { .. }))
+            );
+        }
+        assert!(
+            !feed(&[Some((100.0, 180.0)), Some((160.0, 190.0)), None])
+                .iter()
+                .any(|touched| matches!(touched, Touched::DragStart { .. }))
+        );
+    }
+
+    #[test]
+    fn the_shown_view_takes_a_drag_only_where_it_scrolls() {
+        use crate::datum::ViewValue;
+        use crate::service::UiAssets;
+        let service = UiService::new((200.0, 200.0));
+        let session = service
+            .open(&UiAssets {
+                view: include_bytes!("../../runtime/tests/fixtures/scroll.bapp/view.bvir").to_vec(),
+                styles: include_bytes!("../../runtime/tests/fixtures/scroll.bapp/styles.bin")
+                    .to_vec(),
+                fonts: alloc::vec::Vec::new(),
+            })
+            .expect("view opens");
+        let rows = (0..20)
+            .map(|id| {
+                ViewValue::List(alloc::vec![
+                    ViewValue::I32(id),
+                    ViewValue::Str("Row".into())
+                ])
+            })
+            .collect();
+        session
+            .channel()
+            .set("rows", ViewValue::List(rows))
+            .expect("rows");
+        session.show(true);
+        service.pump();
+        // The title does not scroll; the list under it does.
+        assert!(!service.drag_start(100.0, 20.0, -20.0));
+        assert!(service.drag_start(100.0, 100.0, -20.0));
+        service.drag_by(-30.0);
+        service.drag_end();
+        session.hide();
+        assert!(!service.drag_start(100.0, 100.0, -20.0));
+    }
+
+    #[test]
     fn the_service_keeps_the_latest_gestures() {
         let service = UiService::new(DEFAULT_VIEWPORT);
         for index in 0..=MAX_GESTURES {

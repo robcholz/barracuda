@@ -1,6 +1,7 @@
 //! One mounted view and its values: the unit an app drives.
 
 use crate::program::Program;
+use crate::scroll::Scroller;
 use crate::value::{Value, ValueError};
 use crate::view::View;
 use alloc::{string::String, vec::Vec};
@@ -49,6 +50,8 @@ pub struct Document {
     view: View,
     slots: Vec<Value>,
     dirty: bool,
+    /// The scroll container a finger holds or that still moves.
+    scroll: Option<Scroller>,
 }
 
 impl Document {
@@ -110,6 +113,7 @@ impl Document {
             view,
             slots,
             dirty: true,
+            scroll: None,
         };
         document.frame();
         Ok(document)
@@ -161,13 +165,61 @@ impl Document {
         self.dirty
     }
 
-    /// Brings the tree up to date with the values and steps layout and animation.
+    /// Brings the tree up to date with the values and steps layout,
+    /// animation and scrolling.
     pub fn frame(&mut self) {
         if self.dirty {
             self.view.update(&mut self.ui, &self.program, &self.slots);
             self.dirty = false;
         }
         self.ui.tick();
+        if let Some(scroll) = self.scroll.as_mut()
+            && !scroll.step(self.ui.core_mut())
+        {
+            self.scroll = None;
+        }
+    }
+
+    /// Whether the view moves on its own, so it needs frames though nothing
+    /// changed: scrolled content carries on or its indicator fades.
+    #[must_use]
+    pub fn is_moving(&self) -> bool {
+        self.scroll.is_some()
+    }
+
+    /// A finger at (`x`, `y`) started to drag vertically: takes hold of the
+    /// scroll container there. Returns whether there is one; without one the
+    /// drag is not the view's.
+    pub fn drag_start(&mut self, x: f32, y: f32) -> bool {
+        let core = self.ui.core_mut();
+        let Some(target) = core.scroll_target_at(x, y) else {
+            return false;
+        };
+        match self.scroll.as_mut() {
+            Some(scroll) if scroll.target() == target => scroll.hold(core),
+            _ => {
+                if let Some(old) = self.scroll.take() {
+                    core.set_scroll_bar(old.target(), 0.0);
+                }
+                self.scroll = Scroller::grab(core, x, y);
+            }
+        }
+        self.scroll.is_some()
+    }
+
+    /// The dragging finger moved `dy` px down since the last frame, 0 when it
+    /// held still.
+    pub fn drag_by(&mut self, dy: f32) {
+        if let Some(scroll) = self.scroll.as_mut() {
+            scroll.drag(self.ui.core_mut(), dy);
+        }
+    }
+
+    /// The dragging finger lifted: the content carries on and settles.
+    pub fn drag_end(&mut self) {
+        if let Some(scroll) = self.scroll.as_mut() {
+            scroll.release();
+        }
     }
 
     /// Draws the tree into `words`, the UI core's DrawList, and returns the

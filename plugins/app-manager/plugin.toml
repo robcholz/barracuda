@@ -60,3 +60,11 @@ command = ["bun", "resources/build-app.ts", "crates/runtime/tests/fixtures/wrap"
 inputs = ["crates/runtime/tests/fixtures/wrap", "resources/build-app.ts"]
 outputs = ["crates/runtime/tests/fixtures/wrap.bapp"]
 env = ["POCKETJS_ROOT"]
+
+# A view with a list that scrolls: the UI runtime's scrolling tests.
+[tasks.scroll]
+cwd = "."
+command = ["bun", "resources/build-app.ts", "crates/runtime/tests/fixtures/scroll", "crates/runtime/tests/fixtures/scroll.bapp"]
+inputs = ["crates/runtime/tests/fixtures/scroll", "resources/build-app.ts", "resources/pocketjs"]
+outputs = ["crates/runtime/tests/fixtures/scroll.bapp"]
+env = ["POCKETJS_ROOT"]
