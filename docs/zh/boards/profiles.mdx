@@ -64,11 +64,12 @@ plugins:
 
 ## 装进 Flash
 
-固件必须装进开发板的应用槽位（参见[开发板](/zh/boards/overview)中的 ESP Flash 布局）：4 MiB Flash 上是 2816 KiB。在 ESP32 上，它还必须装进芯片为代码映射的 3 MiB。`headless` 的 release 构建在 ESP32-C3、ESP32-C6 和 ESP32-S3 上约为 4 MiB，`screen` 在 ESP32-S3 上约为 5 MiB；在 ESP32 上，单是 `ai` 就会超出代码窗口。因此各开发板构建：
+固件必须装进开发板的应用槽位（参见[开发板](/zh/boards/overview)中的 ESP Flash 布局）：4 MiB Flash 上是 2816 KiB。在 ESP32 上，它还必须装进芯片为代码映射的 3 MiB。`headless` 的 release 构建在 ESP32-C3、ESP32-C6 和 ESP32-S3 上约为 4 MiB，`screen` 在 ESP32-S3 上约为 5 MiB；在 ESP32 上，单是 `ai` 就会超出代码窗口。在 ESP32 上，`connected` 约为 2.3 MiB，`screen-connected` 约为 3.1 MiB，超过了 4 MiB 开发板的槽位，所以带屏幕的 4 MiB ESP32 开发板构建 `screen-offline`。因此各开发板构建：
 
 | 芯片 | Flash | 不带屏幕 | 带屏幕 |
 | --- | --- | --- | --- |
-| ESP32 | 任意 | `connected` | `screen-connected` |
+| ESP32 | 4 MiB | `connected` | `screen-offline` |
+| ESP32 | 8 MiB、16 MiB | `connected` | `screen-connected` |
 | ESP32-C3 | 4 MiB | `connected` | — |
 | ESP32-C6 | 4 MiB | `connected` | — |
 | ESP32-C6 | 8 MiB、16 MiB | `headless` | `screen` |

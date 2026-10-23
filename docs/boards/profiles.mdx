@@ -86,11 +86,14 @@ The firmware has to fit the Board's app slot (see
 flash. On the ESP32 it also has to fit the 3 MiB the chip maps for code.
 Release builds of `headless` take about 4 MiB on the ESP32-C3, ESP32-C6, and
 ESP32-S3, and `screen` about 5 MiB on the ESP32-S3; on the ESP32, `ai` alone
-overflows the code window. So the Boards build:
+overflows the code window. On the ESP32, `connected` takes about 2.3 MiB and
+`screen-connected` about 3.1 MiB, more than a 4 MiB Board's slot, so a 4 MiB
+ESP32 Board with a screen builds `screen-offline`. So the Boards build:
 
 | Chip | Flash | Without a screen | With a screen |
 | --- | --- | --- | --- |
-| ESP32 | any | `connected` | `screen-connected` |
+| ESP32 | 4 MiB | `connected` | `screen-offline` |
+| ESP32 | 8 MiB, 16 MiB | `connected` | `screen-connected` |
 | ESP32-C3 | 4 MiB | `connected` | — |
 | ESP32-C6 | 4 MiB | `connected` | — |
 | ESP32-C6 | 8 MiB, 16 MiB | `headless` | `screen` |
