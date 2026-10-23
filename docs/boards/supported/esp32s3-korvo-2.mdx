@@ -29,5 +29,10 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | --- | --- | --- |
 | `camera` | Camera (OV3660) | [`camera`](/plugins/vm-camera) |
 | `buttons` | Buttons (ADC resistor ladder) | — |
+| `boot-button` | BOOT button (GPIO0) | — |
 | `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `audio-codec` | Audio codec (ES8311 and ES7210) | [`audio`](/plugins/vm-audio) |
+
+The six buttons on the ADC ladder are the primary `buttons` device. GPIO0,
+the BOOT button, is also the MOSI of the optional LCD board's SPI bus, which
+this Board does not declare.

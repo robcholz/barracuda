@@ -69,10 +69,20 @@ peripherals:
       # VOLUME_UP, VOLUME_DOWN, SET, PLAY, MUTE, REC in button-index order
       # (`voltage_range`, `max_voltage` 3000 mV).
       implementation: adc-ladder-buttons
+      primary: true
       bindings: { sense: button-ladder }
       parameters:
         levels-millivolts: "380 820 1110 1650 1980 2410"
         idle-millivolts: 3000
+    # BOOT on GPIO0, active low, with the pull-up Espressif's esp_boards
+    # `esp32_s3_korvo_2_3` enables. GPIO0 is also the MOSI of the optional
+    # LCD board's SPI bus, which this Board does not declare.
+    boot-button:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO0
+      parameters:
+        pull: up
     battery:
       implementation: adc-battery-power-monitor
       bindings: { sense: battery-sense }

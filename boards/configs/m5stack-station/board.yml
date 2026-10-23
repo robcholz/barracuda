@@ -62,12 +62,40 @@ peripherals:
     real-time-clock:
       implementation: bm8563-rtc
       bindings: { i2c: internal-i2c }
-    # The battery behind the AXP192 the display also uses. The two
-    # INA3221 port monitors at 40h and 41h are not declared: a Board
-    # has one power monitor.
+    # The battery behind the AXP192 the display also uses.
     power-monitor:
       implementation: axp192-axp2101-power-monitor
+      primary: true
       bindings: { i2c: internal-i2c }
+    # The 5 V output of each Grove port, through its own 0.01 ohm shunt
+    # (R39, R45, R40, R41, R42, R43) into one INA3221 channel. Station
+    # schematic v1.3: U16 at 40h (A0 low) measures Port A1, A2, B1 on CH1 to
+    # CH3; U8 at 41h measures Port B2, C1, C2. Current flows from IN+ (the
+    # port's switch) to IN- (the port), so it reads positive into the port.
+    port-a1-power:
+      implementation: ina3221-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters: { address: 64, channel: ch1, shunt-micro-ohms: 10000 }
+    port-a2-power:
+      implementation: ina3221-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters: { address: 64, channel: ch2, shunt-micro-ohms: 10000 }
+    port-b1-power:
+      implementation: ina3221-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters: { address: 64, channel: ch3, shunt-micro-ohms: 10000 }
+    port-b2-power:
+      implementation: ina3221-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters: { address: 65, channel: ch1, shunt-micro-ohms: 10000 }
+    port-c1-power:
+      implementation: ina3221-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters: { address: 65, channel: ch2, shunt-micro-ohms: 10000 }
+    port-c2-power:
+      implementation: ina3221-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters: { address: 65, channel: ch3, shunt-micro-ohms: 10000 }
     # The power key on the PMIC's PWRON pin, M5Unified `BtnPWR`: the centre
     # button, SW15 on PWR_KEY to the AXP192 PWRON (Station schematic v1.3).
     power-button:

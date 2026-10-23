@@ -29,12 +29,15 @@ cargo image deploy
 | --- | --- | --- |
 | `audio-codec` | 音频编解码器（ES8311 和 ES7210） | [`audio`](/zh/plugins/vm-audio) |
 | `front-buttons` | 电容触摸按键 | — |
+| `boot-button` | BOOT 按键（GPIO0） | — |
 | `green-status-led` | 指示 LED | — |
 | `inertial-measurement` | 运动传感器（BMI270） | [`motion`](/zh/plugins/vm-imu) |
 | `power-monitor` | 电量计（BQ27220） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `micro-sd` | microSD 卡槽（FAT） | — |
 | `touch` | 触摸控制器（CST816T） | — |
 | `video-display` | 圆形显示屏（ST77916，四线 SPI） | [`display`](/zh/plugins/vm-display) |
+
+电容触摸按键 `front-buttons` 是主 `buttons` 设备。
 
 ## 可用引脚
 

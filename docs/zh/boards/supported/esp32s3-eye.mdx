@@ -30,6 +30,6 @@ cargo image deploy
 | `camera` | 摄像头（OV2640） | [`camera`](/zh/plugins/vm-camera) |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
 | `buttons` | 按键（ADC 电阻阶梯） | — |
+| `boot-button` | BOOT 按键（GPIO0） | — |
 
-正面的四个按键共用 GPIO1 上的一条 ADC 电阻阶梯。一个开发板只声明一个 `buttons`
-设备，因此 BOOT 按键（GPIO0）没有声明。
+正面的四个按键共用 GPIO1 上的一条 ADC 电阻阶梯，是主 `buttons` 设备。

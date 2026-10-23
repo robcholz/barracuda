@@ -50,14 +50,21 @@ peripherals:
   devices:
     buttons:
       # BUTTON_4, BUTTON_3, BUTTON_2, BUTTON_1 in button-index order
-      # (`voltage_range`, `max_voltage` 3000 mV). A Board declares one
-      # `buttons` device, so the separate BOOT button (GPIO0, active low)
-      # is not declared.
+      # (`voltage_range`, `max_voltage` 3000 mV).
       implementation: adc-ladder-buttons
+      primary: true
       bindings: { sense: button-ladder }
       parameters:
         levels-millivolts: "380 820 1980 2410"
         idle-millivolts: 3000
+    # BOOT on GPIO0, active low, with the pull-up Espressif's esp_boards
+    # `esp32_s3_eye` enables.
+    boot-button:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO0
+      parameters:
+        pull: up
     camera:
       implementation: ov2640-camera
       bindings:

@@ -32,14 +32,22 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `power-monitor` | Battery gauge (AXP192) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-a1-power` | Port A1 5 V output (INA3221 `40h` CH1, 10 mΩ shunt) | — |
+| `port-a2-power` | Port A2 5 V output (INA3221 `40h` CH2, 10 mΩ shunt) | — |
+| `port-b1-power` | Port B1 5 V output (INA3221 `40h` CH3, 10 mΩ shunt) | — |
+| `port-b2-power` | Port B2 5 V output (INA3221 `41h` CH1, 10 mΩ shunt) | — |
+| `port-c1-power` | Port C1 5 V output (INA3221 `41h` CH2, 10 mΩ shunt) | — |
+| `port-c2-power` | Port C2 5 V output (INA3221 `41h` CH3, 10 mΩ shunt) | — |
 | `buttons` | Buttons A, B, C (GPIO37, GPIO38, GPIO39) | — |
 | `power-button` | Power button (AXP192 power key) | — |
 
 The battery gauge shares the PMIC with the display: it reads only the PMIC's
 measurement registers, and the display keeps its regulators.
 
-The two INA3221 port monitors at `40h` and `41h` are not declared: a Board has
-one power monitor, and this one is the battery's.
+Each Grove port's 5 V output passes a 10 mΩ shunt into one INA3221 channel,
+and its current reads positive into the port. `power-monitor`, the battery, is
+the primary power monitor; the `power_monitor` Lua package reads only the
+primary one, so no Lua package reads the port monitors yet.
 
 The power button is read through the PMIC, which latches a short press when the
 key is released and a long press once it has been held for the long-press time;

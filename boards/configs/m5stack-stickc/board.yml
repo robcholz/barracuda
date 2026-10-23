@@ -68,6 +68,14 @@ peripherals:
     real-time-clock:
       implementation: bm8563-rtc
       bindings: { i2c: internal-i2c }
+    # MPU6886 at 68h (M5Unified `IMU_Class::begin`). Early units carry an
+    # SH200Q at 6Ch instead, which no implementation drives: on them nothing
+    # answers at 68h, the motion sensor fails to start and the Board starts
+    # without it. The probe only addresses 68h on the internal bus, which
+    # every unit has, so it disturbs nothing on those units.
+    inertial-measurement:
+      implementation: mpu6886-imu
+      bindings: { i2c: internal-i2c }
     # The battery behind the AXP192 the display also uses.
     power-monitor:
       implementation: axp192-axp2101-power-monitor
