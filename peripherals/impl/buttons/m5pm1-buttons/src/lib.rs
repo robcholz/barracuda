@@ -21,17 +21,19 @@
 //! turns it off on a double click, and enters download mode on a long press
 //! (M5PM1 library `M5PM1_REG_BTN_CFG_1` and `M5PM1_REG_BTN_CFG_2`; M5Stack's
 //! StickS3 and CoreP4X pages, "Button Operation Instructions").
-//! [`SingleClickReset::Disable`] sets `SINGLE_RST_DIS` so a click reaches
-//! the application; the double click and the long press keep their factory
-//! actions. The M5PM1 keeps the setting while it has power.
+//! [`SingleClickReset::Disable`], the Board default, sets `SINGLE_RST_DIS` so
+//! a click reaches the application; the double click and the long press keep
+//! their factory actions. The M5PM1 keeps the bit until it loses power, so
+//! [`SingleClickReset::Keep`] clears it again rather than trusting what an
+//! earlier firmware left.
 //!
 //! # Shared ownership
 //!
 //! Display and battery-monitor implementations use the same M5PM1 through
 //! their own views of the bus. This implementation reads only `BTN_STATUS`,
-//! writes only the single-click-reset bit of `BTN_CFG_1` when the Board asks
-//! for it, and repeats the idempotent housekeeping writes (I2C sleep and
-//! watchdog off) the others also make.
+//! writes only the single-click-reset bit of `BTN_CFG_1`, by
+//! read-modify-write, and repeats the idempotent housekeeping writes (I2C
+//! sleep and watchdog off) the others also make.
 
 #![no_std]
 
@@ -48,7 +50,8 @@ use embedded_hal::i2c::I2c;
 /// What a single click of the key does to the system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SingleClickReset {
-    /// Leave the M5PM1's setting as it is; factory units reset.
+    /// Keep the factory behaviour: a click resets the system. Clears
+    /// `SINGLE_RST_DIS` in case an earlier firmware set it.
     Keep,
     /// Turn the reset off, so the click reaches the application.
     Disable,
@@ -123,9 +126,7 @@ where
             let mut pm1 = M5pm1::new(&mut i2c, config.address)?;
             pm1.disable_i2c_sleep()?;
             pm1.disable_watchdog()?;
-            if config.single_click_reset == SingleClickReset::Disable {
-                pm1.set_single_click_reset(false)?;
-            }
+            pm1.set_single_click_reset(config.single_click_reset == SingleClickReset::Keep)?;
             // A press recorded before start, such as the one that switched
             // the Board on, is not a press the application made.
             pm1.button_status()?.pressed
@@ -269,8 +270,8 @@ mod tests {
             M5pm1PowerKeyConfig::new(0x6e, SingleClickReset::Keep, 500),
         ))
         .expect("start");
-        // Housekeeping only; the button configuration is left as it was.
-        assert_eq!(key.i2c.writes, [(0x09, 0x00), (0x0a, 0x00)]);
+        // Housekeeping, and the factory single-click reset kept.
+        assert_eq!(key.i2c.writes, [(0x09, 0x00), (0x0a, 0x00), (0x49, 0x2a)]);
         let snapshot = key.read().expect("read");
         assert_eq!(snapshot.len(), 1);
         assert_eq!(snapshot.is_pressed(0), Some(false));
@@ -286,6 +287,19 @@ mod tests {
         key.i2c.registers[0x48] = 0x80;
         assert_eq!(key.read().expect("read").is_pressed(0), Some(true));
         assert_eq!(key.read().expect("read").is_pressed(0), Some(false));
+    }
+
+    #[test]
+    fn keeping_the_click_reset_clears_only_bit_0() {
+        let mut chip = Chip::new();
+        // An earlier firmware disabled the reset.
+        chip.registers[0x49] = 0x2b;
+        let key = block_on(M5pm1PowerKeyImplementation::initialize(
+            M5pm1PowerKeyBindings::new(chip),
+            M5pm1PowerKeyConfig::new(0x6e, SingleClickReset::Keep, 500),
+        ))
+        .expect("start");
+        assert_eq!(key.i2c.registers[0x49], 0x2a);
     }
 
     #[test]

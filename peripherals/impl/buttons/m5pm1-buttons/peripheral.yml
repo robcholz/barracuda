@@ -12,9 +12,8 @@ implementation:
 # key is down, and in the first read after a press shorter than the time
 # between reads. Its events follow the key's level, and a press that came
 # and went between two reads is a click. The implementation reads only that
-# register and, when the Board asks for it, sets the
-# single-click-reset-disable bit of the button configuration by
-# read-modify-write; the rails and pins stay with the implementations that
+# register and the single-click-reset-disable bit of the button
+# configuration, by read-modify-write; the rails and pins stay with the implementations that
 # use them.
 bindings:
   i2c:
@@ -25,18 +24,19 @@ parameters:
     # 6Eh, the M5PM1's factory address.
     default: 110
   # The M5PM1's factory setting resets the Board on a single click of the
-  # key (M5PM1 user manual, BTN_CFG_1 SINGLE_RST_DIS = 0). `keep` leaves it,
-  # so the key reads pressed only until the click resets the Board;
-  # `disable` turns the reset off so a click reaches the application. The
-  # M5PM1 keeps that setting while it has power, across resets of the
-  # ESP32. A double click turns the Board off either way.
+  # key (M5PM1 library, BTN_CFG_1 49h bit 0 SINGLE_RST_DIS = 0). `disable`,
+  # the default, sets that bit so a click reaches the application; `keep`
+  # clears it, keeping the factory reset on a click. The M5PM1 keeps the bit
+  # across resets of the ESP32 until the M5PM1 itself loses power, so both
+  # values write it. A double click turns the Board off and a long press
+  # enters download mode either way.
   single-click-reset:
     type: enum
     values: [keep, disable]
     rust-values:
       keep: "::barracuda_m5pm1_buttons::SingleClickReset::Keep"
       disable: "::barracuda_m5pm1_buttons::SingleClickReset::Disable"
-    default: keep
+    default: disable
   # How long the key stays down before its events report a long press; a
   # shorter press is a click. 500 ms is M5Unified's `Button_Class` hold
   # time, well before the M5PM1's own 2 s download-mode press (BTN_CFG_1

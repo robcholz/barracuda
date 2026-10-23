@@ -42,7 +42,10 @@ The M5PM1 measures the battery voltage only; whether the battery charges comes
 from the charger's status line on an M5PM1 pin.
 
 The power button is read from the M5PM1's button status and reads pressed while
-the key is down. The M5PM1 keeps its factory behaviour: a single click resets
-the Board and a double click turns it off, so a click does not reach the
-application unless the Board sets `single-click-reset: disable` on the device.
+the key is down. The Board turns off the M5PM1's single-click reset, so a single click is an
+application button: scripts and Plugins receive it as a click instead of the
+Board resetting. A double click still turns the Board off, and a long press
+still enters download mode. The M5PM1 keeps this setting until it loses power,
+across resets and reflashing; `single-click-reset: keep` on the device brings
+back the factory single-click reset.
 `buttons` is the primary `buttons` device.
