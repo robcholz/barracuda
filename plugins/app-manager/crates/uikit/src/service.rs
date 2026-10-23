@@ -119,6 +119,8 @@ struct Inner {
     system_fonts: RefCell<Vec<Vec<u8>>>,
     /// Whether the system fonts are in place.
     ready: Cell<bool>,
+    /// The view a finger drags.
+    dragging: Cell<Option<u32>>,
 }
 
 impl Inner {
@@ -275,6 +277,7 @@ impl UiService {
                 wake: Cell::new(false),
                 system_fonts: RefCell::new(Vec::new()),
                 ready: Cell::new(false),
+                dragging: Cell::new(None),
             }),
         }
     }
@@ -432,6 +435,40 @@ impl UiService {
         f: impl FnOnce(&mut Document) -> R,
     ) -> Option<R> {
         self.inner.documents.borrow_mut().get_mut(&id).map(f)
+    }
+
+    /// A finger that started at (`x`, `y`) and is `dy` px further down set
+    /// off vertically: the view on screen takes the drag if it takes input
+    /// and something there scrolls. Returns whether it took it.
+    pub(crate) fn drag_start(&self, x: f32, y: f32, dy: f32) -> bool {
+        let shown = self.inner.shown.get();
+        let view = shown.view.filter(|_| shown.input);
+        let held = view.and_then(|view| {
+            self.with_document(view, |document| {
+                let held = document.drag_start(x, y);
+                if held {
+                    document.drag_by(dy);
+                }
+                held
+            })
+        });
+        let held = held == Some(true);
+        self.inner.dragging.set(view.filter(|_| held));
+        held
+    }
+
+    /// The dragging finger moved `dy` px down since the last frame.
+    pub(crate) fn drag_by(&self, dy: f32) {
+        if let Some(view) = self.inner.dragging.get() {
+            self.with_document(view, |document| document.drag_by(dy));
+        }
+    }
+
+    /// The dragging finger lifted.
+    pub(crate) fn drag_end(&self) {
+        if let Some(view) = self.inner.dragging.take() {
+            self.with_document(view, Document::drag_end);
+        }
     }
 
     /// Presses the view on screen at (`x`, `y`) if it takes input.

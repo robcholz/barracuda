@@ -36,17 +36,12 @@ pub const WIFI_SETTINGS: &str = "wifi";
 const CONTROL_TILES: i32 = 0;
 const CONTROL_BRIGHTNESS: i32 = 1;
 const CONTROL_PORTAL: i32 = 2;
-/// Brightness when the system starts, in percent.
-/// The battery gauge's inner width in pixels.
-const BATTERY_GAUGE: i32 = 19;
-/// The brightness bar's inner height in pixels.
-const BRIGHTNESS_BAR: i32 = 158;
 /// How long an answered or allowed result stays on screen.
 const ANSWER_SHOWN: Duration = Duration::from_secs(9);
 const RESULT_SHOWN: Duration = Duration::from_secs(30);
 const DONE_SHOWN: Duration = Duration::from_millis(1600);
-/// The launcher's grid: tile column width and gap, row height and gap, in
-/// pixels.
+/// The launcher's tiles, as the view draws them: column width and gap, row
+/// height and gap, in pixels, for how many fit a page.
 const COLUMN: i32 = 78;
 const COLUMN_GAP: i32 = 6;
 const ROW: i32 = 86;
@@ -857,7 +852,7 @@ impl SystemUi {
         let first = self.page * page;
         let shown = &self.entries[first.min(self.entries.len())..];
         let shown = &shown[..shown.len().min(page)];
-        let positions = grid(shown.len(), &rows, width, height);
+        let filled = fill_rows(shown.len(), &rows);
         let values = [
             ("screen", ViewValue::I32(screen.code())),
             ("clock", ViewValue::Str(clock)),
@@ -867,12 +862,6 @@ impl SystemUi {
             (
                 "battery",
                 ViewValue::I32(battery.map_or(-1, |battery| i32::from(battery.percent))),
-            ),
-            (
-                "batteryFill",
-                ViewValue::I32(battery.map_or(0, |battery| {
-                    i32::from(battery.percent) * BATTERY_GAUGE / 100
-                })),
             ),
             (
                 "agent",
@@ -890,30 +879,33 @@ impl SystemUi {
             ("cardGlyph", ViewValue::Str(card_glyph)),
             ("cardTone", ViewValue::I32(card_tone)),
             (
-                "apps",
-                ViewValue::List(
-                    shown
+                "rows",
+                ViewValue::List({
+                    let mut apps = shown.iter().enumerate().map(|(index, info)| {
+                        let (icon, letter) = app_icon(info);
+                        item([
+                            // The index into the whole launcher, which
+                            // `openApp` answers with.
+                            ViewValue::I32((first + index) as i32),
+                            ViewValue::Str(info.name.clone()),
+                            icon,
+                            ViewValue::Str(letter),
+                            ViewValue::Bool(running_ids.contains(&info.id.as_str())),
+                            // Dimmed: an app that cannot run here.
+                            ViewValue::Bool(info.incompatible.is_some()),
+                        ])
+                    });
+                    filled
                         .iter()
-                        .zip(positions)
                         .enumerate()
-                        .map(|(index, (info, (x, y)))| {
-                            let (icon, letter) = app_icon(info);
+                        .map(|(row, &tiles)| {
                             item([
-                                // The index into the whole launcher, which
-                                // `openApp` answers with.
-                                ViewValue::I32((first + index) as i32),
-                                ViewValue::Str(info.name.clone()),
-                                icon,
-                                ViewValue::Str(letter),
-                                ViewValue::Bool(running_ids.contains(&info.id.as_str())),
-                                // Dimmed: an app that cannot run here.
-                                ViewValue::Bool(info.incompatible.is_some()),
-                                ViewValue::I32(x),
-                                ViewValue::I32(y),
+                                ViewValue::I32(row as i32),
+                                ViewValue::List(apps.by_ref().take(tiles).collect()),
                             ])
                         })
-                        .collect(),
-                ),
+                        .collect()
+                }),
             ),
             (
                 "running",
@@ -1007,10 +999,6 @@ impl SystemUi {
                 ViewValue::I32(i32::from(preferences.brightness)),
             ),
             (
-                "brightnessFill",
-                ViewValue::I32(i32::from(preferences.brightness) * BRIGHTNESS_BAR / 100),
-            ),
-            (
                 "portal",
                 ViewValue::Str(
                     network
@@ -1082,33 +1070,17 @@ fn page_rows(width: i32, height: i32, round: bool) -> Vec<usize> {
         .collect()
 }
 
-/// Positions of `count` launcher tiles filling `page`'s rows in order,
-/// centered on a `width` by `height` display.
-fn grid(count: usize, page: &[usize], width: i32, height: i32) -> Vec<(i32, i32)> {
-    let mut rows = Vec::new();
+/// How many of `count` launcher tiles each of `page`'s rows holds, filling
+/// the rows in order; rows left empty are left out.
+fn fill_rows(count: usize, page: &[usize]) -> Vec<usize> {
     let mut left = count;
-    for &tiles in page {
-        if left == 0 {
-            break;
-        }
-        let tiles = tiles.min(left);
-        rows.push(tiles);
-        left -= tiles;
-    }
-    let tall = rows.len() as i32 * ROW + (rows.len() as i32 - 1).max(0) * ROW_GAP;
-    let top = (height - tall) / 2 + 4;
-    let mut positions = Vec::with_capacity(count);
-    for (row, tiles) in rows.into_iter().enumerate() {
-        let span = tiles as i32 * COLUMN + (tiles as i32 - 1) * COLUMN_GAP;
-        let start = (width - span) / 2;
-        for column in 0..tiles as i32 {
-            positions.push((
-                start + column * (COLUMN + COLUMN_GAP),
-                top + row as i32 * (ROW + ROW_GAP),
-            ));
-        }
-    }
-    positions
+    page.iter()
+        .map_while(|&tiles| {
+            let tiles = tiles.min(left);
+            left -= tiles;
+            (tiles > 0).then_some(tiles)
+        })
+        .collect()
 }
 
 /// The brightness level for a percentage.
@@ -1164,7 +1136,7 @@ fn index(call: &ViewCall) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{grid, page_rows};
+    use super::{fill_rows, page_rows};
 
     #[test]
     fn launcher_pages_fit_the_display() {
@@ -1174,20 +1146,23 @@ mod tests {
         assert_eq!(page_rows(240, 240, true), [1, 2]);
         assert_eq!(page_rows(320, 240, false), [2, 3]);
         assert_eq!(page_rows(135, 240, false), [1, 1]);
-        // Every tile of a full page lies on the display.
+        // Every row of a full page fits the display's width, and the rows
+        // its height.
         for (width, height, round) in [(360, 360, true), (320, 240, false), (720, 1280, false)] {
             let rows = page_rows(width, height, round);
-            let count = rows.iter().sum();
-            for (x, y) in grid(count, &rows, width, height) {
-                assert!(
-                    x >= 0 && x + super::COLUMN <= width,
-                    "{width}x{height}: x {x}"
-                );
-                assert!(
-                    y >= 0 && y + super::ROW <= height,
-                    "{width}x{height}: y {y}"
-                );
+            for &tiles in &rows {
+                let span = tiles as i32 * super::COLUMN + (tiles as i32 - 1) * super::COLUMN_GAP;
+                assert!(span <= width, "{width}x{height}: {span}");
             }
+            let tall = rows.len() as i32 * (super::ROW + super::ROW_GAP) - super::ROW_GAP;
+            assert!(tall <= height, "{width}x{height}: {tall}");
         }
+    }
+
+    #[test]
+    fn tiles_fill_rows_in_order() {
+        assert_eq!(fill_rows(7, &[2, 3, 2]), [2, 3, 2]);
+        assert_eq!(fill_rows(4, &[2, 3, 2]), [2, 2]);
+        assert!(fill_rows(0, &[2, 3, 2]).is_empty());
     }
 }

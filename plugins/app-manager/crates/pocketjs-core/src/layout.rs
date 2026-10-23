@@ -36,7 +36,7 @@ use taffy::{AvailableSpace, Size, TaffyTree};
 
 use crate::spec;
 use crate::style::{self, Resolved, StyleTable};
-use crate::text::Fonts;
+use crate::text::{self, Fonts, WrapUnit};
 use crate::tree::{LayoutRect, Tree, LAYOUT_LIVE};
 
 /// Measure context attached to text leaves (taffy NodeContext).
@@ -50,6 +50,13 @@ pub struct MeasureCtx {
     /// shaping is the expensive half of layout on the PSP; the taffy
     /// measure closure must never re-shape per solve pass.
     pub size: (f32, f32),
+    /// Soft wrap only (`Fonts::soft_wrap`): the run shaped per character,
+    /// its widest word, and its hard line count and their height. Empty
+    /// otherwise.
+    units: Vec<WrapUnit>,
+    min_width: f32,
+    lines: u32,
+    row_height: f32,
     native: bool,
     environment_epoch: u64,
     /// Replaying an unchanged measurement must preserve the public missing
@@ -82,15 +89,26 @@ impl MeasureCtx {
     ) -> MeasureCtx {
         let before = fonts.misses.get();
         let size = fonts.measure_run_provider(native, &text, slot, tracking, line_height);
+        let misses = fonts.misses.get().wrapping_sub(before);
+        let (units, min_width) = if fonts.soft_wrap {
+            fonts.wrap_units(native, &text, slot, tracking)
+        } else {
+            (Vec::new(), 0.0)
+        };
+        let lines = text.matches('\n').count() as u32 + 1;
         MeasureCtx {
+            lines,
+            row_height: size.1 / lines as f32,
             text,
             slot,
             tracking,
             line_height,
             size,
+            units,
+            min_width,
             native,
             environment_epoch: 0,
-            misses: fonts.misses.get().wrapping_sub(before),
+            misses,
         }
     }
 }
@@ -472,12 +490,14 @@ pub fn to_taffy(r: &Resolved) -> taffy::Style {
         taffy::Position::Relative
     };
     s.overflow = taffy::Point {
-        x: if r.overflow == spec::Overflow::Hidden as u8 {
-            taffy::Overflow::Hidden
-        } else {
+        x: if r.overflow == spec::Overflow::Visible as u8 {
             taffy::Overflow::Visible
+        } else {
+            taffy::Overflow::Hidden
         },
-        y: if r.overflow == spec::Overflow::Hidden as u8 {
+        y: if r.overflow == spec::Overflow::Scroll as u8 {
+            taffy::Overflow::Scroll
+        } else if r.overflow == spec::Overflow::Hidden as u8 {
             taffy::Overflow::Hidden
         } else {
             taffy::Overflow::Visible
@@ -900,13 +920,48 @@ fn assign_rect(
         }
         None => (LayoutRect::default(), cum, (0.0, 0.0)),
     };
+    // A scroll container scrolls as far as its content runs past its box,
+    // above it as well as below.
+    let (scroll_top, scroll_range) = handle
+        .filter(|&handle| {
+            eng.taffy
+                .style(handle)
+                .is_ok_and(|style| style.overflow.y == taffy::Overflow::Scroll)
+        })
+        .map_or((0.0, 0.0), |handle| {
+            let layout = eng.taffy.unrounded_layout(handle);
+            let top = eng.taffy.children(handle).map_or(0.0, |children| {
+                children.iter().fold(0.0f32, |top, &child| {
+                    top.min(eng.taffy.unrounded_layout(child).location.y)
+                })
+            });
+            let bottom = top + layout.content_size.height - layout.size.height;
+            (top, bottom.max(0.0))
+        });
     let node = &mut tree.slots[slot as usize];
     node.taffy = handle;
     node.layout = rect;
+    node.scroll_top = scroll_top;
+    node.scroll_range = scroll_range;
+    node.scroll_y = node.scroll_y.clamp(scroll_top, scroll_range);
     if node.node_type == spec::NodeType::Text as u8 {
-        node.text_native = handle
-            .and_then(|handle| eng.taffy.get_node_context(handle))
-            .is_some_and(|context| context.native);
+        let context = handle.and_then(|handle| eng.taffy.get_node_context(handle));
+        node.text_native = context.is_some_and(|context| context.native);
+        match (handle, context) {
+            (Some(handle), Some(context)) if !context.units.is_empty() => {
+                // The rows paint draws: the run broken at the content width
+                // the solver measured it at.
+                let layout = eng.taffy.unrounded_layout(handle);
+                let content = layout.size.width
+                    - ((layout.padding.left + layout.border.left)
+                        + (layout.padding.right + layout.border.right));
+                node.soft_breaks.clear();
+                if content < context.size.0 {
+                    text::soft_wrap(&context.units, content, Some(&mut node.soft_breaks));
+                }
+            }
+            _ => node.soft_breaks.clear(),
+        }
     }
     (child_cum, size)
 }
@@ -948,18 +1003,67 @@ fn readback_scope(
 }
 
 /// Measure closure shared by every solve: a text leaf answers with its shaped
-/// size on the axes the solver left open.
-fn measure_leaf(known: Size<Option<f32>>, ctx: Option<&mut MeasureCtx>) -> Size<f32> {
+/// size on the axes the solver left open. Under soft wrap, a run wider than
+/// the width it is offered breaks into rows and takes that width, as text
+/// does on a web page; its min-content width is its widest word.
+fn measure_leaf(
+    known: Size<Option<f32>>,
+    available: Size<AvailableSpace>,
+    ctx: Option<&mut MeasureCtx>,
+    style: &taffy::Style,
+) -> Size<f32> {
     match ctx {
-        Some(m) => Size {
-            width: known.width.unwrap_or(m.size.0),
-            height: known.height.unwrap_or(m.size.1),
-        },
+        Some(m) => {
+            let limit = match available.width {
+                _ if m.units.is_empty() => f32::INFINITY,
+                AvailableSpace::Definite(width) => width,
+                AvailableSpace::MinContent => m.min_width,
+                AvailableSpace::MaxContent => f32::INFINITY,
+            };
+            let limit = clamp_content_width(limit, style).max(0.0);
+            let rows = if limit < m.size.0 {
+                text::soft_wrap(&m.units, limit, None)
+            } else {
+                m.lines
+            };
+            if rows == m.lines {
+                return Size {
+                    width: known.width.unwrap_or(m.size.0),
+                    height: known.height.unwrap_or(m.size.1),
+                };
+            }
+            Size {
+                width: known.width.unwrap_or(limit),
+                height: known.height.unwrap_or(rows as f32 * m.row_height),
+            }
+        }
         None => Size {
             width: 0.0,
             height: 0.0,
         },
     }
+}
+
+/// Clamp a content width to the node's own min and max width. Taffy sizes a
+/// column item's flex basis with its unclamped cross size (`w-full` beside
+/// `max-w-[240px]`), where CSS uses the clamped one: rows counted at the
+/// unclamped width would not be the rows the clamped box draws.
+fn clamp_content_width(width: f32, style: &taffy::Style) -> f32 {
+    let length =
+        |tag: usize, value: f32| (tag == taffy::CompactLength::LENGTH_TAG).then_some(value);
+    let edge = |side: taffy::LengthPercentage| {
+        let raw = side.into_raw();
+        length(raw.tag(), raw.value()).unwrap_or(0.0)
+    };
+    let inset = edge(style.padding.left) + edge(style.padding.right);
+    let mut width = width;
+    if let Some(max) = length(style.max_size.width.tag(), style.max_size.width.value()) {
+        width = width.min(max - inset);
+    }
+    if let Some(min) = length(style.min_size.width.tag(), style.min_size.width.value()) {
+        width = width.max(min - inset);
+    }
+    width
 }
 
 fn compute(tree: &mut Tree, eng: &mut LayoutEngine, root_slot: u32, root_nid: taffy::NodeId) {
@@ -975,12 +1079,12 @@ fn compute(tree: &mut Tree, eng: &mut LayoutEngine, root_slot: u32, root_nid: ta
             width: AvailableSpace::Definite(eng.viewport.0),
             height: AvailableSpace::Definite(eng.viewport.1),
         },
-        |known, _available, _id, ctx, _style| -> Size<f32> {
+        |known, available, _id, ctx, style| -> Size<f32> {
             #[cfg(feature = "counters")]
             {
                 callbacks = callbacks.saturating_add(1);
             }
-            measure_leaf(known, ctx)
+            measure_leaf(known, available, ctx, style)
         },
     );
     #[cfg(feature = "counters")]
@@ -1363,12 +1467,12 @@ fn solve_regions(tree: &mut Tree, eng: &mut LayoutEngine) {
                     width: AvailableSpace::Definite(size.0),
                     height: AvailableSpace::Definite(size.1),
                 },
-                |known, _available, _id, ctx, _style| -> Size<f32> {
+                |known, available, _id, ctx, style| -> Size<f32> {
                     #[cfg(feature = "counters")]
                     {
                         callbacks = callbacks.saturating_add(1);
                     }
-                    measure_leaf(known, ctx)
+                    measure_leaf(known, available, ctx, style)
                 },
             );
             #[cfg(feature = "counters")]
@@ -1462,7 +1566,9 @@ pub fn reference_mismatches(
                     width: AvailableSpace::Definite(viewport.0),
                     height: AvailableSpace::Definite(viewport.1),
                 },
-                |known, _available, _id, ctx, _style| -> Size<f32> { measure_leaf(known, ctx) },
+                |known, available, _id, ctx, style| -> Size<f32> {
+                    measure_leaf(known, available, ctx, style)
+                },
             );
             compare_reference(tree, &taffy, root_slot, (0.0, 0.0), &mut out);
         }

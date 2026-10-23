@@ -301,12 +301,14 @@ pub enum Display {
     None = 1,
 }
 
-/// overflow (Hidden => scissor in draw).
+/// overflow (Hidden => scissor in draw; Scroll => Hidden plus a vertical
+/// scroll offset, `Ui::set_scroll`).
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Overflow {
     Visible = 0,
     Hidden = 1,
+    Scroll = 2,
 }
 
 /// layout containment (Strict: own layout root; Baked: Strict plus build-time rects).

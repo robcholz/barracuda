@@ -121,8 +121,8 @@ impl<Panel: Display> Screen<Panel> {
 
     /// Draws what changed since the last frame and presents it.
     ///
-    /// Returns whether anything changed, so the caller keeps stepping frames
-    /// while a view animates.
+    /// Returns whether anything changed or the view moves on its own, so the
+    /// caller keeps stepping frames while a view animates or scrolls.
     pub(crate) async fn refresh(&mut self, service: &UiService) -> bool {
         let shown = service.shown();
         self.refused = false;
@@ -132,10 +132,14 @@ impl<Panel: Display> Screen<Panel> {
         {
             self.tracker.invalidate();
         }
+        // Scrolled content that carries on needs frames though nothing else
+        // changed.
+        let mut moving = false;
         let painted = match shown.view {
             Some(view) => service
                 .with_document(view, |document| {
                     document.frame();
+                    moving = document.is_moving();
                     let core = document.draw(&mut self.words);
                     self.paint(core)
                 })
@@ -145,7 +149,7 @@ impl<Panel: Display> Screen<Panel> {
         // A refused frame is redrawn whole at the next change.
         self.drawn = (!self.refused).then_some(shown);
         let Some(bounds) = painted else {
-            return false;
+            return moving;
         };
         let region = self.area(bounds);
         if let Err(error) = self

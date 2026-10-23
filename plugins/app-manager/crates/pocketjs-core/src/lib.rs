@@ -860,6 +860,88 @@ impl Ui {
         self.tree.get(id).map(|node| node.text.as_str())
     }
 
+    /// Under soft wrap, the byte offset in a text node's run where each row
+    /// after the first starts, as paint draws it: the rows the last layout
+    /// chose, or those of the static rect a build gave it. Empty when the run
+    /// is on its hard lines.
+    pub fn node_soft_breaks(&self, id: i32) -> Vec<u32> {
+        let Some(slot) = self.tree.resolve(id) else {
+            return Vec::new();
+        };
+        let node = &self.tree.slots[slot as usize];
+        if node.node_type != spec::NodeType::Text as u8 {
+            return Vec::new();
+        }
+        if node.layout_mode == tree::LAYOUT_LIVE {
+            return node.soft_breaks.clone();
+        }
+        let mut run = alloc::string::String::new();
+        self.tree.collect_run(slot, &mut run);
+        let resolved = style::resolve(node, &self.styles, true);
+        text::static_soft_breaks(
+            &self.fonts,
+            &run,
+            node.text_native,
+            resolved.font_slot as u8,
+            resolved.tracking,
+            text::content_width(node.layout.w, &resolved.padding),
+        )
+    }
+
+    /// The scroll container (overflow Scroll) a drag at (x, y) moves: the
+    /// nearest one at or above the node there whose content runs past its
+    /// box. None when nothing there scrolls.
+    pub fn scroll_target_at(&mut self, x: f32, y: f32) -> Option<i32> {
+        let mut id = self.hit_test_bounds(x, y);
+        while let Some(slot) = self.tree.resolve(id) {
+            let node = &self.tree.slots[slot as usize];
+            if node.scroll_range > node.scroll_top
+                && style::resolve(node, &self.styles, true).overflow == spec::Overflow::Scroll as u8
+            {
+                return Some(id);
+            }
+            if id == spec::ROOT_ID {
+                break;
+            }
+            id = node.parent;
+        }
+        None
+    }
+
+    /// How far a scroll container's content is scrolled up, in px.
+    pub fn scroll_offset(&self, id: i32) -> f32 {
+        self.tree.get(id).map_or(0.0, |node| node.scroll_y)
+    }
+
+    /// The least and most a scroll container's offset can be, from the last
+    /// layout: 0 and how far its content runs past its bottom, with the
+    /// least below 0 when content also runs past its top.
+    pub fn scroll_bounds(&self, id: i32) -> (f32, f32) {
+        self.tree
+            .get(id)
+            .map_or((0.0, 0.0), |node| (node.scroll_top, node.scroll_range))
+    }
+
+    /// Scroll a scroll container's content up by `y` px. Paint only: no
+    /// relayout. A host may go past either end while it rubber-bands; the
+    /// next layout clamps the offset to the bounds.
+    pub fn set_scroll(&mut self, id: i32, y: f32) {
+        if let Some(slot) = self.tree.resolve(id) {
+            self.tree.slots[slot as usize].scroll_y = if y.is_finite() { y } else { 0.0 };
+        }
+    }
+
+    /// Opacity of a scroll container's scroll indicator (0 hides it).
+    pub fn set_scroll_bar(&mut self, id: i32, opacity: f32) {
+        if let Some(slot) = self.tree.resolve(id) {
+            self.tree.slots[slot as usize].scroll_bar = if opacity.is_nan() {
+                0.0
+            } else {
+                opacity.clamp(0.0, 1.0)
+            };
+        }
+    }
+
     /// Style-table record id of a node (spec::STYLE_ID_NONE when unstyled).
     /// Native presenters match mounted conditional branches by it.
     pub fn node_style(&self, id: i32) -> Option<i32> {
@@ -2095,6 +2177,17 @@ impl Ui {
     /// A pure query: no layout state depends on it.
     pub fn set_text_wrap(&mut self, f: Option<text::WrapFn>) {
         self.fonts.set_native_wrap(f);
+    }
+
+    /// Wrap text to its box (default off: runs break only on '\n'). Layout
+    /// breaks a run wider than the width its box is offered into rows, by
+    /// the greedy rules of OP wrapText, and the box takes that width and the
+    /// rows' height; paint draws the same rows. Every text leaf re-measures.
+    pub fn set_soft_wrap(&mut self, on: bool) {
+        if self.fonts.soft_wrap != on {
+            self.fonts.soft_wrap = on;
+            self.mark_layout_dirty();
+        }
     }
 
     /// Resize the logical viewport (root node + layout bounds + draw clip).

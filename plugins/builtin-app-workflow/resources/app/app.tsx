@@ -2,20 +2,20 @@ import { Show } from "solid-js";
 import { For, Text, View } from "@pocketjs/framework/solid/components";
 import { clock, empty, flows, toggle } from "./app";
 
-// The loaded Workflows, what starts each, and a switch for each.
+// The loaded Workflows, what starts each, and a switch for each: a column
+// under the clock, as wide as the display allows up to the 280 px the design
+// draws it at, centered so it keeps to the middle a round display shows.
 export default function Workflows() {
   return (
-    <View class="w-full h-full relative overflow-hidden bg-[#09090B]">
-      <View class="absolute left-0 right-0 top-[16px] flex-row justify-center">
-        <Text class="text-sm font-bold text-[#FAFAFA]">{clock()}</Text>
-      </View>
-      <View class="absolute left-[40px] right-[40px] top-[52px] flex-col">
+    <View class="w-full h-full flex-col items-center px-[16px] overflow-hidden bg-[#09090B]">
+      <Text class="shrink-0 text-sm font-bold text-[#FAFAFA] mt-[16px]">{clock()}</Text>
+      <View class="flex-1 min-h-0 w-full max-w-[280px] flex-col mt-[16px] overflow-y-auto">
         <For each={flows()} by={(flow) => flow.id}>
           {(flow) => (
-            <View class="w-full h-[74px] flex-col">
-              <View class="w-full h-[73px] flex-row items-center gap-3 px-3">
+            <View class="shrink-0 w-full flex-col">
+              <View class="w-full min-h-[73px] flex-row flex-wrap items-center gap-3 px-3 py-[8px]">
                 <Text class="shrink-0 text-lg font-bold text-[#A1A1AA]">{flow().glyph}</Text>
-                <View class="flex-1 flex-col overflow-hidden">
+                <View class="basis-[72px] grow min-w-0 flex-col">
                   <Text class="text-lg text-[#FAFAFA]">{flow().name}</Text>
                   <Text class="text-sm text-[#A1A1AA]">{flow().detail}</Text>
                 </View>
@@ -35,13 +35,13 @@ export default function Workflows() {
             </View>
           )}
         </For>
+        <Show when={empty()}>
+          <View class="w-full flex-1 flex-col items-center justify-center gap-2">
+            <Text class="text-lg text-[#FAFAFA] text-center">No workflows yet</Text>
+            <Text class="text-sm text-[#A1A1AA] text-center">Ask the Agent to set one up</Text>
+          </View>
+        </Show>
       </View>
-      <Show when={empty()}>
-        <View class="absolute left-0 top-0 w-full h-full flex-col items-center justify-center gap-2">
-          <Text class="text-lg text-[#FAFAFA]">No workflows yet</Text>
-          <Text class="text-sm text-[#A1A1AA]">Ask the Agent to set one up</Text>
-        </View>
-      </Show>
     </View>
   );
 }

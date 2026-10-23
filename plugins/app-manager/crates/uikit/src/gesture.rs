@@ -3,9 +3,11 @@
 //!
 //! The recognizer sees one sample per frame: where the finger is, or that it
 //! is lifted. A tap is a short contact that stays put; it presses the view on
-//! the display. Long presses and swipes are [`Gesture`]s, which the UI hands
-//! to the system UI through [`crate::UiService::next_gesture`] and never to
-//! an app's view.
+//! the display. A contact that sets off vertically, away from the top and
+//! bottom edges, may drag: the view on the display scrolls with it when
+//! there is something to scroll under the finger. Long presses and swipes
+//! are [`Gesture`]s, which the UI hands to the system UI through
+//! [`crate::UiService::next_gesture`] and never to an app's view.
 
 /// How far a finger may drift and still tap or long-press, in view pixels.
 const SLOP: f32 = 12.0;
@@ -74,6 +76,22 @@ pub(crate) enum Touched {
     Tap(f32, f32),
     /// A gesture for the system UI.
     Gesture(Gesture),
+    /// A contact that started at (`x`, `y`) set off vertically and is now
+    /// `dy` px further down. It drags from here on, unless the caller
+    /// declines it ([`Recognizer::decline_drag`]) because nothing there
+    /// scrolls.
+    DragStart {
+        /// Where it started.
+        x: f32,
+        /// Where it started.
+        y: f32,
+        /// How far down it travelled so far.
+        dy: f32,
+    },
+    /// The dragging contact moved this many px down since the last sample.
+    Drag(f32),
+    /// The dragging contact lifted.
+    DragEnd,
 }
 
 struct Contact {
@@ -82,6 +100,8 @@ struct Contact {
     since_ms: u64,
     /// The contact already long-pressed or moved, so it cannot tap.
     spent: bool,
+    /// The contact drags the view rather than swipes.
+    dragging: bool,
 }
 
 /// Classifies contacts from per-frame samples.
@@ -112,16 +132,29 @@ impl Recognizer {
                     at: point,
                     since_ms: now_ms,
                     spent: false,
+                    dragging: false,
                 });
                 None
             }
             (Some(point), Some(contact)) => {
-                contact.at = point;
+                let last = core::mem::replace(&mut contact.at, point);
+                if contact.dragging {
+                    return Some(Touched::Drag(point.1 - last.1));
+                }
                 if contact.spent {
                     return None;
                 }
                 if beyond_slop(contact.start, point) {
                     contact.spent = true;
+                    if may_drag(self.viewport, contact.start, point) {
+                        contact.dragging = true;
+                        let (x, y) = contact.start;
+                        return Some(Touched::DragStart {
+                            x,
+                            y,
+                            dy: point.1 - y,
+                        });
+                    }
                     return None;
                 }
                 if now_ms.saturating_sub(contact.since_ms) >= LONG_PRESS_MS {
@@ -133,9 +166,20 @@ impl Recognizer {
             }
             (None, Some(_)) => {
                 let contact = self.contact.take()?;
+                if contact.dragging {
+                    return Some(Touched::DragEnd);
+                }
                 self.lifted(&contact)
             }
             (None, None) => None,
+        }
+    }
+
+    /// Nothing scrolls where the current contact started its drag: it
+    /// swipes when it lifts instead.
+    pub(crate) fn decline_drag(&mut self) {
+        if let Some(contact) = self.contact.as_mut() {
+            contact.dragging = false;
         }
     }
 
@@ -179,6 +223,16 @@ impl Recognizer {
             y,
         }))
     }
+}
+
+/// Whether a contact from `start`, now at `at`, may drag: it travels more
+/// vertically than horizontally, and not away from the top or bottom edge it
+/// started at, which would be a system edge swipe.
+fn may_drag((_, height): (f32, f32), start: (f32, f32), at: (f32, f32)) -> bool {
+    let (dx, dy) = (at.0 - start.0, at.1 - start.1);
+    let from_top = start.1 < height * EDGE_SHARE && dy > 0.0;
+    let from_bottom = start.1 > height * (1.0 - EDGE_SHARE) && dy < 0.0;
+    dy.abs() > dx.abs() && !from_top && !from_bottom
 }
 
 fn beyond_slop(a: (f32, f32), b: (f32, f32)) -> bool {

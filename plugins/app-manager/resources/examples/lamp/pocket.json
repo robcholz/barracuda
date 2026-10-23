@@ -8,7 +8,7 @@
   "app": {
     "entry": "app.tsx",
     "framework": "solid",
-    "viewport": { "fixed": { "logical": [360, 360], "presentation": "integer-fit" } },
+    "viewport": { "fixed": { "logical": [135, 180], "presentation": "integer-fit" } },
     "aot": true
   }
 }

@@ -1,0 +1,14 @@
+{
+  "pocket": 2,
+  "id": "dev.barracuda.wrap",
+  "name": "barracuda-wrap",
+  "title": "Wrap",
+  "version": "0.1.0",
+  "engine": { "capabilities": { "requires": ["text.glyphs.baked", "input.buttons"] } },
+  "app": {
+    "entry": "app.tsx",
+    "framework": "solid",
+    "viewport": { "fixed": { "logical": [120, 120], "presentation": "integer-fit" } },
+    "aot": true
+  }
+}

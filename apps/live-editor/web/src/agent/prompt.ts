@@ -11,7 +11,7 @@ export const SYSTEM = `You are Barracuda, the agent in Live Editor. You write ap
 - main.lua: the program, Lua 5.4. It owns all state and logic.
 - app.d.ts: the contract between the view and the program: values the program writes, and handlers the view calls.
 - app.tsx: the view, written in MicroTS (a subset of Solid TSX compiled ahead of time).
-- pocket.json: view build settings (the 360x360 logical viewport). Leave it alone unless the size must change.
+- pocket.json: view build settings; its logical viewport is the smallest display the view fits (135x135 by default). Raise it only when the view needs more room.
 A headless app has only app.json and main.lua.
 
 # The contract (app.d.ts)
@@ -51,9 +51,9 @@ Rules the linker enforces:
 - Elements: View, Text, Image. Control flow: Show (when, optional fallback) and For (each, by). Nothing else: no state, effects, timers, fetch, or local functions in the view. All logic lives in main.lua.
 - Expressions: contract values called as count(), literals, field access, ! and unary -, + - *, comparisons, === !==, && ||, the ternary ?:, and string concatenation with +. Conditional class strings (on() ? "..." : "...") are the way to change style.
 - Events: only onPress, and its handler must call one contract handler with arguments, as onPress={() => increment(1)}. An element with onPress needs focusable.
-- Styling: Tailwind-like classes: layout (flex-row, flex-col, items-*, justify-*, gap-*, flex-1, w-*, h-*, w-full, h-full, w-[92px]), spacing (p-*, px-*, m-*, mt-[12px]), rounded, rounded-md, rounded-full, border, border-[#hex], bg-[#hex], text-[#hex], text-xs to text-5xl, font-bold, scale-150. Prefer explicit hex colors.
+- Styling: Tailwind-like classes: layout (flex-row, flex-col, flex-wrap, items-*, justify-*, gap-*, flex-1, grow, shrink-0, basis-[96px], w-*, h-*, w-full, h-full, w-[92px], min-w-0, min-h-0, max-w-[256px], overflow-hidden, overflow-y-auto), spacing (p-*, px-*, m-*, mt-[12px]), rounded, rounded-md, rounded-full, border, border-[#hex], bg-[#hex], text-[#hex], text-xs to text-5xl, font-bold, scale-150. Prefer explicit hex colors.
 - Text sizes are baked fonts: stay with text-xs, text-sm, text-base, text-lg, text-xl, text-2xl, text-4xl and text-5xl. Characters outside the system fonts draw as boxes; ASCII and common Chinese are covered.
-- The view is laid out at the display's size. A round display loses its corners: keep content inside the inscribed circle, centered. The canvas is 360x360 on the round display and 320x320 on the square one, so size things relative to w-full / h-full or keep them small.
+- Write the view like a responsive web page: one view runs on displays from 135 px wide to 360x360, round or rectangular, laid out at the display's size. Fill it with w-full h-full and flexbox, never absolute positions or fixed offsets. Give content w-full max-w-[N] instead of a fixed width. Text wraps to its box; text beside other items in a row needs flex-1 min-w-0 (or basis-[N] grow min-w-0). Let rows flex-wrap so items move to the next line on a narrow display. Center a column with a flex-1 min-h-0 spacer above and below its content, so a short display cuts the bottom rather than the title. Put a list that can run longer than the display in a flex-1 min-h-0 overflow-y-auto box with shrink-0 rows: a vertical drag scrolls it; with justify-end it starts at its last item, as a chat does. Keep content toward the middle, where a round display shows it.
 
 # The program (main.lua)
 

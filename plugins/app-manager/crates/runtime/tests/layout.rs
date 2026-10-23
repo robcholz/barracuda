@@ -112,6 +112,22 @@ fn rects(document: &Document) -> Vec<(f32, f32, f32, f32)> {
     out
 }
 
+/// Where each text node's rows start, in tree order, for the text that wraps.
+fn rows(document: &Document) -> Vec<Vec<u32>> {
+    fn walk(core: &barracuda_ui_runtime::pocketjs_core::Ui, id: i32, out: &mut Vec<Vec<u32>>) {
+        for &child in core.node_children(id) {
+            let breaks = core.node_soft_breaks(child);
+            if !breaks.is_empty() {
+                out.push(breaks);
+            }
+            walk(core, child, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(document.ui().core(), spec::ROOT_ID, &mut out);
+    out
+}
+
 /// Lays `program` out at `size` with the system fonts.
 fn laid_out(program: Program, styles: &[u8], (width, height): (f32, f32)) -> Document {
     let fonts = system_fonts();
@@ -180,11 +196,15 @@ fn a_build_for_a_display_solves_the_rects_the_device_would() {
         ),
     ] {
         let program = format::read(bvir).expect("fixture loads");
-        // The card, its title, the row, its two boxes, and the label.
-        assert_eq!(statics(&program.nodes), 6, "{size:?}");
+        // The card, its title and paragraph, the row, its two boxes, and the
+        // label.
+        assert_eq!(statics(&program.nodes), 7, "{size:?}");
         let baked = laid_out(program.clone(), styles, size);
         let solved = laid_out(live(program), styles, size);
         assert_eq!(rects(&baked), rects(&solved), "{size:?}");
+        // The paragraph wraps, and into the same rows either way.
+        assert!(!rows(&baked).is_empty(), "{size:?}");
+        assert_eq!(rows(&baked), rows(&solved), "{size:?}");
         // The root fills the display it was built for.
         assert_eq!(rects(&baked)[0], (0.0, 0.0, size.0, size.1));
     }

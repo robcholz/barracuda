@@ -77,12 +77,30 @@ after a Board or system change.
 
 ### Views and the display
 
-A view is laid out at the display's size in view pixels: its root fills the
-display, and the layout is flexbox, so a view that fills its parent
-(`w-full`, `h-full`), spaces columns with insets on both sides (`left-[40px]
-right-[40px]`), and centers with `justify-center` fits displays of other
-sizes. Fixed sizes stay as written. `view.size` is the smallest display the
-view still fits. The device judges a view by its size alone: whether the
+A view is laid out at the display's size in view pixels, from 135 px wide to
+360 × 360 and more, so write it like a responsive web page:
+
+- Fill the display with `w-full h-full` and lay content out with flexbox,
+  not absolute positions or fixed offsets.
+- Give content `w-full max-w-[256px]` rather than a fixed width: as wide as
+  the display allows, up to the width the design draws it at.
+- Text wraps between words to the room it has, as on a web page. Text beside
+  other items in a row takes the room they leave with `flex-1 min-w-0`, or
+  `basis-[72px] grow min-w-0` to move to its own line when even that is too
+  narrow. As on the web, a text box shrinks below its longest word only with
+  `min-w-0`, and then breaks that word.
+- Let rows `flex-wrap`, so their items move to the next line on a narrow
+  display.
+- Center a column with a `flex-1 min-h-0` spacer above and below its content:
+  on a short display the spacers give way first and the bottom is cut, not
+  the title.
+- Put a list that can run longer than the display in a
+  `flex-1 min-h-0 overflow-y-auto` box with `shrink-0` rows: a vertical drag
+  scrolls it. With `justify-end` it starts at its last item, as a chat does,
+  and scrolls up to the first.
+
+Fixed sizes stay as written. `view.size` is the smallest display the view
+still fits. The device judges a view by its size alone: whether the
 display is round or rectangular is for the view's design to handle, so a view
 meant for every device keeps its content where a round display shows it.
 Text keeps its size: font slots are baked at fixed sizes in view pixels. A

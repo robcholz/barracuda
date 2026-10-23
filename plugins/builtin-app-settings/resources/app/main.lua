@@ -5,10 +5,6 @@ local settings = require("settings")
 local view = assert(app.view())
 
 local SETTINGS, WIFI, SOUND, APPS, STORAGE, ABOUT = 0, 1, 2, 3, 4, 5
--- The width of a level bar, in pixels: the display less the page's 40 px
--- margins and its rows' 12 px padding.
-local DISPLAY = app.device().display
-local BAR = (DISPLAY and DISPLAY.width or 360) - 2 * 40 - 2 * 12
 local TIMEOUTS = { 15, 30, 60, 300, 0 }
 local STATES = {
   running = "Running",
@@ -80,9 +76,7 @@ end
 
 local function publish_sound()
   set("volume", status.volume)
-  set("volumeFill", status.volume * BAR // 100)
   set("brightness", status.brightness)
-  set("brightnessFill", status.brightness * BAR // 100)
   set("timeout", timeout_text(status.screen_off))
   set("muted", status.muted)
 end
@@ -113,16 +107,17 @@ local function publish_storage()
     set("usedNote", "Media, apps, and cache")
   end
   local total = math.max(storage.total or storage.used, storage.used, 1)
-  local fills = {}
+  -- Each part's share of the bar, in thousandths.
+  local shares = {}
   local rows = {}
   local glyphs = { image = "\u{E03C}", package = "\u{E060}", memory = "\u{E050}" }
   for index, part in ipairs(storage.parts) do
-    fills[index] = part.bytes * BAR // total
+    shares[index] = part.bytes * 1000 // total
     rows[index] = { id = index, label = part.name, value = part.label, glyph = glyphs[part.icon] or "", mono = true }
   end
-  set("mediaFill", fills[1])
-  set("appsFill", fills[2])
-  set("cacheFill", fills[3])
+  set("mediaShare", shares[1])
+  set("appsShare", shares[2])
+  set("cacheShare", shares[3])
   set("rows", rows)
 end
 

@@ -20,6 +20,9 @@
 //! | `tick_rate()` | | ticks per second |
 //! | `draw(scale)` | | 1 with new RGBA pixels, 0 when the picture did not change |
 //! | `press(x, y)` | | 1 with the handler call as JSON, 0 when the tap hits no handler |
+//! | `drag_start(x, y)` | | 1 when the view scrolls there and takes the drag, 0 when not |
+//! | `drag_by(dy)` | | moves the drag `dy` view pixels down |
+//! | `drag_end()` | | lets go of the drag |
 //! | `texts()` | | the text on screen as a JSON array |
 
 pub mod preview;
@@ -220,6 +223,24 @@ mod exports {
             }
             None => 0,
         }
+    }
+
+    /// A vertical drag from (`x`, `y`): 1 when the view scrolls there, 0 when not.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn drag_start(x: f32, y: f32) -> u32 {
+        u32::from(with_preview(|preview| preview.drag_start(x, y)) == Some(true))
+    }
+
+    /// Moves the drag `dy` view pixels down.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn drag_by(dy: f32) {
+        with_preview(|preview| preview.drag_by(dy));
+    }
+
+    /// Lets go of the drag.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn drag_end() {
+        with_preview(Preview::drag_end);
     }
 
     /// Answers the text on screen as a JSON array.

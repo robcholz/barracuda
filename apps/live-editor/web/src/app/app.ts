@@ -642,6 +642,11 @@ export class App extends EventTarget {
     this.runner.tap(x, y);
   }
 
+  /** The pointer on the preview, in view pixels: it taps, or drags what scrolls. */
+  pointer(phase: "down" | "move" | "up" | "cancel", x: number, y: number) {
+    this.runner.pointer(phase, x, y);
+  }
+
   lifecycle(event: "back" | "background" | "foreground" | "terminate") {
     this.runner.lifecycle(event);
   }
