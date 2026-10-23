@@ -15,9 +15,11 @@
 // script on its own `resources/app`.
 //
 // A MicroTS view compiles with the PocketJS compiler, which is not part of this
-// repository: point POCKETJS_ROOT at a PocketJS checkout. The script copies each
-// app into that checkout so its `@pocketjs/*` imports resolve, compiles the view,
-// bakes the fonts it uses, and links the View IR into `view.bvir`.
+// repository: point POCKETJS_ROOT at a PocketJS checkout. The script stages a
+// copy of the compiler with the patches in `pocketjs/` applied (the compiler
+// half of the vendored core's patches), copies each app into it so its
+// `@pocketjs/*` imports resolve, compiles the view, bakes the fonts it uses,
+// and links the View IR into `view.bvir`. The checkout itself is left as it is.
 //
 // Without `--target`, the view is built for any display at least the size
 // `pocket.json` names: the device lays it out at its own size. `--target
@@ -40,12 +42,15 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { stagePocketJS } from "./pocketjs/stage";
 
-const pocket = process.env.POCKETJS_ROOT;
-if (!pocket) {
+const checkout = process.env.POCKETJS_ROOT;
+if (!checkout) {
   console.error("Set POCKETJS_ROOT to a PocketJS checkout.");
   process.exit(1);
 }
+// The compiler, staged with the patches in `pocketjs/`.
+const pocket = stagePocketJS(checkout);
 const args = process.argv.slice(2);
 const flag = (name: string) => {
   const at = args.indexOf(name);
@@ -109,13 +114,13 @@ const FONT_SLOT_BYTE = 12;
 // build measures text with them.
 const systemFonts = resolve(import.meta.dir, "../../system-fonts/filesystem/resources/fonts");
 // The core the device runs, for WebAssembly: the checkout's wasm bindings
-// (`engine/wasm`) over the vendored `pocketjs-core`, which carries the
-// soft-wrap patch, with soft wrap on as the UI runtime has it. The same crate
+// (`engine/wasm`) over the vendored `pocketjs-core`, which carries
+// Barracuda's patches, with soft wrap on as the UI runtime has it. The same crate
 // and float math as the device, so the rects a targeted build solves, wrapped
 // text included, are the ones the device would.
 const vendoredCore = resolve(import.meta.dir, "../crates/pocketjs-core");
 const coreWasm = () => {
-  const bindings = join(pocket, "engine/wasm");
+  const bindings = join(checkout, "engine/wasm");
   const crate = resolve(import.meta.dir, "../../../target/pocketjs-wasm");
   const write = (path: string, text: string) => {
     if (!existsSync(path) || readFileSync(path, "utf8") !== text) writeFileSync(path, text);
@@ -210,7 +215,7 @@ for (const { name, source, bundle, ownFonts } of apps) {
       const shownLarge = [..."0123456789 .,:%-+"].concat([...extraChars].filter((char) => char.codePointAt(0)! >= 0xe000 && char.codePointAt(0)! <= 0xf8ff));
       for (const slot of large) {
         const [px, bold] = DISPLAY_SLOTS[slot];
-        const face = await opentype(bold ? (faces.boldTtf ?? join(pocket, "assets/fonts/Inter-Bold.ttf")) : (faces.regularTtf ?? join(pocket, "assets/fonts/Inter-Regular.ttf")));
+        const face = await opentype(bold ? (faces.boldTtf ?? join(checkout, "assets/fonts/Inter-Bold.ttf")) : (faces.regularTtf ?? join(checkout, "assets/fonts/Inter-Regular.ttf")));
         const codepoints = [...new Set(shownLarge.map((char) => char.codePointAt(0)!))].sort((a, b) => a - b);
         fonts.push(bakeSlot(face, slot, px, bold, codepoints, density, [await opentype(icons)]));
       }

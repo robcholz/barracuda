@@ -1,0 +1,40 @@
+Scroll containers: `overflow-y-auto` and `overflow-y-scroll`.
+
+The compiler half of the core's scroll patch
+(`crates/pocketjs-core/patches/0002-scroll.patch`): both classes set
+`overflow` to the new `Overflow.Scroll`, which the core clips like
+`overflow-hidden` and scrolls by a paint-only offset its host drives.
+build-app.ts applies this to a staged copy of the PocketJS compiler, never to
+the checkout.
+
+--- a/contracts/spec/spec.ts
++++ b/contracts/spec/spec.ts
+@@ -342,7 +342,7 @@
+   insetB: 27, //        f32 px
+   insetL: 28, //        f32 px
+   display: 29, //       enum Display
+-  overflow: 30, //      enum Overflow (hidden => scissor in draw)
++  overflow: 30, //      enum Overflow (hidden => scissor in draw; scroll => hidden plus a scroll offset)
+   zIndex: 31, //        i32 (paint order among siblings; layout-group id but paint-only)
+   hitPass: 32, //       0|1. 1 = the node's OWN box never claims a hit (ink or
+   //                    bounds walk alike); descendants are still tested — the
+@@ -572,7 +572,7 @@
+   Align: { Start: 0, Center: 1, End: 2, Stretch: 3 },
+   PosType: { Relative: 0, Absolute: 1 },
+   Display: { Flex: 0, None: 1 },
+-  Overflow: { Visible: 0, Hidden: 1 },
++  Overflow: { Visible: 0, Hidden: 1, Scroll: 2 },
+   /** Layout containment: `contain-strict` / `layout-baked`. */
+   Contain: { None: 0, Strict: 1, Baked: 2 },
+   TextAlign: { Left: 0, Center: 1, Right: 2 },
+--- a/framework/compiler/tailwind.ts
++++ b/framework/compiler/tailwind.ts
+@@ -302,6 +302,8 @@
+     case "relative": D.push([PROP.posType, int(ENUMS.PosType.Relative)]); return true;
+     case "hidden": D.push([PROP.display, int(ENUMS.Display.None)]); return true;
+     case "overflow-hidden": D.push([PROP.overflow, int(ENUMS.Overflow.Hidden)]); return true;
++    case "overflow-y-auto":
++    case "overflow-y-scroll": D.push([PROP.overflow, int(ENUMS.Overflow.Scroll)]); return true;
+     // Layout containment (PocketJS extension of Tailwind's contain-*): the
+     // subtree is solved as its own layout root given this node's box.
+     // `layout-baked` adds the MicroTS build-time proof and rect tables.

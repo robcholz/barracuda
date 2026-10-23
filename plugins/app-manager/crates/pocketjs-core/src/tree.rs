@@ -114,6 +114,14 @@ pub struct Node {
     /// Text nodes under soft wrap: the byte offset in the run where each row
     /// after the first starts, as layout broke it (`text::soft_wrap`).
     pub soft_breaks: Vec<u32>,
+    /// Scroll containers (overflow Scroll): how far the content is scrolled
+    /// up; the least and most it can be, from the last layout (the least is
+    /// below 0 when content runs past the top, as `justify-end` content
+    /// does); and the opacity of the scroll indicator.
+    pub scroll_y: f32,
+    pub scroll_top: f32,
+    pub scroll_range: f32,
+    pub scroll_bar: f32,
 }
 
 impl Node {
@@ -145,6 +153,10 @@ impl Node {
             region_root: false,
             text_native: false,
             soft_breaks: Vec::new(),
+            scroll_y: 0.0,
+            scroll_top: 0.0,
+            scroll_range: 0.0,
+            scroll_bar: 0.0,
         }
     }
 

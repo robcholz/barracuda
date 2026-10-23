@@ -10,7 +10,8 @@
 //   microts-files.json  the files it reads (TypeScript's library declarations, PocketJS's sources)
 //
 // The MicroTS compiler is not part of this repository: point POCKETJS_ROOT at a PocketJS checkout,
-// at the commit docs/plugins/app-manager/pocketjs.mdx names, as build-app.ts needs it.
+// at the commit docs/plugins/app-manager/pocketjs.mdx names, as build-app.ts needs it; the build
+// stages it with Barracuda's patches to it, as build-app.ts does.
 //
 //   POCKETJS_ROOT=~/src/pocketjs bun apps/live-editor/web/build.ts
 //
@@ -20,6 +21,7 @@
 import fs from "node:fs";
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { stagePocketJS } from "../../../plugins/app-manager/resources/pocketjs/stage";
 
 const web = import.meta.dir;
 const repository = resolve(web, "../../..");
@@ -59,8 +61,9 @@ console.log("live-editor.wasm");
 
 await buildApp();
 
-const pocket = process.env.POCKETJS_ROOT && resolve(process.env.POCKETJS_ROOT);
-if (!pocket) {
+const checkout =
+  process.env.POCKETJS_ROOT && resolve(process.env.POCKETJS_ROOT);
+if (!checkout) {
   if (fs.existsSync(join(dist, "microts.js"))) {
     console.log("microts.js: kept (set POCKETJS_ROOT to rebuild it)");
     process.exit(0);
@@ -70,6 +73,8 @@ if (!pocket) {
   );
   process.exit(1);
 }
+// The compiler, staged with Barracuda's patches to it, as build-app.ts stages it.
+const pocket = stagePocketJS(checkout);
 
 // Every app in the repository with a view: the system view, the builtin apps and the examples.
 const apps = [
@@ -117,6 +122,12 @@ for (const path of [...read].sort()) {
     // read as missing: the browser finds it missing too
   }
 }
+// The staged compiler reaches its dependencies through a link to the checkout's node_modules,
+// so they were read there; the browser has no links and looks for them under the staged root.
+const modules = fs.realpathSync(join(pocket, "node_modules"));
+for (const [path, text] of Object.entries(snapshot))
+  if (path.startsWith(`${modules}/`))
+    snapshot[join(pocket, "node_modules", path.slice(modules.length))] = text;
 writeFileSync(join(dist, "microts-files.json"), JSON.stringify(snapshot));
 console.log(`microts-files.json: ${Object.keys(snapshot).length} files`);
 

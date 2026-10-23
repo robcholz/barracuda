@@ -25,19 +25,25 @@ the ESP32-C3 too. The sources are also reformatted with this workspace's
 `rustfmt`. The manifests are rewritten to
 stand alone in this workspace and silence Clippy's style lints.
 
-`pocketjs-core` also carries one change to PocketJS itself, recorded in
-`pocketjs-core/patches/soft-wrap.patch` with its reasons. Upstream breaks text
-only at `\n`; the patch adds `Ui::set_soft_wrap`, which makes the layout wrap
-text to the width its box is given, in the same solve, and makes paint draw
-those rows. It is off by default, so upstream behavior is unchanged, and the
-UI runtime turns it on for every view.
+`pocketjs-core` also carries changes to PocketJS itself, each recorded with
+its reasons in `pocketjs-core/patches/`, applied in name order:
+
+| Patch | Change |
+| --- | --- |
+| `0001-soft-wrap.patch` | **Soft wrap.** Upstream breaks text only at `\n`. `Ui::set_soft_wrap` makes the layout wrap text to the width its box is given, in the same solve, and makes paint draw those rows. It is off by default; the UI runtime turns it on for every view. |
+| `0002-scroll.patch` | **Scroll containers.** Upstream scrolls in JS. `Overflow::Scroll` clips like `overflow-hidden` and moves its content by an offset the host drives (`Ui::set_scroll`), in paint and hit testing alike, within the bounds its last layout found (`Ui::scroll_bounds`); `Ui::set_scroll_bar` shows its indicator. The UI runtime drives it from touch. |
+
+Neither changes anything for a view that does not use it. The compiler's half
+of the scroll change, the `overflow-y-auto` and `overflow-y-scroll` classes,
+is `plugins/app-manager/resources/pocketjs/overflow-scroll.patch`.
 
 Update by copying the same paths from a newer commit, re-applying the three
 deletions and the `portable_atomic` import, running `cargo fmt --all`, and
-applying the patch from `pocketjs-core/src` with
-`patch -p1 < ../patches/soft-wrap.patch`. Drop the patch once upstream has
-the change. A build for one display solves its rects in this patched core,
-built for WebAssembly with the checkout's `engine/wasm` bindings. The build scripts in
-`plugins/app-manager/resources` compile views with the PocketJS checkout at
-the same commit. Keep Barracuda-specific code out of these directories; it belongs in
+applying each patch from `pocketjs-core/src` with
+`patch -p1 < ../patches/<patch>`. Drop a patch once upstream has its change.
+The build scripts in `plugins/app-manager/resources` compile views with the
+PocketJS checkout at the same commit, staged with the patches in
+`resources/pocketjs/` applied so the checkout itself never changes, and a
+build for one display solves its rects in this patched core, built for
+WebAssembly with the checkout's `engine/wasm` bindings. Keep Barracuda-specific code out of these directories; it belongs in
 `barracuda-ui-runtime`.

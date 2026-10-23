@@ -490,12 +490,14 @@ pub fn to_taffy(r: &Resolved) -> taffy::Style {
         taffy::Position::Relative
     };
     s.overflow = taffy::Point {
-        x: if r.overflow == spec::Overflow::Hidden as u8 {
-            taffy::Overflow::Hidden
-        } else {
+        x: if r.overflow == spec::Overflow::Visible as u8 {
             taffy::Overflow::Visible
+        } else {
+            taffy::Overflow::Hidden
         },
-        y: if r.overflow == spec::Overflow::Hidden as u8 {
+        y: if r.overflow == spec::Overflow::Scroll as u8 {
+            taffy::Overflow::Scroll
+        } else if r.overflow == spec::Overflow::Hidden as u8 {
             taffy::Overflow::Hidden
         } else {
             taffy::Overflow::Visible
@@ -918,9 +920,30 @@ fn assign_rect(
         }
         None => (LayoutRect::default(), cum, (0.0, 0.0)),
     };
+    // A scroll container scrolls as far as its content runs past its box,
+    // above it as well as below.
+    let (scroll_top, scroll_range) = handle
+        .filter(|&handle| {
+            eng.taffy
+                .style(handle)
+                .is_ok_and(|style| style.overflow.y == taffy::Overflow::Scroll)
+        })
+        .map_or((0.0, 0.0), |handle| {
+            let layout = eng.taffy.unrounded_layout(handle);
+            let top = eng.taffy.children(handle).map_or(0.0, |children| {
+                children.iter().fold(0.0f32, |top, &child| {
+                    top.min(eng.taffy.unrounded_layout(child).location.y)
+                })
+            });
+            let bottom = top + layout.content_size.height - layout.size.height;
+            (top, bottom.max(0.0))
+        });
     let node = &mut tree.slots[slot as usize];
     node.taffy = handle;
     node.layout = rect;
+    node.scroll_top = scroll_top;
+    node.scroll_range = scroll_range;
+    node.scroll_y = node.scroll_y.clamp(scroll_top, scroll_range);
     if node.node_type == spec::NodeType::Text as u8 {
         let context = handle.and_then(|handle| eng.taffy.get_node_context(handle));
         node.text_native = context.is_some_and(|context| context.native);

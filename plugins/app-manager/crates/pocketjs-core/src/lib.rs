@@ -888,6 +888,60 @@ impl Ui {
         )
     }
 
+    /// The scroll container (overflow Scroll) a drag at (x, y) moves: the
+    /// nearest one at or above the node there whose content runs past its
+    /// box. None when nothing there scrolls.
+    pub fn scroll_target_at(&mut self, x: f32, y: f32) -> Option<i32> {
+        let mut id = self.hit_test_bounds(x, y);
+        while let Some(slot) = self.tree.resolve(id) {
+            let node = &self.tree.slots[slot as usize];
+            if node.scroll_range > node.scroll_top
+                && style::resolve(node, &self.styles, true).overflow == spec::Overflow::Scroll as u8
+            {
+                return Some(id);
+            }
+            if id == spec::ROOT_ID {
+                break;
+            }
+            id = node.parent;
+        }
+        None
+    }
+
+    /// How far a scroll container's content is scrolled up, in px.
+    pub fn scroll_offset(&self, id: i32) -> f32 {
+        self.tree.get(id).map_or(0.0, |node| node.scroll_y)
+    }
+
+    /// The least and most a scroll container's offset can be, from the last
+    /// layout: 0 and how far its content runs past its bottom, with the
+    /// least below 0 when content also runs past its top.
+    pub fn scroll_bounds(&self, id: i32) -> (f32, f32) {
+        self.tree
+            .get(id)
+            .map_or((0.0, 0.0), |node| (node.scroll_top, node.scroll_range))
+    }
+
+    /// Scroll a scroll container's content up by `y` px. Paint only: no
+    /// relayout. A host may go past either end while it rubber-bands; the
+    /// next layout clamps the offset to the bounds.
+    pub fn set_scroll(&mut self, id: i32, y: f32) {
+        if let Some(slot) = self.tree.resolve(id) {
+            self.tree.slots[slot as usize].scroll_y = if y.is_finite() { y } else { 0.0 };
+        }
+    }
+
+    /// Opacity of a scroll container's scroll indicator (0 hides it).
+    pub fn set_scroll_bar(&mut self, id: i32, opacity: f32) {
+        if let Some(slot) = self.tree.resolve(id) {
+            self.tree.slots[slot as usize].scroll_bar = if opacity.is_nan() {
+                0.0
+            } else {
+                opacity.clamp(0.0, 1.0)
+            };
+        }
+    }
+
     /// Style-table record id of a node (spec::STYLE_ID_NONE when unstyled).
     /// Native presenters match mounted conditional branches by it.
     pub fn node_style(&self, id: i32) -> Option<i32> {
