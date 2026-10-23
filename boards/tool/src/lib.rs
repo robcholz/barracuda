@@ -868,6 +868,8 @@ fn write_selected_build(
             );
         }
     }
+    // esp-hal's top linker script, unless the Platform links with its own.
+    let esp_linker_script = platform.build().linker_script().unwrap_or("linkall.x");
     if is_esp_riscv(target) {
         // espup's riscv32-esp-elf GCC, on PATH through the Platform's
         // environment file, compiles C dependencies. Rust's own linker links
@@ -911,7 +913,7 @@ fn write_selected_build(
             );
         }
         cargo.push_str(&format!(
-            "\n[target.{target}]\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\"]\n"
+            "\n[target.{target}]\nrustflags = [\"-C\", \"link-arg=-T{esp_linker_script}\"]\n"
         ));
     }
     if let Some(tool_prefix) = target
@@ -949,7 +951,7 @@ fn write_selected_build(
             );
         }
         cargo.push_str(&format!(
-            "\n[target.{target}]\nrustflags = [\"-C\", \"link-arg=-Tlinkall.x\", \"-C\", \"link-arg=-nostartfiles\"]\n"
+            "\n[target.{target}]\nrustflags = [\"-C\", \"link-arg=-T{esp_linker_script}\", \"-C\", \"link-arg=-nostartfiles\"]\n"
         ));
     }
     if platform.application().launcher().is_some() {

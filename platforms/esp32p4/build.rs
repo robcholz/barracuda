@@ -83,6 +83,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
+    // The top linker script `platform.yml` names, and the memory map it
+    // includes in place of esp-hal's. That map fixes the L2 cache split to
+    // esp-hal's default, so another split esp-hal would link for is refused.
+    println!("cargo:rerun-if-env-changed=ESP_HAL_CONFIG_L2_CACHE_SIZE");
+    if let Ok(l2_cache) = env::var("ESP_HAL_CONFIG_L2_CACHE_SIZE") {
+        if l2_cache.trim_matches('"') != "256KB" {
+            return Err(format!(
+                "ESP_HAL_CONFIG_L2_CACHE_SIZE={l2_cache}: the ESP32-P4 memory map in \
+                 platforms/esp32p4/ld assumes esp-hal's default 256KB L2 cache"
+            )
+            .into());
+        }
+    }
+    let linker_scripts = manifest.join("ld");
+    println!("cargo:rerun-if-changed={}", linker_scripts.display());
+    println!("cargo:rustc-link-search={}", linker_scripts.display());
+
     let table_path = bundle.join(board.native_layout().artifact());
     println!("cargo:rerun-if-changed={}", table_path.display());
     let table = PartitionTable::try_from_str(fs::read_to_string(table_path)?)?;

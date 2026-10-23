@@ -50,8 +50,11 @@ Start from the closest Platform and keep its key order:
 
 - `name`, `info.family`, `info.environment` (`bare-metal` or `hosted`),
   `package`, `crate`, and `type` (the Rust type implementing `Platform`);
-- `build`: `rustup-toolchain`, optional `environment-file`, and the
-  `missing-toolchain-prompt` that `cargo board select` prints;
+- `build`: `rustup-toolchain`, optional `environment-file`, the
+  `missing-toolchain-prompt` that `cargo board select` prints, and an
+  optional `linker-script`, a top linker script the Platform's build script
+  puts on the link path in place of its runtime crate's (the ESP32 and
+  ESP32-P4 widen esp-hal's flash window this way);
 - `hal`: `bindings`, the binding categories Boards may use in
   `peripherals.io`, and the runtime controller groups (`runtime-i2c-controllers`,
   `runtime-adc-controllers`, ...) exposed I/O draws from; host Platforms

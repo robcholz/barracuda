@@ -792,6 +792,8 @@ pub struct BuildConfig {
     environment_file: Option<PathBuf>,
     #[serde(default)]
     missing_toolchain_prompt: Option<String>,
+    #[serde(default)]
+    linker_script: Option<String>,
 }
 
 impl BuildConfig {
@@ -826,7 +828,26 @@ impl BuildConfig {
         self.missing_toolchain_prompt.as_deref()
     }
 
+    /// Returns the top linker script the Platform's target links with in
+    /// place of its runtime crate's, found on the link search path the
+    /// Platform's build script adds.
+    #[must_use]
+    pub fn linker_script(&self) -> Option<&str> {
+        self.linker_script.as_deref()
+    }
+
     fn validate(&self, path: &Path) -> Result<(), ResolveError> {
+        if self
+            .linker_script()
+            .is_some_and(|script| script.trim().is_empty() || script.contains(['"', '\\', '/']))
+        {
+            return Err(ResolveError::ManifestInvalid {
+                path: path.to_owned(),
+                message: String::from(
+                    "build.linker-script must be a file name, without a path or quotes",
+                ),
+            });
+        }
         let Some(toolchain) = self.rustup_toolchain() else {
             if self.build_std.is_empty()
                 && self.environment_file.is_none()
