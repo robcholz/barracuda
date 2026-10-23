@@ -33,6 +33,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `power-monitor` | Battery gauge (AXP192) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `buttons` | Buttons A and B (GPIO37, GPIO39) | — |
+| `power-button` | Power button (AXP192 power key) | — |
 | `microphone` | Microphone (SPM1423 PDM) | [`audio`](/plugins/vm-audio) |
 | `infrared` | Infrared transmitter (GPIO9) | [`infrared`](/plugins/vm-infrared) |
 
@@ -41,6 +42,11 @@ measurement registers, and the display keeps its regulators.
 
 The motion sensor is not declared: early units carry an SH200Q instead of the
 MPU6886, and no implementation drives it yet.
+
+The power button is read through the PMIC, which latches a short press when the
+key is released and a long press once it has been held for the long-press time;
+the button reads pressed in one sample for each. It sets and clears only the
+key's own interrupt bits of the PMIC. `buttons` is the primary `buttons` device.
 
 ## Exposed pins
 

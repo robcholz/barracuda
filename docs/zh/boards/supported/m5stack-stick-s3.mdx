@@ -32,10 +32,13 @@ cargo image deploy
 | `inertial-measurement` | 运动传感器（BMI270） | [`motion`](/zh/plugins/vm-imu) |
 | `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `buttons` | 按键 A 和 B（GPIO11、GPIO12） | — |
+| `power-button` | 电源键（M5PM1） | — |
 | `audio-codec` | 音频编解码器（ES8311） | [`audio`](/zh/plugins/vm-audio) |
 | `infrared` | 红外发射器和接收器（GPIO46、GPIO42） | [`infrared`](/zh/plugins/vm-infrared) |
 
 M5PM1 只测量电池电压；是否在充电取自接在 M5PM1 引脚上的充电器状态线。
+
+电源键从 M5PM1 的按键状态读取，按住时读为按下。M5PM1 保持出厂行为：单击会复位开发板，双击会关机；除非开发板在该设备上设置 `single-click-reset: disable`，单击不会交给应用。`buttons` 是主 `buttons` 设备。
 
 ## 可用引脚
 

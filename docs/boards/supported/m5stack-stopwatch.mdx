@@ -33,11 +33,18 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `real-time-clock` | Real-time clock (RX8130CE) | — |
 | `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `buttons` | Buttons A and B (GPIO2, GPIO1) | — |
+| `power-button` | Power button (M5PM1 power key) | — |
 | `audio-codec` | Audio codec (ES8311) | [`audio`](/plugins/vm-audio) |
 | `vibration` | Vibration motor (M5IOE1 PWM, IO9) | [`vibration`](/plugins/vm-vibration) |
 
 The M5PM1 measures the battery voltage only; whether the battery charges comes
 from the charger's status line on an M5PM1 pin.
+
+The power button is read from the M5PM1's button status and reads pressed while
+the key is down. The M5PM1 keeps its factory behaviour: a single click resets
+the Board and a double click turns it off, so a click does not reach the
+application unless the Board sets `single-click-reset: disable` on the device.
+`buttons` is the primary `buttons` device.
 
 ## Exposed pins
 

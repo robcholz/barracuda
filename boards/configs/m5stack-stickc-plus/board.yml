@@ -82,11 +82,17 @@ peripherals:
     power-monitor:
       implementation: axp192-axp2101-power-monitor
       bindings: { i2c: internal-i2c }
+    # The power key on the PMIC's PWRON pin, M5Unified `BtnPWR`: the
+    # power/reset button, `pwr_key` on the AXP192 PWRON (M5Stack StickC Plus
+    # pin map).
+    power-button:
+      implementation: axp192-axp2101-buttons
+      bindings: { i2c: internal-i2c }
     # Buttons A (front) and B (side) on GPIO37 and GPIO39, active low with
-    # the Board's pull-ups (M5Unified `M5Unified::update`). The power key
-    # is the AXP192's and is not declared.
+    # the Board's pull-ups (M5Unified `M5Unified::update`).
     buttons:
       implementation: gpio-buttons
+      primary: true
       bindings:
         button-1: GPIO37
         button-2: GPIO39

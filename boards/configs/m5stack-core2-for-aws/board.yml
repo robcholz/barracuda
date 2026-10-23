@@ -123,6 +123,11 @@ peripherals:
       implementation: axp192-axp2101-power-monitor
       bindings: { i2c: internal-i2c }
       parameters: { ina3221-battery-current: true }
+    # The power key on the PMIC's PWRON pin, M5Unified `BtnPWR`: the left
+    # power button, as on the Core2.
+    power-button:
+      implementation: axp192-axp2101-buttons
+      bindings: { i2c: internal-i2c }
     # ATECC608B-TNGTLS (Trust&GO) at 35h on the internal bus
     # (docs.m5stack.com Core2 for AWS: "ATECC608B-TNGTLSU-G (addr 0x35)",
     # internal I2C G21/G22).

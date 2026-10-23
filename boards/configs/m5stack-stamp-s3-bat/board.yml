@@ -28,3 +28,9 @@ peripherals:
       implementation: m5pm1-power-monitor
       bindings: { i2c: internal-i2c }
       parameters: { charge-status: g2 }
+    # The power key on the M5PM1's PWR_BTN, M5Unified `BtnPWR`: the PWR button
+    # that wakes the M5PM1 (M5Stack StampS3-Bat M5PM1 docs). The M5PM1's
+    # factory click reset is kept.
+    power-button:
+      implementation: m5pm1-buttons
+      bindings: { i2c: internal-i2c }

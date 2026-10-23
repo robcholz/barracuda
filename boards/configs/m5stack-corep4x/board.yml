@@ -95,6 +95,12 @@ peripherals:
     power-monitor:
       implementation: m5pm1-power-monitor
       bindings: { i2c: internal }
+    # The power key on the M5PM1's PWR_BTN, M5Unified `BtnPWR`: the "PMIC
+    # power button": a click powers on or resets, a double click powers off
+    # (M5Stack CoreP4X docs). The M5PM1's factory click reset is kept.
+    power-button:
+      implementation: m5pm1-buttons
+      bindings: { i2c: internal }
     real-time-clock:
       implementation: rx8130ce-rtc
       bindings: { i2c: internal }

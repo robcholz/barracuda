@@ -114,6 +114,12 @@ peripherals:
     power-monitor:
       implementation: axp192-axp2101-power-monitor
       bindings: { i2c: internal-i2c }
+    # The power key on the PMIC's PWRON pin, M5Unified `BtnPWR`: the left
+    # power button, wired to the AXP2101 PWRON only (M5Unified
+    # `Power_Class::begin`).
+    power-button:
+      implementation: axp192-axp2101-buttons
+      bindings: { i2c: internal-i2c }
     inertial-measurement:
       implementation: bmi270-imu
       bindings: { i2c: internal-i2c }

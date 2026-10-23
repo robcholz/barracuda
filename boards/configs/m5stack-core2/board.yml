@@ -102,6 +102,12 @@ peripherals:
       implementation: axp192-axp2101-power-monitor
       bindings: { i2c: internal-i2c }
       parameters: { ina3221-battery-current: true }
+    # The power key on the PMIC's PWRON pin, M5Unified `BtnPWR`: the left
+    # power button: a click switches the Core2 on, 6 s off (M5Stack Core2
+    # docs).
+    power-button:
+      implementation: axp192-axp2101-buttons
+      bindings: { i2c: internal-i2c }
     # The vibration motor on AXP192 LDO3 (Core2) or AXP2101 DLDO1 (Core2
     # v1.1), the PMIC the display also uses (M5Unified
     # `Power_Class::setVibration`).

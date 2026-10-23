@@ -33,6 +33,7 @@ cargo image deploy
 | `real-time-clock` | 实时时钟（BM8563） | — |
 | `inertial-measurement` | 运动传感器（MPU6886） | [`motion`](/zh/plugins/vm-imu) |
 | `power-monitor` | 电量计（AXP192 或 AXP2101） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `power-button` | 电源键（AXP192 或 AXP2101） | — |
 | `audio` | 音频（NS4168 功放、SPM1423 PDM 麦克风） | [`audio`](/zh/plugins/vm-audio) |
 | `micro-sd` | microSD 卡槽（FAT，SPI） | — |
 | `vibration` | 振动马达（AXP192 LDO3 或 AXP2101 DLDO1） | [`vibration`](/zh/plugins/vm-vibration) |
@@ -44,6 +45,8 @@ cargo image deploy
 Core2 v1.1 的 AXP2101 不测量电流，改由 `40h` 的 INA3221 检测电池电流。
 
 microSD 卡通过自己的片选与显示屏共用 SPI 总线。
+
+电源键通过 PMIC 读取：按键松开时 PMIC 锁存一次短按，按住达到长按时间时锁存一次长按；每次按下，按键在一次采样中读为按下。它只设置和清除 PMIC 中电源键自己的中断位。
 
 ## 可用引脚
 

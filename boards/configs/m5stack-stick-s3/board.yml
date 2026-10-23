@@ -83,10 +83,18 @@ peripherals:
       implementation: m5pm1-power-monitor
       bindings: { i2c: internal-i2c }
       parameters: { charge-status: g0 }
+    # The power key on the M5PM1's PWR_BTN, M5Unified `BtnPWR`: the side
+    # button: a click powers on or resets, a double click powers off, a long
+    # press enters download mode (M5Stack StickS3 docs). The M5PM1's factory
+    # click reset is kept.
+    power-button:
+      implementation: m5pm1-buttons
+      bindings: { i2c: internal-i2c }
     # Buttons A (GPIO11) and B (GPIO12), active low with the Board's
     # pull-ups (M5Unified `M5Unified::update`).
     buttons:
       implementation: gpio-buttons
+      primary: true
       bindings:
         button-1: GPIO11
         button-2: GPIO12

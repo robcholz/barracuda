@@ -31,8 +31,11 @@ cargo image deploy
 | `display` | 电子墨水屏，4.7 英寸 540 x 960 竖屏，16 级灰度（ED047TC1，由 ESP32-S3 并行总线直接驱动；电源由 M5PM1 控制） | [`display`](/zh/plugins/vm-display) |
 | `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `buttons` | 按键 A 和 B（GPIO4、GPIO3） | — |
+| `power-button` | 电源键（M5PM1） | — |
 | `micro-sd` | microSD 卡槽（FAT，SPI） | — |
 
 这块屏幕没有控制器：Barracuda 在 CPU 上运行 M5GFX 的波形，并逐行输出每一帧，所以刷新完成之前显示屏一直被占用。
 
 M5PM1 只测量电池电压；是否在充电取自接在 M5PM1 引脚上的充电器状态线。
+
+电源键从 M5PM1 的按键状态读取，按住时读为按下。M5PM1 保持出厂行为：单击会复位开发板，双击会关机；除非开发板在该设备上设置 `single-click-reset: disable`，单击不会交给应用。`buttons` 是主 `buttons` 设备。

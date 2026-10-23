@@ -33,6 +33,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `real-time-clock` | Real-time clock (RX8130CE) | — |
 | `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `buttons` | Buttons A and B (GPIO2, GPIO3) | — |
+| `power-button` | Power button (M5PM1 power key) | — |
 | `buzzer` | Passive buzzer (GPIO42) | [`buzzer`](/plugins/vm-buzzer) |
 | `nfc-reader` | NFC card reader (ST25R3916, `50h`, supply on M5IOE1 G4) | [`nfc`](/plugins/vm-nfc) |
 
@@ -44,3 +45,9 @@ The card reader's supply is switched by M5IOE1 G4; the reader turns it on at
 start and waits a second for it, as M5Stack's UIFlow does, so this Board
 starts about a second later. The PaperMono-Lite has no reader and is not
 this Board.
+
+The power button is read from the M5PM1's button status and reads pressed while
+the key is down. The M5PM1 keeps its factory behaviour: a single click resets
+the Board and a double click turns it off, so a click does not reach the
+application unless the Board sets `single-click-reset: disable` on the device.
+`buttons` is the primary `buttons` device.

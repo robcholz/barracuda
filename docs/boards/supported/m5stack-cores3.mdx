@@ -34,6 +34,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `environment-sensor` | Ambient-light and proximity sensor (LTR-553ALS) | [`environment`](/plugins/vm-environment-sensor) |
 | `real-time-clock` | Real-time clock (BM8563) | — |
 | `power-monitor` | Battery gauge (AXP2101) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `power-button` | Power button (AXP2101 power key) | — |
 | `audio-codec` | Audio codec (AW88298 amplifier, ES7210 microphone ADC) | [`audio`](/plugins/vm-audio) |
 | `camera` | Camera (GC0308, 320x240 RGB565) | [`camera`](/plugins/vm-camera) |
 
@@ -49,6 +50,11 @@ The AXP2101 measures no battery current, so `measure` reports the battery
 voltage with zero current.
 
 The microSD slot is not declared: its MISO, GPIO35, is also the display's D/C line, which the shared SPI bus cannot switch between the two.
+
+The power button is read through the PMIC, which latches a short press when the
+key is released and a long press once it has been held for the long-press time;
+the button reads pressed in one sample for each. It sets and clears only the
+key's own interrupt bits of the PMIC.
 
 ## Exposed pins
 

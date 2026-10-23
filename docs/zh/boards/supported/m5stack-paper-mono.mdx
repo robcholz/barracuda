@@ -33,9 +33,12 @@ cargo image deploy
 | `real-time-clock` | 实时时钟（RX8130CE） | — |
 | `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `buttons` | 按键 A 和 B（GPIO2、GPIO3） | — |
+| `power-button` | 电源键（M5PM1） | — |
 | `buzzer` | 无源蜂鸣器（GPIO42） | [`buzzer`](/zh/plugins/vm-buzzer) |
 | `nfc-reader` | NFC 读卡器（ST25R3916，`50h`，供电由 M5IOE1 G4 控制） | [`nfc`](/zh/plugins/vm-nfc) |
 
 M5PM1 只测量电池电压。这块开发板没有把充电器的状态线接到 M5PM1，所以只要有 VIN 输入且电池低于 4.1 V，电池就显示为正在充电。
 
 读卡器的供电由 M5IOE1 G4 控制；读卡器在启动时打开它，并像 M5Stack 的 UIFlow 那样等待一秒，因此这块开发板的启动会晚大约一秒。PaperMono-Lite 没有读卡器，不是这块开发板。
+
+电源键从 M5PM1 的按键状态读取，按住时读为按下。M5PM1 保持出厂行为：单击会复位开发板，双击会关机；除非开发板在该设备上设置 `single-click-reset: disable`，单击不会交给应用。`buttons` 是主 `buttons` 设备。

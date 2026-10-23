@@ -29,6 +29,12 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `power-button` | Power button (M5PM1 power key) | — |
 
 The M5PM1 measures the battery voltage only; whether the battery charges comes
 from the charger's status line on an M5PM1 pin.
+
+The power button is read from the M5PM1's button status and reads pressed while
+the key is down. The M5PM1 keeps its factory behaviour: a single click resets
+the Board and a double click turns it off, so a click does not reach the
+application unless the Board sets `single-click-reset: disable` on the device.

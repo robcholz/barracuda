@@ -32,6 +32,7 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | `touch` | Touch controller (CST3530) | — |
 | `real-time-clock` | Real-time clock (RX8130CE) | — |
 | `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `power-button` | Power button (M5PM1 power key) | — |
 | `audio-codec` | Audio codec (ES8311 and ES7210) | [`audio`](/plugins/vm-audio) |
 | `micro-sd` | microSD card slot (FAT, SPI) | — |
 
@@ -48,6 +49,11 @@ ESP32-C6 Wi-Fi co-processor yet, so the IP stack has no link on this Board.
 The M5PM1 measures the battery voltage only. This Board does not route the
 charger's status to it, so the battery reads as charging while VIN is present
 and the cell is below 4.1 V.
+
+The power button is read from the M5PM1's button status and reads pressed while
+the key is down. The M5PM1 keeps its factory behaviour: a single click resets
+the Board and a double click turns it off, so a click does not reach the
+application unless the Board sets `single-click-reset: disable` on the device.
 
 ## Exposed pins
 

@@ -33,10 +33,13 @@ cargo image deploy
 | `real-time-clock` | 实时时钟（BM8563） | — |
 | `power-monitor` | 电量计（AXP192） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
 | `buttons` | 按键 A、B、C（GPIO37、GPIO38、GPIO39） | — |
+| `power-button` | 电源键（AXP192） | — |
 
 电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。
 
 `40h` 和 `41h` 的两个 INA3221 端口监测没有声明：一块开发板只有一个电源监测设备，这里用的是电池的。
+
+电源键通过 PMIC 读取：按键松开时 PMIC 锁存一次短按，按住达到长按时间时锁存一次长按；每次按下，按键在一次采样中读为按下。它只设置和清除 PMIC 中电源键自己的中断位。`buttons` 是主 `buttons` 设备。
 
 ## 可用引脚
 

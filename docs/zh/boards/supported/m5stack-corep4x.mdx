@@ -32,6 +32,7 @@ cargo image deploy
 | `touch` | 触摸控制器（CST3530） | — |
 | `real-time-clock` | 实时时钟（RX8130CE） | — |
 | `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `power-button` | 电源键（M5PM1） | — |
 | `audio-codec` | 音频编解码器（ES8311 和 ES7210） | [`audio`](/zh/plugins/vm-audio) |
 | `micro-sd` | microSD 卡槽（FAT，SPI） | — |
 
@@ -40,6 +41,8 @@ cargo image deploy
 IP101GRI 以太网 PHY 也尚未声明：CoreP4X 上它的 RMII 引脚没有公开，ESP32-P4 平台也还没有驱动 ESP32-C6 Wi-Fi 协处理器，所以这块开发板上的 IP 协议栈没有链路。
 
 M5PM1 只测量电池电压。这块开发板没有把充电器的状态线接到 M5PM1，所以只要有 VIN 输入且电池低于 4.1 V，电池就显示为正在充电。
+
+电源键从 M5PM1 的按键状态读取，按住时读为按下。M5PM1 保持出厂行为：单击会复位开发板，双击会关机；除非开发板在该设备上设置 `single-click-reset: disable`，单击不会交给应用。
 
 ## 可用引脚
 
