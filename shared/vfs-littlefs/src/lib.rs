@@ -8,17 +8,12 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
-use core::marker::PhantomData;
-
 use barracuda_vfs::{
     Backend, BackendFile, BackendFuture, DirEntry, FileType, FsError, FsUsage, Metadata,
     OpenOptions, SeekFrom, VfsBackend,
 };
 use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
-use generic_array::{
-    typenum::{U128, U8},
-    ArrayLength,
-};
+use generic_array::typenum::{U128, U8};
 use littlefs2::driver::Storage;
 use littlefs2::fs::Filesystem;
 use littlefs2::path::PathBuf;
@@ -26,22 +21,53 @@ use portable_atomic_util::Arc;
 use spin::Mutex;
 
 /// Adapts an owned synchronous NOR-flash partition to `littlefs2::Storage`.
-pub struct PartitionStorage<Flash, CacheSize, LookaheadSize, const BLOCK_COUNT: usize> {
+///
+/// The filesystem's block count is a value of the storage, not of its type, so
+/// one storage type, and one compiled LittleFS, serves partitions of every
+/// size.
+pub struct PartitionStorage<Flash> {
     flash: Flash,
-    marker: PhantomData<(CacheSize, LookaheadSize)>,
+    block_count: usize,
 }
 
-/// Mounts or formats a synchronous NOR partition using the largest supported
-/// LittleFS geometry that fits it.
+/// The number of erase blocks a LittleFS filesystem spans in a partition of
+/// `partition_blocks` erase blocks, or `None` when the partition has fewer
+/// than two.
 ///
-/// `littlefs2` represents the block count as a Rust associated constant while
-/// [`ReadNorFlash::capacity`] is a runtime value. This entry point performs the
-/// type erasure once, inside the backend crate, so Platform and System do not
-/// need Board-specific LittleFS types. The currently supported geometries
-/// cover the native filesystem regions of the standard, ESP32-C6, and STM32U5
-/// targets. A partition whose erase-block count lies between two supported
-/// geometries uses the lower geometry; the unused tail remains outside the
-/// filesystem rather than being addressed with an invalid compile-time size.
+/// The count is the partition's, rounded down to the next of 2, 4, 8, 16, 32,
+/// 64, 128, 256, 384, 512, 768, 1024, 1536, 2048, 3072, and 4096; blocks past
+/// the filesystem, and every block past 4096, stay unused. LittleFS records
+/// the count in its superblock and refuses to mount a filesystem whose count
+/// differs, so this rounding is part of the on-media format: firmware formats
+/// and mounts with it, and the image builder lays out resource images with it.
+#[must_use]
+pub const fn filesystem_block_count(partition_blocks: usize) -> Option<usize> {
+    let blocks = match partition_blocks {
+        0..2 => return None,
+        2..4 => 2,
+        4..8 => 4,
+        8..16 => 8,
+        16..32 => 16,
+        32..64 => 32,
+        64..128 => 64,
+        128..256 => 128,
+        256..384 => 256,
+        384..512 => 384,
+        512..768 => 512,
+        768..1_024 => 768,
+        1_024..1_536 => 1_024,
+        1_536..2_048 => 1_536,
+        2_048..3_072 => 2_048,
+        3_072..4_096 => 3_072,
+        _ => 4_096,
+    };
+    Some(blocks)
+}
+
+/// Mounts or formats a synchronous NOR partition as LittleFS.
+///
+/// The filesystem spans [`filesystem_block_count`] of the partition's erase
+/// blocks. A partition holding no filesystem of that geometry is formatted.
 ///
 /// # Errors
 ///
@@ -52,7 +78,7 @@ pub fn mount_or_format_partition<Flash>(flash: Flash) -> Result<Backend, FsError
 where
     Flash: NorFlash + Send + 'static,
 {
-    mount_partition_with(flash, PartitionMount::MountOrFormat)
+    LittleFs::mount_or_format(PartitionStorage::new(flash)?).map(LittleFs::into_backend)
 }
 
 /// Mounts an already-formatted synchronous NOR partition as LittleFS.
@@ -68,74 +94,28 @@ pub fn mount_partition<Flash>(flash: Flash) -> Result<Backend, FsError>
 where
     Flash: NorFlash + Send + 'static,
 {
-    mount_partition_with(flash, PartitionMount::Existing)
+    LittleFs::mount(PartitionStorage::new(flash)?).map(LittleFs::into_backend)
 }
 
-#[derive(Clone, Copy)]
-enum PartitionMount {
-    Existing,
-    MountOrFormat,
-}
-
-fn mount_partition_with<Flash>(flash: Flash, mount: PartitionMount) -> Result<Backend, FsError>
-where
-    Flash: NorFlash + Send + 'static,
-{
-    let capacity = flash.capacity();
-    let block_count = capacity
-        .checked_div(Flash::ERASE_SIZE)
-        .filter(|count| *count > 0 && count.saturating_mul(Flash::ERASE_SIZE) == capacity)
-        .ok_or(FsError::InvalidInput)?;
-
-    macro_rules! mount_geometry {
-        ($blocks:expr) => {{
-            let storage = PartitionStorage::<Flash, U128, U8, $blocks>::new(flash)?;
-            match mount {
-                PartitionMount::Existing => LittleFs::mount(storage),
-                PartitionMount::MountOrFormat => LittleFs::mount_or_format(storage),
-            }
-            .map(LittleFs::into_backend)
-        }};
-    }
-
-    match block_count {
-        0..2 => Err(FsError::InvalidInput),
-        2..4 => mount_geometry!(2),
-        4..8 => mount_geometry!(4),
-        8..16 => mount_geometry!(8),
-        16..32 => mount_geometry!(16),
-        32..64 => mount_geometry!(32),
-        64..128 => mount_geometry!(64),
-        128..256 => mount_geometry!(128),
-        256..384 => mount_geometry!(256),
-        384..512 => mount_geometry!(384),
-        512..768 => mount_geometry!(512),
-        768..1_024 => mount_geometry!(768),
-        1_024..1_536 => mount_geometry!(1_024),
-        1_536..2_048 => mount_geometry!(1_536),
-        2_048..3_072 => mount_geometry!(2_048),
-        3_072..4_096 => mount_geometry!(3_072),
-        _ => mount_geometry!(4_096),
-    }
-}
-
-impl<Flash, CacheSize, LookaheadSize, const BLOCK_COUNT: usize>
-    PartitionStorage<Flash, CacheSize, LookaheadSize, BLOCK_COUNT>
+impl<Flash> PartitionStorage<Flash>
 where
     Flash: NorFlash,
 {
-    /// Validates the partition capacity and creates a LittleFS storage adapter.
+    /// Creates a LittleFS storage adapter spanning [`filesystem_block_count`]
+    /// of the partition's erase blocks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FsError::InvalidInput`] when the partition is not an exact
+    /// number of erase blocks or contains fewer than two.
     pub fn new(flash: Flash) -> Result<Self, FsError> {
-        let required = Flash::ERASE_SIZE
-            .checked_mul(BLOCK_COUNT)
+        let capacity = flash.capacity();
+        let block_count = capacity
+            .checked_div(Flash::ERASE_SIZE)
+            .filter(|count| count.saturating_mul(Flash::ERASE_SIZE) == capacity)
+            .and_then(filesystem_block_count)
             .ok_or(FsError::InvalidInput)?;
-        if BLOCK_COUNT == 0 || flash.capacity() < required {
-            return Err(FsError::InvalidInput);
-        }
-        Ok(Self {
-            flash,
-            marker: PhantomData,
-        })
+        Ok(Self { flash, block_count })
     }
 
     /// Recovers the owned partition.
@@ -144,20 +124,23 @@ where
     }
 }
 
-impl<Flash, CacheSize, LookaheadSize, const BLOCK_COUNT: usize> Storage
-    for PartitionStorage<Flash, CacheSize, LookaheadSize, BLOCK_COUNT>
+impl<Flash> Storage for PartitionStorage<Flash>
 where
     Flash: NorFlash,
-    CacheSize: ArrayLength<u8>,
-    LookaheadSize: ArrayLength<u64>,
 {
     const READ_SIZE: usize = Flash::READ_SIZE;
     const WRITE_SIZE: usize = Flash::WRITE_SIZE;
     const BLOCK_SIZE: usize = Flash::ERASE_SIZE;
-    const BLOCK_COUNT: usize = BLOCK_COUNT;
+    /// Unused: the filesystem takes the partition's count from
+    /// [`Storage::block_count`].
+    const BLOCK_COUNT: usize = 0;
 
-    type CACHE_SIZE = CacheSize;
-    type LOOKAHEAD_SIZE = LookaheadSize;
+    type CACHE_SIZE = U128;
+    type LOOKAHEAD_SIZE = U8;
+
+    fn block_count(&self) -> usize {
+        self.block_count
+    }
 
     fn read(&mut self, offset: usize, buffer: &mut [u8]) -> littlefs2::io::Result<usize> {
         let offset = u32::try_from(offset).map_err(|_| littlefs2::io::Error::IO)?;
