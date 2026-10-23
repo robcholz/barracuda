@@ -872,6 +872,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-axp192-axp2101-buttons"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-axp192",
+ "barracuda-driver-axp2101",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-axp192-axp2101-power-monitor"
 version = "0.1.0"
 dependencies = [
@@ -976,6 +987,7 @@ dependencies = [
  "barracuda-atom-s3r-display",
  "barracuda-aw88298-es7210-audio-codec",
  "barracuda-aw9523-digital-io",
+ "barracuda-axp192-axp2101-buttons",
  "barracuda-axp192-axp2101-power-monitor",
  "barracuda-axp192-axp2101-vibration",
  "barracuda-bm8563-rtc",
@@ -1002,6 +1014,7 @@ dependencies = [
  "barracuda-gt911-tt21100-touch",
  "barracuda-icm42607-imu",
  "barracuda-ina226-power-monitor",
+ "barracuda-ina3221-power-monitor",
  "barracuda-indicator-led",
  "barracuda-ip5306-power-monitor",
  "barracuda-it8951-display",
@@ -1009,6 +1022,7 @@ dependencies = [
  "barracuda-ltr553-environment-sensor",
  "barracuda-m5hdmi-display",
  "barracuda-m5ioe1-vibration",
+ "barracuda-m5pm1-buttons",
  "barracuda-m5pm1-power-monitor",
  "barracuda-m5stack-pmic-display",
  "barracuda-mfrc522-nfc-reader",
@@ -2294,6 +2308,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-ina3221-power-monitor"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-ina3221",
+ "barracuda-peripheral",
+ "embassy-futures",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-indicator-led"
 version = "0.1.0"
 dependencies = [
@@ -2462,6 +2486,16 @@ dependencies = [
  "barracuda-peripheral",
  "embassy-futures",
  "embassy-time",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "barracuda-m5pm1-buttons"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver-m5pm1",
+ "barracuda-peripheral",
+ "embassy-futures",
  "embedded-hal 1.0.0",
 ]
 

@@ -1,0 +1,36 @@
+id: m5pm1-buttons
+api-version: 1
+peripheral: buttons
+implementation:
+  package: barracuda-m5pm1-buttons
+  crate: barracuda_m5pm1_buttons
+  factory: "::{{crate}}::M5pm1PowerKeyImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::M5pm1PowerKeyBindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::M5pm1PowerKeyConfig::new({{parameter.address}}, {{parameter.single-click-reset}})"
+# The power key on the PWR_BTN input of an M5Stack M5PM1 power controller as
+# one button, read from the M5PM1's button-status register: pressed while the
+# key is down, and in the first read after a press shorter than the time
+# between reads. The implementation reads only that register and, when the
+# Board asks for it, the single-click-reset bit of the button configuration;
+# the rails and pins stay with the implementations that use them.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 6Eh, the M5PM1's factory address.
+    default: 110
+  # The M5PM1's factory setting resets the Board on a single click of the
+  # key (M5PM1 user manual, BTN_CFG_1 SINGLE_RST_DIS = 0). `keep` leaves it,
+  # so the key reads pressed only until the click resets the Board;
+  # `disable` turns the reset off so a click reaches the application. The
+  # M5PM1 keeps that setting while it has power, across resets of the
+  # ESP32. A double click turns the Board off either way.
+  single-click-reset:
+    type: enum
+    values: [keep, disable]
+    rust-values:
+      keep: "::barracuda_m5pm1_buttons::SingleClickReset::Keep"
+      disable: "::barracuda_m5pm1_buttons::SingleClickReset::Disable"
+    default: keep

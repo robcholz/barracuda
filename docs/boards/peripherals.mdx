@@ -476,9 +476,14 @@ own view of the bus and touches only the status, ADC, and fuel-gauge
 registers. `axp192-axp2101-vibration` writes only the Core2 motor
 regulator's voltage field and enable bit beside them, and
 `m5ioe1-vibration` only the StopWatch's M5IOE1 PWM channel and its pin.
-`m5pm1-power-monitor` and `pi4ioe5v6408-buttons` likewise configure
-only their own M5PM1 or expander pins next to the display implementations
-that use the others.
+`axp192-axp2101-buttons` sets only the power key's two interrupt-enable
+bits and clears only its two status bits, which are write-1-to-clear, so
+every other interrupt's status stays as it was. `m5pm1-power-monitor` and
+`pi4ioe5v6408-buttons` likewise configure only their own M5PM1 or expander
+pins next to the display implementations that use the others, and
+`m5pm1-buttons` reads only the M5PM1's button-status register. The
+`ina3221-power-monitor` devices on the channels of one INA3221 each read
+only their own channel and never write the chip.
 
 The M5Stack PowerHub's STM32G031 power co-processor relays four semantic
 peripherals, so four implementations share it the same way:

@@ -64,6 +64,7 @@ barracuda-atom-s3-display = { path = "peripherals/impl/display/atom-s3-display" 
 barracuda-atom-s3r-display = { path = "peripherals/impl/display/atom-s3r-display" }
 barracuda-aw88298-es7210-audio-codec = { path = "peripherals/impl/audio-codec/aw88298-es7210-audio-codec" }
 barracuda-aw9523-digital-io = { path = "peripherals/impl/digital-io/aw9523-digital-io" }
+barracuda-axp192-axp2101-buttons = { path = "peripherals/impl/buttons/axp192-axp2101-buttons" }
 barracuda-axp192-axp2101-power-monitor = { path = "peripherals/impl/power-monitor/axp192-axp2101-power-monitor" }
 barracuda-axp192-axp2101-vibration = { path = "peripherals/impl/vibration/axp192-axp2101-vibration" }
 barracuda-bm8563-rtc = { path = "peripherals/impl/real-time-clock/bm8563-rtc" }
@@ -90,6 +91,7 @@ barracuda-gt911-touch = { path = "peripherals/impl/touch/gt911-touch" }
 barracuda-gt911-tt21100-touch = { path = "peripherals/impl/touch/gt911-tt21100-touch" }
 barracuda-icm42607-imu = { path = "peripherals/impl/inertial-measurement/icm42607-imu" }
 barracuda-ina226-power-monitor = { path = "peripherals/impl/power-monitor/ina226-power-monitor" }
+barracuda-ina3221-power-monitor = { path = "peripherals/impl/power-monitor/ina3221-power-monitor" }
 barracuda-indicator-led = { path = "peripherals/impl/indicator/indicator-led" }
 barracuda-ip5306-power-monitor = { path = "peripherals/impl/power-monitor/ip5306-power-monitor" }
 barracuda-it8951-display = { path = "peripherals/impl/display/it8951-display" }
@@ -97,6 +99,7 @@ barracuda-lm75b-environment-sensor = { path = "peripherals/impl/environment-sens
 barracuda-ltr553-environment-sensor = { path = "peripherals/impl/environment-sensor/ltr553-environment-sensor" }
 barracuda-m5hdmi-display = { path = "peripherals/impl/display/m5hdmi-display" }
 barracuda-m5ioe1-vibration = { path = "peripherals/impl/vibration/m5ioe1-vibration" }
+barracuda-m5pm1-buttons = { path = "peripherals/impl/buttons/m5pm1-buttons" }
 barracuda-m5pm1-power-monitor = { path = "peripherals/impl/power-monitor/m5pm1-power-monitor" }
 barracuda-m5stack-pmic-display = { path = "peripherals/impl/display/m5stack-pmic-display" }
 barracuda-mfrc522-nfc-reader = { path = "peripherals/impl/nfc-reader/mfrc522-nfc-reader" }

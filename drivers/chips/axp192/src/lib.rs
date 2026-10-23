@@ -12,6 +12,14 @@
 //! results from REG78H (battery voltage, 12 bits at 1.1 mV) and REG7AH/7CH
 //! (battery charge and discharge current, 13 bits at 0.5 mA). No method
 //! touches registers of both groups.
+//!
+//! The power key (PEK, on PWRON) has two bits of its own in registers other
+//! owners share: REG42H bits 1:0 enable its short- and long-press interrupts
+//! (IRQ22, IRQ23), and REG46H bits 1:0 latch them. The enable bits are set by
+//! read-modify-write; the status bits clear when written with 1 (datasheet
+//! 9.11.59), so writing only the key's latched bits leaves every other
+//! interrupt's status as it was. M5Unified `AXP192_Class::getPekPress` reads
+//! and clears the same two bits.
 
 #![no_std]
 
@@ -37,6 +45,13 @@ const ADC_ENABLE_1: u8 = 0x82;
 /// REG82H bits 7 and 6: battery voltage and battery current ADCs.
 const BATTERY_ADCS: u8 = 0b1100_0000;
 const GPIO34_LEVEL: u8 = 0x96;
+const IRQ_ENABLE_3: u8 = 0x42;
+const IRQ_STATUS_3: u8 = 0x46;
+/// REG42H/REG46H bit 1: PEK short press (IRQ22).
+const PEK_SHORT_PRESS: u8 = 1 << 1;
+/// REG42H/REG46H bit 0: PEK long press (IRQ23).
+const PEK_LONG_PRESS: u8 = 1 << 0;
+const PEK_PRESSES: u8 = PEK_SHORT_PRESS | PEK_LONG_PRESS;
 const GPIO0_FUNCTION: u8 = 0x90;
 const LDO_IO0_VOLTAGE: u8 = 0x91;
 const GPIO1_FUNCTION: u8 = 0x92;
@@ -139,6 +154,24 @@ pub struct BatteryMeasurement {
     pub charge_microamps: u32,
     /// Current out of the battery in microamps.
     pub discharge_microamps: u32,
+}
+
+/// Power-key presses the AXP192 latched since they were last taken.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PowerKeyPresses {
+    /// The key was released before the long-press time (REG46H bit 1).
+    pub short_press: bool,
+    /// The key was held for the long-press time, REG36H bits 5:4 (REG46H
+    /// bit 0).
+    pub long_press: bool,
+}
+
+impl PowerKeyPresses {
+    /// Whether the key was pressed at all.
+    #[must_use]
+    pub const fn any(self) -> bool {
+        self.short_press || self.long_press
+    }
 }
 
 /// AXP192 GPIO whose function register selects its level (REG90H, 92H, 93H).
@@ -370,6 +403,34 @@ where
         })
     }
 
+    /// Enables the power key's short- and long-press interrupts, leaving the
+    /// other enable bits of REG42H as they are.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn enable_power_key_interrupts(&mut self) -> Result<(), Error<I2C::Error>> {
+        self.update(IRQ_ENABLE_3, |value| value | PEK_PRESSES)
+    }
+
+    /// Reads the power key's latched presses and clears exactly those status
+    /// bits, as M5Unified `AXP192_Class::getPekPress` does.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn take_power_key_presses(&mut self) -> Result<PowerKeyPresses, Error<I2C::Error>> {
+        let pending = self.read(IRQ_STATUS_3)? & PEK_PRESSES;
+        if pending != 0 {
+            // Write-1-to-clear: the zero bits leave the other statuses set.
+            self.write(IRQ_STATUS_3, pending)?;
+        }
+        Ok(PowerKeyPresses {
+            short_press: pending & PEK_SHORT_PRESS != 0,
+            long_press: pending & PEK_LONG_PRESS != 0,
+        })
+    }
+
     fn read_pair(&mut self, register: u8) -> Result<[u8; 2], Error<I2C::Error>> {
         let mut value = [0; 2];
         self.i2c
@@ -433,8 +494,46 @@ mod tests {
     use super::{
         ADDRESS, Axp192, BatteryMeasurement, BatteryStatus, DCDC3_VOLTAGE, Error, GPIO0_FUNCTION,
         GPIO2_FUNCTION, GPIO34_FUNCTION, GPIO34_LEVEL, Gpio, LDO_IO0_VOLTAGE, LDO23_VOLTAGE,
-        LowGpio, OUTPUT_CONTROL, Rail,
+        LowGpio, OUTPUT_CONTROL, PowerKeyPresses, Rail,
     };
+
+    #[test]
+    fn power_key_touches_only_its_own_interrupt_bits() {
+        let mut bus = Bus::default();
+        // M5Unified writes 03h to REG42H; here the DC-DC interrupts are on too.
+        bus.registers[0x42] = 0b0011_1000;
+        // A DC-DC1 under-voltage (bit 5) is pending beside a short press.
+        bus.registers[0x46] = 0b0010_0010;
+        {
+            let mut pmic = Axp192::new(&mut bus, ADDRESS).expect("valid address");
+            pmic.enable_power_key_interrupts().expect("enable");
+            assert_eq!(
+                pmic.take_power_key_presses().expect("presses"),
+                PowerKeyPresses {
+                    short_press: true,
+                    long_press: false,
+                }
+            );
+        }
+        assert_eq!(bus.registers[0x42], 0b0011_1011);
+        // Only bit 1 is written back, which clears it and nothing else.
+        assert_eq!(bus.writes, [(0x42, 0b0011_1011), (0x46, 0b0000_0010)]);
+        bus.writes.clear();
+        bus.registers[0x46] = 0b0010_0000;
+        {
+            let mut pmic = Axp192::new(&mut bus, ADDRESS).expect("valid address");
+            let presses = pmic.take_power_key_presses().expect("presses");
+            assert!(!presses.any());
+        }
+        assert!(bus.writes.is_empty(), "no write without a press");
+        bus.registers[0x46] = 0b0000_0001;
+        {
+            let mut pmic = Axp192::new(&mut bus, ADDRESS).expect("valid address");
+            let presses = pmic.take_power_key_presses().expect("presses");
+            assert!(presses.long_press && !presses.short_press && presses.any());
+        }
+        assert_eq!(bus.writes, [(0x46, 0b0000_0001)]);
+    }
 
     #[test]
     fn drives_gpio2_low_or_floating() {

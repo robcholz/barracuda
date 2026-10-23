@@ -11,6 +11,14 @@
 //! detection control REG68H, the battery voltage REG34H/35H (14 bits in
 //! millivolts), and the fuel gauge's state of charge REGA4H. No method
 //! touches registers of both groups. The AXP2101 has no battery-current ADC.
+//!
+//! The power key (POK, on PWRON) has two bits of its own in registers other
+//! owners share: REG41H bits 3:2 enable its short- and long-press interrupts,
+//! and REG49H bits 3:2 latch them. The enable bits are set by
+//! read-modify-write; the status bits are write-1-to-clear (datasheet
+//! 6.13.2.44, `RW1C`), so writing only the key's latched bits leaves every
+//! other interrupt's status as it was. M5Unified `AXP2101_Class::getPekPress`
+//! reads and clears the same two bits.
 
 #![no_std]
 
@@ -32,6 +40,13 @@ const BATTERY_PERCENT: u8 = 0xa4;
 const VBAT_ADC: u8 = 1 << 0;
 /// REG68H bit 0: battery detection, which the fuel gauge needs.
 const BATTERY_DETECTION_ENABLE: u8 = 1 << 0;
+const IRQ_ENABLE_1: u8 = 0x41;
+const IRQ_STATUS_1: u8 = 0x49;
+/// REG41H/REG49H bit 3: POWERON short press (`ponsp_irq`).
+const POK_SHORT_PRESS: u8 = 1 << 3;
+/// REG41H/REG49H bit 2: POWERON long press (`ponlp_irq`).
+const POK_LONG_PRESS: u8 = 1 << 2;
+const POK_PRESSES: u8 = POK_SHORT_PRESS | POK_LONG_PRESS;
 /// Voltage registers keep their setting in bits 4:0; bits 7:5 are reserved.
 const VOLTAGE_FIELD: u8 = 0x1f;
 
@@ -103,6 +118,24 @@ pub struct BatteryStatus {
     pub vbus_present: bool,
     /// REG00H bit 3: a battery is connected.
     pub battery_present: bool,
+}
+
+/// Power-key presses the AXP2101 latched since they were last taken.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PowerKeyPresses {
+    /// The key was released before the long-press time (REG49H bit 3).
+    pub short_press: bool,
+    /// The key was held for the long-press time, REG27H bits 5:4 (REG49H
+    /// bit 2).
+    pub long_press: bool,
+}
+
+impl PowerKeyPresses {
+    /// Whether the key was pressed at all.
+    #[must_use]
+    pub const fn any(self) -> bool {
+        self.short_press || self.long_press
+    }
 }
 
 /// AXP2101 register or configuration failure.
@@ -243,6 +276,34 @@ where
         self.read(BATTERY_PERCENT)
     }
 
+    /// Enables the power key's short- and long-press interrupts, leaving the
+    /// other enable bits of REG41H as they are.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn enable_power_key_interrupts(&mut self) -> Result<(), Error<I2C::Error>> {
+        self.update(IRQ_ENABLE_1, |value| value | POK_PRESSES)
+    }
+
+    /// Reads the power key's latched presses and clears exactly those status
+    /// bits, as M5Unified `AXP2101_Class::getPekPress` does.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn take_power_key_presses(&mut self) -> Result<PowerKeyPresses, Error<I2C::Error>> {
+        let pending = self.read(IRQ_STATUS_1)? & POK_PRESSES;
+        if pending != 0 {
+            // Write-1-to-clear: the zero bits leave the other statuses set.
+            self.write(IRQ_STATUS_1, pending)?;
+        }
+        Ok(PowerKeyPresses {
+            short_press: pending & POK_SHORT_PRESS != 0,
+            long_press: pending & POK_LONG_PRESS != 0,
+        })
+    }
+
     fn update(
         &mut self,
         register: u8,
@@ -295,7 +356,48 @@ mod tests {
         i2c::{ErrorType, I2c, Operation},
     };
 
-    use super::{ADDRESS, Axp2101, BatteryStatus, ChargeDirection, Error, LDO_ENABLE, Ldo};
+    use super::{
+        ADDRESS, Axp2101, BatteryStatus, ChargeDirection, Error, LDO_ENABLE, Ldo, PowerKeyPresses,
+    };
+
+    #[test]
+    fn power_key_touches_only_its_own_interrupt_bits() {
+        let mut bus = Bus::default();
+        // Power-on default: VBUS and battery interrupts on, key presses on.
+        bus.registers[0x41] = 0b1111_0000;
+        // A VBUS insert (bit 7) and a key edge (bit 1) are pending beside a
+        // long press.
+        bus.registers[0x49] = 0b1000_0110;
+        {
+            let mut pmic = Axp2101::new(&mut bus, ADDRESS).expect("valid address");
+            pmic.enable_power_key_interrupts().expect("enable");
+            assert_eq!(
+                pmic.take_power_key_presses().expect("presses"),
+                PowerKeyPresses {
+                    short_press: false,
+                    long_press: true,
+                }
+            );
+        }
+        assert_eq!(bus.registers[0x41], 0b1111_1100);
+        // Only bit 2 is written back, which clears it and nothing else.
+        assert_eq!(bus.writes, [(0x41, 0b1111_1100), (0x49, 0b0000_0100)]);
+        bus.writes.clear();
+        bus.registers[0x49] = 0b1000_1000;
+        {
+            let mut pmic = Axp2101::new(&mut bus, ADDRESS).expect("valid address");
+            let presses = pmic.take_power_key_presses().expect("presses");
+            assert!(presses.short_press && !presses.long_press && presses.any());
+        }
+        assert_eq!(bus.writes, [(0x49, 0b0000_1000)]);
+        bus.writes.clear();
+        bus.registers[0x49] = 0b0000_0011;
+        {
+            let mut pmic = Axp2101::new(&mut bus, ADDRESS).expect("valid address");
+            assert!(!pmic.take_power_key_presses().expect("presses").any());
+        }
+        assert!(bus.writes.is_empty(), "no write without a press");
+    }
 
     struct Bus {
         registers: [u8; 0x100],

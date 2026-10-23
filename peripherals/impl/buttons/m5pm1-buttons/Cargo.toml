@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-m5pm1-buttons"
+version = "0.1.0"
+edition = "2024"
+description = "Power-key button implementation on the M5Stack M5PM1 power controller"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-m5pm1.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

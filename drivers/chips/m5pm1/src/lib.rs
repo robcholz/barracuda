@@ -24,6 +24,15 @@
 //! | `VBAT` (millivolts, little-endian) | `22h`/`23h` |
 //! | `PWMn` (12-bit, bit 12 enable, bit 13 inverted) | `30h` + 2n |
 //! | `PWM_FREQ` (Hz, shared) | `34h`/`35h` |
+//! | `BTN_STATUS` (bit 7 pressed since read, bit 0 pressed; read-only) | `48h` |
+//! | `BTN_CFG_1` (bit 0 single-click reset disabled) | `49h` |
+//!
+//! The power key's registers come from M5Stack's M5PM1 library (`M5PM1.h`,
+//! `M5PM1_REG_BTN_STATUS`, `M5PM1_REG_BTN_CFG_1`) and the M5PM1 user manual
+//! (v1.9, Button Configuration): `BTN_STATUS` bit 0 is the key's level and
+//! bit 7 records a press and clears when read. `BTN_CFG_1` also holds the
+//! download-mode lock and the click, double-click, and long-press times,
+//! which this driver leaves as they are.
 
 #![no_std]
 
@@ -47,6 +56,14 @@ const GPIO_FUNCTION_LOW: u8 = 0x16;
 const GPIO_FUNCTION_HIGH: u8 = 0x17;
 const PWM0_DUTY: u8 = 0x30;
 const PWM_FREQUENCY: u8 = 0x34;
+const BUTTON_STATUS: u8 = 0x48;
+const BUTTON_CONFIG_1: u8 = 0x49;
+/// `BTN_STATUS` bit 0, `BTN_STATE`: the key is down.
+const BUTTON_DOWN: u8 = 1 << 0;
+/// `BTN_STATUS` bit 7, `BTN_FLAG`: pressed since the last read.
+const BUTTON_FLAG: u8 = 1 << 7;
+/// `BTN_CFG_1` bit 0, `SINGLE_RST_DIS`: a single click does not reset.
+const SINGLE_CLICK_RESET_DISABLED: u8 = 1 << 0;
 
 /// Number of general-purpose pins, G0 to G4.
 pub const GPIO_COUNT: u8 = 5;
@@ -128,6 +145,15 @@ impl PowerSource {
     pub const fn battery(self) -> bool {
         self.0 & 0b100 != 0
     }
+}
+
+/// The power key's state from `BTN_STATUS`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ButtonStatus {
+    /// The key is down now (`BTN_STATE`).
+    pub pressed: bool,
+    /// The key went down since the register was last read (`BTN_FLAG`).
+    pub pressed_since_last_read: bool,
 }
 
 /// One power rail switched in the power-configuration register.
@@ -381,6 +407,35 @@ where
         self.write(channel.duty_register().wrapping_add(1), 0x00)
     }
 
+    /// Reads the power key's level and whether it went down since the last
+    /// read; reading clears that record (M5PM1 library `btnGetState` and
+    /// `btnGetFlag`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn button_status(&mut self) -> Result<ButtonStatus, Error<I2C::Error>> {
+        let status = self.read(BUTTON_STATUS)?;
+        Ok(ButtonStatus {
+            pressed: status & BUTTON_DOWN != 0,
+            pressed_since_last_read: status & BUTTON_FLAG != 0,
+        })
+    }
+
+    /// Chooses whether a single click of the power key resets the system,
+    /// the M5PM1's factory behaviour, leaving the rest of `BTN_CFG_1` as it
+    /// is. The M5PM1 keeps the setting while it has power, across resets of
+    /// the host.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I2C register error.
+    pub fn set_single_click_reset(&mut self, enabled: bool) -> Result<(), Error<I2C::Error>> {
+        self.update(BUTTON_CONFIG_1, |value| {
+            set_bits(value, SINGLE_CLICK_RESET_DISABLED, !enabled)
+        })
+    }
+
     fn update(
         &mut self,
         register: u8,
@@ -425,14 +480,49 @@ mod tests {
 
     use embedded_hal::i2c::{ErrorType, I2c, Operation};
 
-    use super::{Error, M5pm1, Pull, PwmChannel, Rail};
+    use super::{ButtonStatus, Error, M5pm1, Pull, PwmChannel, Rail};
+
+    #[test]
+    fn power_key_reads_its_status_and_changes_only_the_reset_bit() {
+        // M5PM1 library: BTN_STATUS bit 0 the level, bit 7 the press flag;
+        // BTN_CFG_1 factory value 2Ah with SINGLE_RST_DIS (bit 0) clear.
+        let mut bus = Bus {
+            registers: [0x00; 0x50],
+        };
+        bus.registers[0x48] = 0b1000_0000;
+        bus.registers[0x49] = 0x2a;
+        let mut controller = M5pm1::new(&mut bus, 0x6e).expect("controller");
+        assert_eq!(
+            controller.button_status().expect("status"),
+            ButtonStatus {
+                pressed: false,
+                pressed_since_last_read: true,
+            }
+        );
+        controller
+            .set_single_click_reset(false)
+            .expect("single-click reset off");
+        controller
+            .set_single_click_reset(true)
+            .expect("single-click reset on");
+        controller
+            .set_single_click_reset(false)
+            .expect("single-click reset off");
+        assert_eq!(bus.registers[0x49], 0x2b);
+        bus.registers[0x48] = 0b0000_0001;
+        let mut controller = M5pm1::new(&mut bus, 0x6e).expect("controller");
+        let status = controller.button_status().expect("status");
+        assert!(status.pressed && !status.pressed_since_last_read);
+        // Reading writes nothing.
+        assert_eq!(bus.registers[0x48], 0b0000_0001);
+    }
 
     #[test]
     fn epd_supply_pin_matches_m5gfx_paper_diy_bring_up() {
         // M5GFX board_M5PaperDIY: 0x16 &= !(0b11 << 4), 0x10 |= 1 << 2,
         // 0x13 &= !(1 << 2), 0x11 |= 1 << 2.
         let mut bus = Bus {
-            registers: [0xff; 0x40],
+            registers: [0xff; 0x50],
         };
         bus.registers[0x10] = 0x00;
         bus.registers[0x11] = 0x00;
@@ -453,7 +543,7 @@ mod tests {
         // M5GFX Light_M5PaperMono: G3 push-pull, 0x16 |= 0xC0, 5 kHz, then a
         // squared 12-bit duty with the enable bit.
         let mut bus = Bus {
-            registers: [0x00; 0x40],
+            registers: [0x00; 0x50],
         };
         bus.registers[0x13] = 0xff;
         {
@@ -490,7 +580,7 @@ mod tests {
         // M5Unified M5PM1_Class: PWM1 at 0x32/0x33, G4's function in bits
         // 1:0 of GPIO_FUNC1 (0x17), enable bit 4 and polarity bit 5.
         let mut bus = Bus {
-            registers: [0x00; 0x40],
+            registers: [0x00; 0x50],
         };
         bus.registers[0x13] = 0xff;
         {
@@ -511,7 +601,7 @@ mod tests {
     #[test]
     fn output_latches_its_level_before_driving() {
         let mut bus = Bus {
-            registers: [0x00; 0x40],
+            registers: [0x00; 0x50],
         };
         bus.registers[0x16] = 0xff;
         bus.registers[0x13] = 0xff;
@@ -537,7 +627,7 @@ mod tests {
     fn charge_status_input_and_battery_readings_match_m5unified() {
         // M5Unified PaperDIY: G3 a GPIO input with a pull-up (CHG_STAT).
         let mut bus = Bus {
-            registers: [0x00; 0x40],
+            registers: [0x00; 0x50],
         };
         bus.registers[0x10] = 0xff;
         bus.registers[0x16] = 0xff;
@@ -562,7 +652,7 @@ mod tests {
     }
 
     struct Bus {
-        registers: [u8; 0x40],
+        registers: [u8; 0x50],
     }
 
     impl ErrorType for Bus {
@@ -612,7 +702,7 @@ mod tests {
         // M5GFX's CoreP4X bring-up writes 0x09 = 0, 0x0A = 0 and sets bit 3
         // of 0x06; the charger bit 0 stays as it was.
         let mut bus = Bus {
-            registers: [0xff; 0x40],
+            registers: [0xff; 0x50],
         };
         bus.registers[0x06] = 0x01;
         {
@@ -637,7 +727,7 @@ mod tests {
     #[test]
     fn rejects_an_invalid_address() {
         let mut bus = Bus {
-            registers: [0; 0x40],
+            registers: [0; 0x50],
         };
         assert!(matches!(
             M5pm1::new(&mut bus, 0x80),
