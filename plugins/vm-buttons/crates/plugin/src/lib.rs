@@ -272,7 +272,7 @@ where
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         (!self.buttons.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 1,
-            purpose: "读取按键",
+            purpose: "Read buttons",
         })
     }
 

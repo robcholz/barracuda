@@ -356,7 +356,7 @@ where
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         (!self.transceivers.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 2,
-            purpose: "红外遥控收发",
+            purpose: "Send and receive infrared remote codes",
         })
     }
 

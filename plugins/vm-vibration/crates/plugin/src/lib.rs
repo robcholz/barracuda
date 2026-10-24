@@ -291,7 +291,7 @@ where
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         (!self.motors.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 2,
-            purpose: "振动提醒",
+            purpose: "Vibrate",
         })
     }
 

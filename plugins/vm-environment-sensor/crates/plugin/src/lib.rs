@@ -142,7 +142,7 @@ where
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         (!self.sensors.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 2,
-            purpose: "读取环境传感器",
+            purpose: "Read environment sensors",
         })
     }
 

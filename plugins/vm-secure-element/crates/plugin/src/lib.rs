@@ -254,7 +254,7 @@ where
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         (!self.elements.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 2,
-            purpose: "硬件密钥签名与随机数",
+            purpose: "Sign with hardware keys and get random bytes",
         })
     }
 

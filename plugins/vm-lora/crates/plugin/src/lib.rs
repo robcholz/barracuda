@@ -311,7 +311,7 @@ where
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         (!self.radios.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 2,
-            purpose: "LoRa 无线收发",
+            purpose: "Send and receive LoRa radio packets",
         })
     }
 

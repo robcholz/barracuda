@@ -300,7 +300,7 @@ where
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         (!self.buzzers.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 2,
-            purpose: "播放提示音",
+            purpose: "Play tones",
         })
     }
 
