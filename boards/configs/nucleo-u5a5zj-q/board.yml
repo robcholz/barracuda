@@ -1,4 +1,7 @@
 name: nucleo-u5a5zj-q
+# headless overflows the 2.5 MiB flash region by 227 KiB; Lua and the
+# network without the Agent fit (docs/boards/profiles.mdx).
+profile: connected
 hardware:
   chip: stm32u5a5zj
 toolchain:
