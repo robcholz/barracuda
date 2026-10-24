@@ -252,7 +252,7 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use barracuda_vm_package_api::{
-        LUA_PACKAGE_HEAP_BUDGET_BYTES, LUA_PACKAGE_INSTALL_PEAK_BYTES, MAX_LUA_PACKAGES,
+        LUA_PACKAGE_HEAP_BUDGET_BYTES, LUA_PACKAGE_INSTALL_PEAK_BYTES, MAX_BUILTIN_EXTENSIONS,
     };
 
     use super::{VmMemoryPool, VmMemoryPoolError};
@@ -295,16 +295,16 @@ mod tests {
     }
 
     #[test]
-    fn a_full_registry_leaves_the_script_its_reserve() {
-        let packages = MAX_LUA_PACKAGES
-            .saturating_mul(LUA_PACKAGE_HEAP_BUDGET_BYTES)
-            .saturating_add(LUA_PACKAGE_INSTALL_PEAK_BYTES);
+    fn the_builtins_leave_the_script_its_reserve() {
+        let extensions = MAX_BUILTIN_EXTENSIONS.saturating_mul(LUA_PACKAGE_HEAP_BUDGET_BYTES);
         let left = VM_MEMORY_BYTES_PER_RUN
-            .saturating_sub(packages)
+            .saturating_sub(extensions)
+            .saturating_sub(LUA_PACKAGE_INSTALL_PEAK_BYTES)
             .saturating_sub(SCRIPT_HEAP_RESERVE_BYTES);
         assert!(
             super::builtins_floor() <= left,
-            "the built-ins need {} bytes, {left} remain beside a full registry and the script",
+            "the built-ins need {} bytes, {left} remain beside their extensions, one \
+             installation's peak, and the script",
             super::builtins_floor()
         );
     }

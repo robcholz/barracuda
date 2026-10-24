@@ -11,22 +11,31 @@ use barracuda_lua::{Lua, Package, Result as LuaResult};
 use portable_atomic_util::{Arc, Weak};
 use spin::Mutex;
 
-/// Most Lua packages the registry holds at once.
-pub const MAX_LUA_PACKAGES: usize = 32;
-
 /// Lua heap one installed package may keep in a run once its installation's
 /// garbage is collected.
 ///
-/// The VM sizes each run's heap so that the built-in packages,
-/// [`MAX_LUA_PACKAGES`] packages at this budget each, one installation's
-/// transient peak, and the script all fit; each package proves it stays
-/// within both budgets.
+/// A package installs into a run when the run's script first requires it,
+/// and what it keeps there comes out of the script's own share of the heap.
+/// Each package proves it stays within this budget and
+/// [`LUA_PACKAGE_INSTALL_PEAK_BYTES`].
 pub const LUA_PACKAGE_HEAP_BUDGET_BYTES: usize = 12 * 1024;
 
 /// Heap one package's installation may use beyond what it keeps, such as
-/// compiling Lua source. Packages install one after another, so only one
-/// such peak is ever live.
+/// compiling Lua source. Packages install one at a time, so the VM leaves
+/// room for one such peak beside the built-ins and the script.
 pub const LUA_PACKAGE_INSTALL_PEAK_BYTES: usize = 32 * 1024;
+
+/// Bytes a run's heap must have free in one block before a package installs
+/// on first require: what the package may keep and its installation's peak.
+pub const LUA_PACKAGE_INSTALL_HEADROOM_BYTES: usize =
+    LUA_PACKAGE_HEAP_BUDGET_BYTES + LUA_PACKAGE_INSTALL_PEAK_BYTES;
+
+/// Most registered packages that install with the built-ins at once.
+///
+/// Such a package is in every run's heap whether the script uses it or not,
+/// so the VM counts this many of them, at [`LUA_PACKAGE_HEAP_BUDGET_BYTES`]
+/// each, with its built-ins.
+pub const MAX_BUILTIN_EXTENSIONS: usize = 4;
 
 /// What a package promises the code that requires it, for any consumer of
 /// the registry that decides which code gets which packages. The VM itself
@@ -55,6 +64,22 @@ pub enum PackageInterface {
     },
 }
 
+/// When a run installs a registered package.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PackageLoading {
+    /// The first time the run's script requires the package's name; the
+    /// package registers its library under that name with
+    /// [`Lua::register_lib`]. A run whose script never requires it holds
+    /// none of it.
+    #[default]
+    OnRequire,
+    /// With the built-ins, before the run's script starts, for a package
+    /// that adds functions to the built-in `io` or `os` tables instead of
+    /// registering a library of its own. At most
+    /// [`MAX_BUILTIN_EXTENSIONS`] are registered at once.
+    WithBuiltins,
+}
+
 /// A named Lua package registered by a Plugin during System composition.
 pub trait LuaPackage: Package + Send + Sync {
     /// Returns the stable name accepted by Lua's `require` function.
@@ -65,6 +90,11 @@ pub trait LuaPackage: Package + Send + Sync {
     /// package on a Board without the device.
     fn interface(&self) -> Option<PackageInterface> {
         None
+    }
+
+    /// When a run installs the package.
+    fn loading(&self) -> PackageLoading {
+        PackageLoading::OnRequire
     }
 
     /// Revokes resources captured by callbacks already installed into a Lua state.
@@ -96,7 +126,8 @@ impl LuaPackageRegistry {
     /// # Errors
     ///
     /// Returns an error when the package name is empty or already registered,
-    /// or when the registry already holds [`MAX_LUA_PACKAGES`] packages.
+    /// or when the package installs with the built-ins and the registry
+    /// already holds [`MAX_BUILTIN_EXTENSIONS`] such packages.
     pub fn register(
         &self,
         package: impl LuaPackage + 'static,
@@ -108,15 +139,22 @@ impl LuaPackageRegistry {
         }
 
         let mut state = self.state.lock();
-        if state.entries.len() >= MAX_LUA_PACKAGES {
-            return Err(LuaPackageRegistryError::Full);
-        }
         if state
             .entries
             .iter()
             .any(|entry| entry.package.name() == name)
         {
             return Err(LuaPackageRegistryError::DuplicateName(name));
+        }
+        if package.loading() == PackageLoading::WithBuiltins
+            && state
+                .entries
+                .iter()
+                .filter(|entry| entry.package.loading() == PackageLoading::WithBuiltins)
+                .count()
+                >= MAX_BUILTIN_EXTENSIONS
+        {
+            return Err(LuaPackageRegistryError::TooManyBuiltinExtensions);
         }
         let id = state.next_id;
         state.next_id = state.next_id.wrapping_add(1);
@@ -132,19 +170,68 @@ impl LuaPackageRegistry {
         })
     }
 
-    /// Installs every package registered during Plugin composition.
+    /// Lets `lua` require every package registered during Plugin composition.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of a package that installs with the built-ins and
+    /// fails to.
     pub fn install(&self, lua: &mut Lua) -> LuaResult<()> {
         self.install_scoped(lua, &LuaPackageScope::All)
     }
 
-    /// Installs the registered packages `scope` admits; the others cannot be
-    /// required in `lua`.
+    /// Lets `lua` require the registered packages `scope` admits; the others
+    /// cannot be required in `lua`.
+    ///
+    /// The packages that install with the built-ins install now. Each other
+    /// package installs the first time a script in `lua` requires it, if it
+    /// is still registered then and was registered before this call;
+    /// [`LUA_PACKAGE_INSTALL_HEADROOM_BYTES`] must be free first, or that
+    /// `require` raises Lua's out-of-memory error.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of a package that installs with the built-ins and
+    /// fails to.
     pub fn install_scoped(&self, lua: &mut Lua, scope: &LuaPackageScope) -> LuaResult<()> {
-        for entry in &self.state.lock().entries {
-            if scope.admits(entry.package.name()) {
-                entry.package.install(lua)?;
-            }
+        let (extensions, registered_before) = {
+            let state = self.state.lock();
+            let extensions = state
+                .entries
+                .iter()
+                .filter(|entry| {
+                    entry.package.loading() == PackageLoading::WithBuiltins
+                        && scope.admits(entry.package.name())
+                })
+                .map(|entry| Arc::clone(&entry.package))
+                .collect::<Vec<_>>();
+            (extensions, state.next_id)
+        };
+        // The lock is released first: an installation may use the registry.
+        for package in extensions {
+            package.install(lua)?;
         }
+
+        let registry = Arc::downgrade(&self.state);
+        let scope = scope.clone();
+        lua.set_package_finder(LUA_PACKAGE_INSTALL_HEADROOM_BYTES, move |name| {
+            if !scope.admits(name) {
+                return None;
+            }
+            let registry = registry.upgrade()?;
+            let state = registry.lock();
+            state
+                .entries
+                .iter()
+                .find(|entry| {
+                    entry.id < registered_before
+                        && entry.package.name() == name
+                        && entry.package.loading() == PackageLoading::OnRequire
+                })
+                .map(|entry| {
+                    Box::new(RequiredPackage(Arc::clone(&entry.package))) as Box<dyn Package>
+                })
+        });
         Ok(())
     }
 
@@ -166,6 +253,16 @@ impl LuaPackageRegistry {
     }
 }
 
+/// A registered package a script has just required, installing outside the
+/// registry's lock.
+struct RequiredPackage(Arc<dyn LuaPackage>);
+
+impl Package for RequiredPackage {
+    fn install(&self, lua: &mut Lua) -> LuaResult<()> {
+        self.0.install(lua)
+    }
+}
+
 /// The registered packages one Lua run may `require`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum LuaPackageScope {
@@ -177,7 +274,7 @@ pub enum LuaPackageScope {
 }
 
 impl LuaPackageScope {
-    /// Whether the package `name` is installed in a run of this scope.
+    /// Whether a run of this scope may install the package `name`.
     #[must_use]
     pub fn admits(&self, name: &str) -> bool {
         match self {
@@ -200,7 +297,9 @@ struct RegistryEntry {
 
 /// Retained registration for one Lua package.
 ///
-/// Dropping the guard removes the package from the VM registry.
+/// Dropping the guard removes the package from the VM registry: no run can
+/// require it any longer, and the callbacks runs already installed are
+/// revoked.
 pub struct LuaPackageRegistration {
     state: Weak<Mutex<RegistryState>>,
     id: u64,
@@ -226,7 +325,8 @@ pub enum LuaPackageRegistryError {
     /// Only one Plugin may own a given Lua package name.
     #[error("Lua package `{0}` is already registered")]
     DuplicateName(&'static str),
-    /// The registry already holds [`MAX_LUA_PACKAGES`] packages.
-    #[error("the VM holds at most {MAX_LUA_PACKAGES} Lua packages")]
-    Full,
+    /// The registry already holds [`MAX_BUILTIN_EXTENSIONS`] packages that
+    /// install with the built-ins.
+    #[error("the VM holds at most {MAX_BUILTIN_EXTENSIONS} Lua packages that install with the built-ins")]
+    TooManyBuiltinExtensions,
 }
