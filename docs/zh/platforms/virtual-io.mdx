@@ -94,7 +94,7 @@ driven, level}` 的形式报告。通过管理器访问寄存器没有总线副�
 {"seq":4,"at_us":1710,"kind":"i2c","bus":"I2C0","address":80,"operations":[{"write":"10"},{"read":"aabb"}],"result":"ok","injected":false}
 ```
 
-设备模型的说明以 `{"kind":"device","bus":"I2C0","address":67,"model":"pi4ioe5v6408","note":"P3 high"}` 的形式跟在其事务之后。`result` 是 `ok`、`nack`、`arbitration-loss`、`timeout` 或 `bus-error`。日志保留最近的 4096 个事件。`spi` 事件保留每个方向的前 32 字节以及传输的 `length`，因为显示屏每次传输会流式发送数 KB 数据。违规记录带有暴露该违规的事务的 `seq`、`at_us`、`bus`、`address`、`model`、`rule` 和 `message`。
+设备模型的说明以 `{"kind":"device","bus":"I2C0","address":67,"model":"pi4ioe5v6408","note":"P3 high"}` 的形式跟在其事务之后。`result` 是 `ok`、`nack`、`arbitration-loss`、`timeout` 或 `bus-error`。日志保留 4096 个事件；日志满时，它丢弃数量最多的那类事件中最旧的一个，这样显示屏源源不断的 SPI 和 GPIO 事件不会把本次运行的 I2C 事务挤掉。`spi` 事件保留每个方向的前 32 字节以及传输的 `length`，因为显示屏每次传输会流式发送数 KB 数据。违规记录带有暴露该违规的事务的 `seq`、`at_us`、`bus`、`address`、`model`、`rule` 和 `message`。
 
 ```console
 $ printf '%s\n' '{"op":"add_device","bus":"I2C0","address":80}' \

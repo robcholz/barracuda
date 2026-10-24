@@ -1,7 +1,86 @@
 name: m5stack-atom-s3r-cam
 hardware:
   chip: esp32s3
+  # ESP32-S3-PICO-1-N8R8.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified internal bus of the AtomS3R family: SCL G0, SDA G45.
+        peripheral: I2C0
+        scl: GPIO0
+        sda: GPIO45
+        frequency-hz: 400000
+      camera-control:
+        # The camera's own SCCB bus: CAM_SDA G12, CAM_SCL G9 (M5Stack
+        # AtomS3R-CAM pin map; M5Unified probes the sensor on the same pins),
+        # at esp32-camera's default 100 kHz.
+        peripheral: I2C1
+        scl: GPIO9
+        sda: GPIO12
+        frequency-hz: 100000
+    camera-capture:
+      camera-data:
+        # M5Stack AtomS3R-CAM pin map: XCLK G21, PCLK G40, VSYNC G10, HREF
+        # G14, Y2-Y9 (D0-D7) = G3, G42, G46, G48, G4, G17, G11, G13. 20 MHz
+        # XCLK as esp32-camera's examples use. One 320x240 RGB565 frame.
+        peripheral: LCD_CAM
+        dma: DMA_CH0
+        xclk: GPIO21
+        pclk: GPIO40
+        vsync: GPIO10
+        href: GPIO14
+        data: [GPIO3, GPIO42, GPIO46, GPIO48, GPIO4, GPIO17, GPIO11, GPIO13]
+        xclk-frequency-hz: 20000000
+        dma-buffer-bytes: 153600
+    rmt-output:
+      ir-transmit:
+        # IR LED driver `IR_LED_DRV` on GPIO47 (docs.m5stack.com AtomS3R,
+        # AtomS3R-CAM, and AtomS3R-Ext pin maps, "BMI270 & IR": the block's
+        # other pins are the BMI270 bus G0/G45 and the button G41 in
+        # M5Unified).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO47
+  devices:
+    camera:
+      # GC0308 at 21h, or on the AtomS3R-M12 an OV3660 at 3Ch on the same
+      # wiring: M5Unified tells the two apart only by which address answers
+      # and runs both as the AtomS3R-CAM. G18 low (POWER_N) switches the
+      # camera on.
+      implementation: gc0308-camera
+      bindings: { capture: camera-data, control: camera-control, power-down: GPIO18 }
+      parameters:
+        alternate-sensor: ov3660
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 68h (M5Stack pin map).
+        address: 104
+        # M5Unified `IMU_Class::begin` (AtomS3R, -CAM, -Ext): the BMI270's X and Y
+        # swapped and the new Y inverted; the BMM150 at 10h on its auxiliary
+        # bus (`BMI270_Class::begin`), X and Z inverted, in the same Board axes.
+        axis-x: "+y"
+        axis-y: "-x"
+        magnetometer: bmm150
+        magnetometer-axis-x: "-x"
+        magnetometer-axis-z: "-z"
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+exposed-io:
+  pins:
+    # Grove (PORT.CUSTOM) G1/G2: M5Stack AtomS3R-CAM pin map.
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }

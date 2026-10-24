@@ -1,7 +1,102 @@
 name: m5stack-tough
+profile: screen-connected
 hardware:
   chip: esp32
+  # ESP32-D0WDQ6-V3.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: quad-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5GFX/M5Unified: the internal bus (I2C_NUM_1, 400 kHz) of the AXP192 at 34h.
+        peripheral: I2C1
+        scl: GPIO22
+        sda: GPIO21
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        # M5GFX Tough (shared with the Core2 path): SPI3_HOST at 40 MHz.
+        # MISO (GPIO38) only serves the TF card.
+        peripheral: SPI3
+        sck: GPIO18
+        mosi: GPIO23
+        miso: GPIO38
+        chip-select: GPIO5
+        frequency-hz: 40000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5StackCore2, board_M5Tough): the
+        # microSD card shares the LCD's bus with its own chip select, GPIO4.
+        peripheral: SPI3
+        sck: GPIO18
+        mosi: GPIO23
+        miso: GPIO38
+        chip-select: GPIO4
+        frequency-hz: 20000000
+    pdm-i2s-stream:
+      speaker:
+        # M5Unified `_begin_audio` (Tough shares the Core2 path): the NS4168
+        # amplifier, BCK GPIO12, LRCK GPIO0, data GPIO2.
+        peripheral: I2S0
+        dma: DMA_I2S0
+        clk: GPIO0
+        bclk: GPIO12
+        dout: GPIO2
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
+  devices:
+    audio:
+      # NS4168 amplifier, switched on through AXP192 GPIO2 (M5Unified
+      # `_speaker_enabled_cb_core2`).
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: speaker, pmic: internal-i2c }
+      parameters:
+        pmic-power: core2-speaker
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    display:
+      # ILI9342C 320x240. AXP192 LDO2 powers it, GPIO4 resets it, LDO3 lights it.
+      implementation: m5stack-pmic-display
+      bindings: { dc: GPIO15, i2c: internal-i2c, spi: display-spi }
+      parameters:
+        power-layout: tough
+        controller: ili9342c
+        width: 320
+        height: 240
+        invert-colors: true
+    touch:
+      # CHSC6540 at 2Eh on the internal bus (M5GFX Tough `Touch_CHSC6540`,
+      # interrupt GPIO39, unused: the implementation polls), 320x240. The
+      # display's AXP192 GPIO4 reset pulse resets it with the panel (M5GFX
+      # `lcd_reset`).
+      implementation: chsc6540-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        width: 320
+        height: 240
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # The battery behind the AXP192 the display also uses.
+    power-monitor:
+      implementation: axp192-axp2101-power-monitor
+      bindings: { i2c: internal-i2c }
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:
+    # M5Unified `_pin_table_port_bc`.
+    port-a-scl: { pin: GPIO33 }
+    port-a-sda: { pin: GPIO32 }
+    port-b-g26: { pin: GPIO26 }
+    port-b-g36: { pin: GPIO36 }
+    port-c-g13: { pin: GPIO13 }
+    port-c-g14: { pin: GPIO14 }

@@ -28,4 +28,34 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 | Device | What it is | Lua package |
 | --- | --- | --- |
+| `led-strip` | RGB LED (WS2812, GPIO21) | [`light`](/plugins/vm-led-strip) |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (FT3267) | — |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `buttons` | Buttons A (knob press) and B (GPIO42, GPIO0) | [`buttons`](/plugins/vm-buttons) |
+| `rotary-encoder` | Knob encoder (A GPIO41, B GPIO40, pulse counter) | [`encoder`](/plugins/vm-rotary-encoder) |
+| `buzzer` | Passive buzzer (GPIO3) | [`buzzer`](/plugins/vm-buzzer) |
+| `nfc-reader` | RFID / NFC card reader (WS1850S, MFRC522-compatible, `28h`) | [`nfc`](/plugins/vm-nfc) |
+
+Dial v1.1 carries a Stamp-S3A, whose RGB LED is powered through GPIO38; the
+LED switches GPIO38 on at start. On the StampS3 of v1.0 GPIO38 is unused.
+
+The card reader starts with a soft reset, as M5Stack's M5Dial library does,
+and is polled; its reset and interrupt lines are not used.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO15` |
+| `port-a-sda` | `GPIO13` |
+| `port-b-g1` | `GPIO1` |
+| `port-b-g2` | `GPIO2` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

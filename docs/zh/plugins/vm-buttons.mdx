@@ -1,0 +1,58 @@
+---
+title: "Buttons 插件"
+sidebarTitle: "Buttons"
+description: "用 `buttons` Lua 包在 Lua 中读取开发板的按键，并等待按下、单击和长按。"
+---
+
+基于开发板的按键安装 `buttons` Lua 包，默认使用主按键设备。
+
+- 插件 ID：`buttons`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `buttons.devices`（`*`）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`buttons`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件获取开发板上没有被其他插件占用的每个 `Buttons` 设备，主设备排在最前，并安装 `buttons` Lua 包。引脚采样、消抖、长按时间以及 PMIC 寄存器仍由所选的实现拥有，由它把这些转换为按键事件。
+
+Lua API：
+
+- `buttons.list() -> { name, ... }`：各按键设备在开发板上的名称，主设备排在最前
+- `buttons.available([name]) -> boolean`：指定名称的设备（不给出时为主设备）是否存在且没有被其他调用占用
+- `buttons.count([name]) -> integer`：设备有几个按键
+- `buttons.read([name]) -> { pressed, ... }`：每个按键此刻是否按下，按键 1 在最前
+- `buttons.poll([name]) -> button, event`；没有按键变化时不返回任何值
+- `buttons.wait([timeout_ms[, name]]) -> button, event`；超时前没有按键变化时不返回任何值；不给超时时一直等到下一个事件。每 10 ms 检查一次。
+
+`name` 是 `list` 返回的开发板设备名；不给出时调用使用主设备，所以为单个按键设备写的脚本在有多个按键设备的开发板上无需修改。要给 `wait` 指定设备而不设超时，超时传 `nil`。
+
+按键按开发板文档中的顺序从 1 开始编号。`event` 是下列之一：
+
+| 事件 | 何时 |
+| --- | --- |
+| `"pressed"` | 按键按下 |
+| `"released"` | 按键松开 |
+| `"click"` | 紧跟在 `"released"` 之后，表示按下时间短于长按时间 |
+| `"long_press"` | 按键已按住达到长按时间；它在 `"released"` 之前出现，之后不再有 `"click"` |
+
+GPIO、扩展芯片、ADC 电阻分压和电容触摸按键默认消抖 10 ms，按住 500 ms 算长按，开发板可以设置其他值；它们的事件来自 `poll` 和 `wait` 的采样，所以短于两次调用间隔的一次按下可能看不到。PMIC 电源键报告 PMIC 锁存的每次按下，在按下结束后一次性给出它的全部事件。每个设备最多为调用不频繁的脚本保存 16 个事件，超出时丢弃最早的事件。
+
+读取失败、设备名不存在，或设备正被另一个调用等待时，返回 `nil, error`。
+
+```lua
+local buttons = require("buttons")
+while true do
+  local button, event = buttons.wait(5000)
+  if button then
+    print("button " .. button .. " " .. event)
+  end
+end
+```
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 1。没有按键的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。本插件不做后台采样，也不拥有长时间运行的任务。

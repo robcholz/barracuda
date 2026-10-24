@@ -1,0 +1,29 @@
+id: spi-sd-fat-removable-storage
+api-version: 1
+peripheral: removable-storage
+implementation:
+  package: barracuda-spi-sd-fat-removable-storage
+  crate: barracuda_spi_sd_fat_removable_storage
+  factory: "::{{crate}}::SpiSdFatRemovableStorageImplementation<{{binding.spi.type}}, {{hal.delay.type}}, {{binding.power-enable.type}}>"
+  bindings-expression: "::{{crate}}::SpiSdBindings::new({{binding.spi.value}}, {{hal.delay.value}}, {{binding.power-enable.value}})"
+  config-expression: "::{{crate}}::SpiSdConfig::new({{peripheral.name}}, {{parameter.power-active-level}})"
+bindings:
+  # The card's SPI device, alone on its controller or sharing it with a
+  # display through its own chip select.
+  spi:
+    kind: spi-device
+  # The card slot's supply switch, when a GPIO controls it.
+  power-enable:
+    kind: digital-output
+    required: false
+    initial-from:
+      parameter: power-active-level
+      values: { high: low, low: high }
+parameters:
+  power-active-level:
+    type: enum
+    values: [high, low]
+    rust-values:
+      high: "true"
+      low: "false"
+    default: high

@@ -1,0 +1,26 @@
+[package]
+name = "barracuda-rmt-infrared"
+version = "0.1.0"
+edition = "2024"
+description = "Infrared remote-control implementation over pulse-train outputs and inputs"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-board-hal.workspace = true
+barracuda-driver-ir-nec.workspace = true
+barracuda-peripheral.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

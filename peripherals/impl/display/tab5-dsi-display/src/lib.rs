@@ -4,6 +4,9 @@
 
 use core::marker::PhantomData;
 
+use barracuda_board_hal::{
+    ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig, OutputDrive,
+};
 use barracuda_driver_gt911::Gt911;
 use barracuda_driver_ili9881c::INIT_COMMANDS as ILI9881C_COMMANDS;
 use barracuda_driver_pi4ioe5v6408::{Error as ExpanderError, Pi4ioe5v6408};
@@ -30,6 +33,12 @@ const WIDTH: u16 = 720;
 const HEIGHT: u16 = 1280;
 const CONTROL_EXPANDER_ADDRESS: u8 = 0x43;
 const DISPLAY_RESET_PIN: u8 = 4;
+/// The touch controller's reset: P5 of the PI4IOE5V6408 at 43h (M5GFX
+/// `reg_data_io1_1`, "bit5=GT911 TouchReset").
+const TOUCH_RESET_PIN: u8 = 5;
+/// GT911 programming guide: INT stays at its address strap level at least
+/// 5 ms after reset rises.
+const STRAP_HOLD_MS: u32 = 5;
 
 /// Board-owned addresses used to identify the shipping Tab5 display revision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,24 +58,32 @@ impl Tab5DsiDisplayConfig {
     }
 }
 
-/// Move-only DSI host and shared control-bus view consumed by this implementation.
-pub struct Tab5DsiDisplayBindings<HOST, I2C, DELAY> {
+/// Move-only DSI host, shared control-bus view, and touch interrupt line
+/// consumed by this implementation.
+pub struct Tab5DsiDisplayBindings<HOST, I2C, STRAP, DELAY> {
     host: HOST,
     i2c: I2C,
+    touch_interrupt: STRAP,
     delay: DELAY,
 }
 
-impl<HOST, I2C, DELAY> Tab5DsiDisplayBindings<HOST, I2C, DELAY> {
-    /// Combines the DSI data plane with the revision-detection bus.
+impl<HOST, I2C, STRAP, DELAY> Tab5DsiDisplayBindings<HOST, I2C, STRAP, DELAY> {
+    /// Combines the DSI data plane with the revision-detection bus and the
+    /// touch interrupt line that straps the GT911 address.
     #[must_use]
-    pub const fn new(host: HOST, i2c: I2C, delay: DELAY) -> Self {
-        Self { host, i2c, delay }
+    pub const fn new(host: HOST, i2c: I2C, touch_interrupt: STRAP, delay: DELAY) -> Self {
+        Self {
+            host,
+            i2c,
+            touch_interrupt,
+            delay,
+        }
     }
 }
 
 /// Display initialization failure.
 #[derive(Debug)]
-pub enum Tab5DsiDisplayInitError<BusError, HostError> {
+pub enum Tab5DsiDisplayInitError<BusError, HostError, PinError> {
     /// One or both configured I2C addresses are invalid.
     InvalidAddresses,
     /// Neither supported Tab5 panel revision responded with a valid identity.
@@ -75,6 +92,8 @@ pub enum Tab5DsiDisplayInitError<BusError, HostError> {
     Bus(BusError),
     /// The private Tab5 panel-reset expander could not be configured.
     Expander(ExpanderError<BusError>),
+    /// The touch interrupt line could not be driven or released.
+    TouchInterrupt(PinError),
     /// The Platform DSI host rejected panel initialization.
     Host(HostError),
 }
@@ -96,22 +115,25 @@ pub struct Tab5DsiDisplay<HOST> {
 }
 
 /// Static factory used by generated Board composition.
-pub struct Tab5DsiDisplayImplementation<HOST, I2C, DELAY>(
+pub struct Tab5DsiDisplayImplementation<HOST, I2C, STRAP, DELAY>(
     PhantomData<HOST>,
     PhantomData<I2C>,
+    PhantomData<STRAP>,
     PhantomData<DELAY>,
 );
 
-impl<HOST, I2C, DELAY> PeripheralImplementation for Tab5DsiDisplayImplementation<HOST, I2C, DELAY>
+impl<HOST, I2C, STRAP, DELAY> PeripheralImplementation
+    for Tab5DsiDisplayImplementation<HOST, I2C, STRAP, DELAY>
 where
     HOST: DsiHost + 'static,
     I2C: I2c + 'static,
+    STRAP: ConfigurableDigitalPin + 'static,
     DELAY: DelayNs + 'static,
 {
-    type Bindings = Tab5DsiDisplayBindings<HOST, I2C, DELAY>;
+    type Bindings = Tab5DsiDisplayBindings<HOST, I2C, STRAP, DELAY>;
     type Config = Tab5DsiDisplayConfig;
     type Peripheral = Tab5DsiDisplay<HOST>;
-    type Error = Tab5DsiDisplayInitError<I2C::Error, HOST::Error>;
+    type Error = Tab5DsiDisplayInitError<I2C::Error, HOST::Error, STRAP::Error>;
 
     async fn initialize(
         mut bindings: Self::Bindings,
@@ -124,10 +146,11 @@ where
             return Err(Tab5DsiDisplayInitError::InvalidAddresses);
         }
 
-        Pi4ioe5v6408::new(&mut bindings.i2c, CONTROL_EXPANDER_ADDRESS)
-            .map_err(Tab5DsiDisplayInitError::Expander)?
-            .pulse_reset_low(DISPLAY_RESET_PIN, 10, 120, &mut bindings.delay)
-            .map_err(Tab5DsiDisplayInitError::Expander)?;
+        reset_panel_and_touch(
+            &mut bindings.i2c,
+            &mut bindings.touch_interrupt,
+            &mut bindings.delay,
+        )?;
 
         let panel = detect_panel(
             &mut bindings.i2c,
@@ -144,6 +167,13 @@ where
             .map_err(Tab5DsiDisplayInitError::Host)?;
         panel
             .write_init_commands(&mut bindings.host, &mut bindings.delay)
+            .map_err(Tab5DsiDisplayInitError::Host)?;
+        // ESP-IDF's ILI9881C and ST712x panel drivers send their
+        // initialization sequence in command mode, then start video and turn
+        // the display on.
+        bindings
+            .host
+            .start_video()
             .map_err(Tab5DsiDisplayInitError::Host)?;
         bindings
             .host
@@ -250,6 +280,50 @@ impl PanelRevision {
     }
 }
 
+/// M5GFX's Tab5 start-up: with the touch interrupt line driven high, hold
+/// the panel and the touch controller in reset, then release both, so the
+/// GT911 of an ILI9881C unit answers at 14h (high strap) and not at 5Dh.
+/// [`detect_panel`] identifies the panel by the touch controller that
+/// answers, so the touch controller has to leave reset first; the touch
+/// implementation, built after the display, does not reset it again.
+fn reset_panel_and_touch<I2C, STRAP, DELAY, HostError>(
+    i2c: &mut I2C,
+    touch_interrupt: &mut STRAP,
+    delay: &mut DELAY,
+) -> Result<(), Tab5DsiDisplayInitError<I2C::Error, HostError, STRAP::Error>>
+where
+    I2C: I2c,
+    STRAP: ConfigurableDigitalPin,
+    DELAY: DelayNs,
+{
+    touch_interrupt
+        .configure_output(OutputConfig {
+            initial: DigitalLevel::High,
+            drive: OutputDrive::PushPull,
+        })
+        .map_err(Tab5DsiDisplayInitError::TouchInterrupt)?;
+    let mut expander = Pi4ioe5v6408::new(i2c, CONTROL_EXPANDER_ADDRESS)
+        .map_err(Tab5DsiDisplayInitError::Expander)?;
+    for pin in [DISPLAY_RESET_PIN, TOUCH_RESET_PIN] {
+        expander
+            .configure_output(pin, false)
+            .map_err(Tab5DsiDisplayInitError::Expander)?;
+    }
+    delay.delay_ms(10);
+    for pin in [TOUCH_RESET_PIN, DISPLAY_RESET_PIN] {
+        expander
+            .set_output(pin, true)
+            .map_err(Tab5DsiDisplayInitError::Expander)?;
+    }
+    delay.delay_ms(STRAP_HOLD_MS);
+    // The touch controller drives its interrupt line from here on.
+    touch_interrupt
+        .configure_input(InputConfig::default())
+        .map_err(Tab5DsiDisplayInitError::TouchInterrupt)?;
+    delay.delay_ms(120);
+    Ok(())
+}
+
 fn detect_panel<I2C: I2c>(
     i2c: &mut I2C,
     gt911_address: u8,
@@ -311,7 +385,7 @@ impl<HOST: DsiHost> Display for Tab5DsiDisplay<HOST> {
             self.size(),
             PixelFormat::Rgb565,
             DisplayTechnology::Lcd,
-            DisplayFeatures::BRIGHTNESS | DisplayFeatures::SLEEP,
+            DisplayFeatures::BUFFERED | DisplayFeatures::BRIGHTNESS | DisplayFeatures::SLEEP,
         )
     }
 
@@ -347,7 +421,7 @@ impl<HOST: DsiHost> Display for Tab5DsiDisplay<HOST> {
     }
 
     async fn flush(&mut self, _request: RefreshRequest) -> Result<(), Self::ControlError> {
-        Ok(())
+        self.host.present().map_err(Tab5DsiDisplayError::Host)
     }
 
     async fn set_power(&mut self, power: DisplayPower) -> Result<(), Self::ControlError> {

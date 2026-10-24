@@ -1,0 +1,23 @@
+[package]
+name = "barracuda-chsc6540-touch"
+version = "0.1.0"
+edition = "2024"
+description = "Chipsemi CHSC6540 two-contact touch peripheral implementation"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-chsc6540.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

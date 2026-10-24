@@ -1,0 +1,25 @@
+[package]
+name = "barracuda-mipi-dbi-pi4ioe5v6408-display"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda display implementation for MIPI DBI panels whose backlight is a PI4IOE5V6408 expander output"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-pi4ioe5v6408.workspace = true
+barracuda-mipi-dbi-display.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+mipidsi.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

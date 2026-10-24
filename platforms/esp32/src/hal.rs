@@ -5,11 +5,14 @@ extern crate alloc;
 use alloc::boxed::Box;
 
 use barracuda_board_hal::{
-    AnalogErrorType, AnalogInput, ConfigurableDigitalPin, DigitalLevel, InputConfig, OutputConfig,
-    OutputDrive, Pull as BoardPull, RuntimeAnalogPlatform, RuntimePlatform, RuntimePwmPlatform,
-    RuntimeUartPlatform, SharedI2cBus, UartConfig, UartDataBits, UartParity, UartStopBits,
-    UnavailableAnalogOutput,
+    AnalogErrorType, AnalogInput, AnalogVoltageInput, ConfigurableDigitalPin, DigitalLevel,
+    InputConfig, OutputConfig, OutputDrive, Pull as BoardPull, RuntimeAnalogPlatform,
+    RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SharedI2cBus, SpiBusControl,
+    SpiDeviceControl, UartConfig, UartDataBits, UartParity, UartStopBits, UnavailableAnalogOutput,
 };
+use core::cell::RefCell;
+use embassy_sync::blocking_mutex::CriticalSectionMutex;
+use esp_hal::analog::adc::{AdcCalLine, AdcCalScheme, RegisterAccess as AdcRegisterAccess};
 use embedded_hal::{
     digital::{ErrorType, StatefulOutputPin},
     i2c::Operation as I2cOperation,
@@ -74,9 +77,528 @@ pub type DigitalOutput = Output<'static>;
 /// Type-erased digital input consumed by peripheral implementations.
 pub type DigitalInput = Input<'static>;
 /// Blocking SPI bus used by statically selected devices.
-pub type SpiBus = Spi<'static, Blocking>;
+///
+/// It is esp-hal's blocking driver, which it dereferences to, and also
+/// clocks transfers shorter than a byte ([`SpiBusControl`]) through the
+/// controller's command phase, which a JTAG port driven through the
+/// controller needs.
+pub struct SpiBus(Spi<'static, Blocking>);
+
+impl core::ops::Deref for SpiBus {
+    type Target = Spi<'static, Blocking>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for SpiBus {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl embedded_hal::spi::ErrorType for SpiBus {
+    type Error = esp_hal::spi::Error;
+}
+
+impl embedded_hal::spi::SpiBus for SpiBus {
+    fn read(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::read(&mut self.0, words)
+    }
+
+    fn write(&mut self, words: &[u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::write(&mut self.0, words)
+    }
+
+    fn transfer(&mut self, read: &mut [u8], write: &[u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::transfer(&mut self.0, read, write)
+    }
+
+    fn transfer_in_place(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::transfer_in_place(&mut self.0, words)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::flush(&mut self.0)
+    }
+}
+
+impl SpiBusControl for SpiBus {
+    fn configure(&mut self, frequency_hz: u32, mode: EmbeddedMode) -> Result<(), Self::Error> {
+        let config = SpiConfig::default()
+            .with_frequency(Rate::from_hz(frequency_hz))
+            .with_mode(hal_spi_mode(mode));
+        self.0
+            .apply_config(&config)
+            .map_err(|_| esp_hal::spi::Error::Unsupported)
+    }
+
+    fn write_bits(&mut self, value: u8, bits: u8) -> Result<(), Self::Error> {
+        use esp_hal::spi::master::{Address, Command, DataMode};
+
+        let mode = DataMode::SingleTwoDataLines;
+        let shift = 8u8.saturating_sub(bits);
+        let mask = u8::MAX.checked_shr(u32::from(shift)).unwrap_or(0);
+        // The command phase sends its value from bit 7 down to bit 0, then
+        // bits 15 to 8 (ESP-IDF `spi_ll_set_command`, MSB first), so a
+        // command of up to eight bits starts at bit 7.
+        let aligned = u16::from(value & mask) << shift;
+        let command = match bits {
+            1 => Command::_1Bit(aligned, mode),
+            2 => Command::_2Bit(aligned, mode),
+            3 => Command::_3Bit(aligned, mode),
+            4 => Command::_4Bit(aligned, mode),
+            5 => Command::_5Bit(aligned, mode),
+            6 => Command::_6Bit(aligned, mode),
+            7 => Command::_7Bit(aligned, mode),
+            8 => Command::_8Bit(aligned, mode),
+            _ => return Err(esp_hal::spi::Error::Unsupported),
+        };
+        self.0
+            .half_duplex_write(mode, command, Address::None, 0, &[])?;
+        // A half-duplex transfer leaves the command phase enabled, and the
+        // full-duplex transfers that follow do not clear it; an empty
+        // transfer without a command, which clocks nothing, does.
+        self.0
+            .half_duplex_write(mode, Command::None, Address::None, 0, &[])
+    }
+}
+
+/// Converts an `embedded-hal` SPI mode to esp-hal's.
+fn hal_spi_mode(mode: EmbeddedMode) -> HalSpiMode {
+    match (mode.polarity, mode.phase) {
+        (Polarity::IdleLow, Phase::CaptureOnFirstTransition) => HalSpiMode::_0,
+        (Polarity::IdleLow, Phase::CaptureOnSecondTransition) => HalSpiMode::_1,
+        (Polarity::IdleHigh, Phase::CaptureOnFirstTransition) => HalSpiMode::_2,
+        (Polarity::IdleHigh, Phase::CaptureOnSecondTransition) => HalSpiMode::_3,
+    }
+}
+
 /// Standards-compliant single-owner SPI device.
-pub type SpiDevice = ExclusiveDevice<SpiBus, DigitalOutput, Delay>;
+///
+/// It is `embedded-hal-bus`'s exclusive device, and also lets an
+/// implementation change its clock and clock bytes with its chip select
+/// released ([`SpiDeviceControl`]), which an SD card in SPI mode needs.
+pub struct SpiDevice {
+    device: ExclusiveDevice<SpiBus, DigitalOutput, Delay>,
+    config: SpiConfig,
+    frequency_hz: u32,
+}
+
+impl embedded_hal::spi::ErrorType for SpiDevice {
+    type Error = embedded_hal_bus::spi::DeviceError<esp_hal::spi::Error, core::convert::Infallible>;
+}
+
+impl embedded_hal::spi::SpiDevice for SpiDevice {
+    fn transaction(
+        &mut self,
+        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
+    ) -> Result<(), Self::Error> {
+        self.device.transaction(operations)
+    }
+}
+
+impl SpiDeviceControl for SpiDevice {
+    fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+
+    fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error> {
+        let config = self.config.with_frequency(Rate::from_hz(frequency_hz));
+        self.device
+            .bus_mut()
+            .apply_config(&config)
+            .map_err(|_| embedded_hal_bus::spi::DeviceError::Spi(esp_hal::spi::Error::Unsupported))?;
+        self.config = config;
+        self.frequency_hz = frequency_hz;
+        Ok(())
+    }
+
+    fn write_deselected(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        // The exclusive device holds its chip select high between
+        // transactions, so writing to the bus directly clocks deselected.
+        let bus = self.device.bus_mut();
+        embedded_hal::spi::SpiBus::write(bus, bytes)
+            .and_then(|()| embedded_hal::spi::SpiBus::flush(bus))
+            .map_err(embedded_hal_bus::spi::DeviceError::Spi)
+    }
+}
+
+/// Static owner of one SPI controller whose clock and data lines several
+/// statically selected devices share.
+///
+/// A transaction takes the bus out of a short critical section and returns
+/// it afterwards, so a long display transfer never holds interrupts off.
+/// Board peripherals run on one cooperative executor and their transfers are
+/// blocking, so two transactions never overlap there; a device that finds the
+/// bus taken reports [`SharedSpiError::Busy`] instead of waiting.
+pub struct SpiBusManager {
+    state: CriticalSectionMutex<RefCell<SharedSpiState>>,
+}
+
+struct SharedSpiState {
+    bus: Option<SpiBus>,
+    /// The device whose configuration the controller holds; 0 for none.
+    configured: u32,
+    next_device: u32,
+}
+
+impl SpiBusManager {
+    /// Wraps one exclusively owned bus for chip-select-level sharing.
+    #[must_use]
+    pub const fn new(bus: SpiBus) -> Self {
+        Self {
+            state: CriticalSectionMutex::new(RefCell::new(SharedSpiState {
+                bus: Some(bus),
+                configured: 0,
+                next_device: 1,
+            })),
+        }
+    }
+
+    fn register(&self) -> u32 {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            let id = state.next_device;
+            state.next_device = state.next_device.wrapping_add(1).max(1);
+            id
+        })
+    }
+
+    /// Takes the bus for `device`, telling whether another device's
+    /// configuration is applied.
+    fn take(&self, device: u32) -> Option<(SpiBus, bool)> {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            let bus = state.bus.take()?;
+            let reconfigure = state.configured != device;
+            Some((bus, reconfigure))
+        })
+    }
+
+    fn restore(&self, bus: SpiBus, configured: u32) {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            state.bus = Some(bus);
+            state.configured = configured;
+        });
+    }
+
+    fn forget_configuration(&self, device: u32) {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            if state.configured == device {
+                state.configured = 0;
+            }
+        });
+    }
+}
+
+/// Statically allocates one shared SPI bus owner at the Board call site.
+#[macro_export]
+macro_rules! __barracuda_esp_spi_bus_manager {
+    ($bus:expr) => {{
+        static MANAGER: $crate::hal::__StaticCell<$crate::hal::SpiBusManager> =
+            $crate::hal::__StaticCell::new();
+        MANAGER.init($crate::hal::SpiBusManager::new($bus))
+    }};
+}
+
+#[doc(hidden)]
+pub use __barracuda_esp_spi_bus_manager as spi_bus_manager;
+
+/// Failure of one device's transaction on a shared SPI bus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedSpiError {
+    /// Another device's transaction holds the bus.
+    Busy,
+    /// The controller rejected this device's clock.
+    Configuration,
+    /// The transfer failed.
+    Bus(esp_hal::spi::Error),
+}
+
+impl core::fmt::Display for SharedSpiError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Busy => formatter.write_str("the shared SPI bus is in use"),
+            Self::Configuration => formatter.write_str("invalid SPI device clock"),
+            Self::Bus(_) => formatter.write_str("SPI transfer failed"),
+        }
+    }
+}
+
+impl core::error::Error for SharedSpiError {}
+
+impl embedded_hal::spi::Error for SharedSpiError {
+    fn kind(&self) -> embedded_hal::spi::ErrorKind {
+        match self {
+            Self::Bus(error) => embedded_hal::spi::Error::kind(error),
+            Self::Busy | Self::Configuration => embedded_hal::spi::ErrorKind::Other,
+        }
+    }
+}
+
+/// One chip-selected device on a shared SPI controller, at its own clock.
+pub struct SharedSpiDevice {
+    manager: &'static SpiBusManager,
+    chip_select: DigitalOutput,
+    config: SpiConfig,
+    frequency_hz: u32,
+    id: u32,
+}
+
+/// Constructs one device on a shared SPI controller.
+#[must_use]
+pub fn shared_spi_device(
+    manager: &'static SpiBusManager,
+    chip_select: impl OutputPin + 'static,
+    frequency_hz: u32,
+) -> SharedSpiDevice {
+    SharedSpiDevice {
+        manager,
+        chip_select: digital_output(chip_select, DigitalLevel::High),
+        config: SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
+        frequency_hz,
+        id: manager.register(),
+    }
+}
+
+impl SharedSpiDevice {
+    /// Runs `transfer` with the bus configured for this device, selecting
+    /// the device around it when `select` is set.
+    fn with_bus(
+        &mut self,
+        select: bool,
+        transfer: impl FnOnce(&mut SpiBus) -> Result<(), esp_hal::spi::Error>,
+    ) -> Result<(), SharedSpiError> {
+        let (mut bus, reconfigure) = self.manager.take(self.id).ok_or(SharedSpiError::Busy)?;
+        if reconfigure && bus.apply_config(&self.config).is_err() {
+            self.manager.restore(bus, 0);
+            return Err(SharedSpiError::Configuration);
+        }
+        if select {
+            self.chip_select.set_low();
+        }
+        let result = transfer(&mut bus).and_then(|()| embedded_hal::spi::SpiBus::flush(&mut bus));
+        if select {
+            self.chip_select.set_high();
+        }
+        self.manager.restore(bus, self.id);
+        result.map_err(SharedSpiError::Bus)
+    }
+}
+
+impl embedded_hal::spi::ErrorType for SharedSpiDevice {
+    type Error = SharedSpiError;
+}
+
+impl embedded_hal::spi::SpiDevice for SharedSpiDevice {
+    fn transaction(
+        &mut self,
+        operations: &mut [embedded_hal::spi::Operation<'_, u8>],
+    ) -> Result<(), Self::Error> {
+        self.with_bus(true, |bus| {
+            for operation in operations {
+                match operation {
+                    embedded_hal::spi::Operation::Read(words) => {
+                        embedded_hal::spi::SpiBus::read(bus, words)?;
+                    }
+                    embedded_hal::spi::Operation::Write(words) => {
+                        embedded_hal::spi::SpiBus::write(bus, words)?;
+                    }
+                    embedded_hal::spi::Operation::Transfer(read, write) => {
+                        embedded_hal::spi::SpiBus::transfer(bus, read, write)?;
+                    }
+                    embedded_hal::spi::Operation::TransferInPlace(words) => {
+                        embedded_hal::spi::SpiBus::transfer_in_place(bus, words)?;
+                    }
+                    embedded_hal::spi::Operation::DelayNs(nanoseconds) => {
+                        embedded_hal::spi::SpiBus::flush(bus)?;
+                        embedded_hal::delay::DelayNs::delay_ns(&mut Delay::new(), *nanoseconds);
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+}
+
+impl SpiDeviceControl for SharedSpiDevice {
+    fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+
+    fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error> {
+        self.config = self.config.with_frequency(Rate::from_hz(frequency_hz));
+        self.frequency_hz = frequency_hz;
+        self.manager.forget_configuration(self.id);
+        Ok(())
+    }
+
+    fn write_deselected(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.with_bus(false, |bus| embedded_hal::spi::SpiBus::write(bus, bytes))
+    }
+}
+
+/// Calibration the Board's analog inputs apply: the chip's eFuse
+/// line fit, which every ESP chip this file serves has.
+type AnalogCalibration<ADC> = AdcCalLine<ADC>;
+
+/// Static owner of one ADC controller whose channels several peripheral
+/// implementations sample. A conversion takes tens of microseconds, inside
+/// a critical section.
+pub struct AnalogConverter<ADC: 'static> {
+    adc: CriticalSectionMutex<RefCell<Adc<'static, ADC, Blocking>>>,
+}
+
+impl<ADC: 'static> AnalogConverter<ADC> {
+    /// Wraps one configured converter for channel-level sharing.
+    #[must_use]
+    pub const fn new(adc: Adc<'static, ADC, Blocking>) -> Self {
+        Self {
+            adc: CriticalSectionMutex::new(RefCell::new(adc)),
+        }
+    }
+}
+
+/// Starts the configuration of one ADC controller's Board channels.
+#[must_use]
+pub fn analog_config<ADC>() -> AdcConfig<ADC> {
+    AdcConfig::new()
+}
+
+/// Enables one Board analog input on its controller at 11 dB attenuation,
+/// the range (to about 3.1 V) that resistor dividers and button ladders on
+/// these Boards are built for.
+pub fn analog_channel<ADC, P>(
+    config: &mut AdcConfig<ADC>,
+    pin: P,
+) -> AdcPin<P, ADC, AnalogCalibration<ADC>>
+where
+    P: AdcChannel + AnalogPin,
+    AnalogCalibration<ADC>: AdcCalScheme<ADC>,
+{
+    config.enable_pin_with_cal(pin, Attenuation::_11dB)
+}
+
+/// Builds one shared ADC controller from its Board channels' configuration
+/// and allocates its owner statically at the Board call site.
+#[macro_export]
+macro_rules! __barracuda_esp_analog_converter {
+    ($adc:ident, $controller:expr, $config:expr) => {{
+        static CONVERTER: $crate::hal::__StaticCell<
+            $crate::hal::AnalogConverter<$crate::hal::__vendor::peripherals::$adc<'static>>,
+        > = $crate::hal::__StaticCell::new();
+        let converter: &'static $crate::hal::AnalogConverter<
+            $crate::hal::__vendor::peripherals::$adc<'static>,
+        > = CONVERTER.init($crate::hal::AnalogConverter::new(
+            $crate::hal::__vendor::analog::adc::Adc::new($controller, $config),
+        ));
+        converter
+    }};
+}
+
+#[doc(hidden)]
+pub use __barracuda_esp_analog_converter as analog_converter;
+
+/// One Board analog input, sampled in calibrated millivolts.
+pub struct AnalogInputChannel<ADC: 'static, P> {
+    converter: &'static AnalogConverter<ADC>,
+    pin: AdcPin<P, ADC, AnalogCalibration<ADC>>,
+}
+
+/// Hands one enabled channel of a shared converter to its implementation.
+#[must_use]
+pub fn analog_input<ADC, P>(
+    converter: &'static AnalogConverter<ADC>,
+    pin: AdcPin<P, ADC, AnalogCalibration<ADC>>,
+) -> AnalogInputChannel<ADC, P> {
+    AnalogInputChannel { converter, pin }
+}
+
+impl<ADC, P> AnalogErrorType for AnalogInputChannel<ADC, P> {
+    type Error = ExposedAnalogError;
+}
+
+impl<ADC, P> AnalogVoltageInput for AnalogInputChannel<ADC, P>
+where
+    ADC: AdcRegisterAccess + 'static,
+    P: AdcChannel,
+    AnalogCalibration<ADC>: AdcCalScheme<ADC>,
+{
+    fn read_millivolts(&mut self) -> Result<u32, Self::Error> {
+        let pin = &mut self.pin;
+        self.converter.adc.lock(|adc| {
+            let mut adc = adc.borrow_mut();
+            loop {
+                match adc.read_oneshot(pin) {
+                    Ok(millivolts) => return Ok(u32::from(millivolts)),
+                    Err(nb::Error::WouldBlock) => {}
+                    Err(nb::Error::Other(())) => return Err(ExposedAnalogError::Conversion),
+                }
+            }
+        })
+    }
+}
+/// Single-owner SPI device whose one data line carries writes and reads.
+pub type ThreeWireSpiDevice = ExclusiveDevice<ThreeWireSpiBus, DigitalOutput, Delay>;
+
+/// Blocking SPI bus with one bidirectional data line (three-wire SPI).
+///
+/// Writes drive the line as MOSI. Reads release it and sample the device's
+/// answer on the same line through the controller's half-duplex SIO mode, so
+/// a device such as a display controller can be identified by reading its ID
+/// registers. Full-duplex transfers cannot exist on one line and are rejected.
+pub struct ThreeWireSpiBus {
+    spi: SpiBus,
+    write_config: SpiConfig,
+    read_config: SpiConfig,
+}
+
+impl embedded_hal::spi::ErrorType for ThreeWireSpiBus {
+    type Error = esp_hal::spi::Error;
+}
+
+impl embedded_hal::spi::SpiBus for ThreeWireSpiBus {
+    fn read(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        if words.is_empty() {
+            return Ok(());
+        }
+        // Both clocks were validated when the device was constructed.
+        self.spi
+            .apply_config(&self.read_config)
+            .map_err(|_| esp_hal::spi::Error::Unsupported)?;
+        let result = self.spi.half_duplex_read(
+            esp_hal::spi::master::DataMode::Single,
+            esp_hal::spi::master::Command::None,
+            esp_hal::spi::master::Address::None,
+            0,
+            words,
+        );
+        self.spi
+            .apply_config(&self.write_config)
+            .map_err(|_| esp_hal::spi::Error::Unsupported)?;
+        result
+    }
+
+    fn write(&mut self, words: &[u8]) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::write(&mut self.spi, words)
+    }
+
+    fn transfer(&mut self, _read: &mut [u8], _write: &[u8]) -> Result<(), Self::Error> {
+        Err(esp_hal::spi::Error::Unsupported)
+    }
+
+    fn transfer_in_place(&mut self, _words: &mut [u8]) -> Result<(), Self::Error> {
+        Err(esp_hal::spi::Error::Unsupported)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        embedded_hal::spi::SpiBus::flush(&mut self.spi)
+    }
+}
 /// Blocking I2C controller passed to a peripheral implementation.
 pub type I2cBus = I2c<'static, Blocking>;
 /// Static owner of one I2C bus shared by peripheral implementations.
@@ -180,7 +702,7 @@ impl RuntimePwmTimer {
 /// Platform-owned LEDC controller, timer, and channel allocation.
 #[cfg(feature = "runtime-pwm")]
 pub struct RuntimePwmResource {
-    controller: esp_hal::peripherals::LEDC<'static>,
+    controller: PwmController,
     timer: Option<RuntimePwmTimer>,
     channel: Option<LedcChannelNumber>,
 }
@@ -407,12 +929,7 @@ impl RuntimePlatform for RuntimeAdapter {
         frequency_hz: u32,
         mode: EmbeddedMode,
     ) -> Result<Self::SpiBus, Self::SpiError> {
-        let mode = match (mode.polarity, mode.phase) {
-            (Polarity::IdleLow, Phase::CaptureOnFirstTransition) => HalSpiMode::_0,
-            (Polarity::IdleLow, Phase::CaptureOnSecondTransition) => HalSpiMode::_1,
-            (Polarity::IdleHigh, Phase::CaptureOnFirstTransition) => HalSpiMode::_2,
-            (Polarity::IdleHigh, Phase::CaptureOnSecondTransition) => HalSpiMode::_3,
-        };
+        let mode = hal_spi_mode(mode);
         let bus = Spi::new(
             controller,
             SpiConfig::default()
@@ -500,11 +1017,11 @@ impl RuntimePwmPlatform for RuntimeAdapter {
             .channel
             .take()
             .ok_or(ExposedPwmError::MissingResource)?;
-        let ledc = Ledc::new(resource.controller);
-        let mut configured_timer = ledc.timer::<LowSpeed>(timer.number);
+        let ledc = resource.controller;
+        let mut configured_timer = ledc.timer(timer.number);
         configure_ledc_timer(&mut configured_timer, frequency_hz)?;
         let configured_timer = timer.storage.init(configured_timer);
-        let mut channel = ledc.channel::<LowSpeed>(channel_number, pin);
+        let mut channel = ledc.channel(channel_number, pin);
         channel
             .configure(esp_hal::ledc::channel::config::Config {
                 timer: configured_timer,
@@ -875,7 +1392,7 @@ pub use __barracuda_esp32_runtime_gpio_number as runtime_gpio_number;
 #[must_use]
 #[cfg(feature = "runtime-pwm")]
 pub fn runtime_pwm_resource(
-    controller: esp_hal::peripherals::LEDC<'static>,
+    controller: PwmController,
     timers: &[RuntimePwmTimer],
     channels: &[LedcChannelNumber],
 ) -> RuntimePwmResource {
@@ -934,6 +1451,19 @@ pub fn digital_output(pin: impl OutputPin + 'static, initial: DigitalLevel) -> D
 #[must_use]
 pub fn digital_input(pin: impl InputPin + 'static) -> DigitalInput {
     Input::new(pin, HalInputConfig::default())
+}
+
+/// A pin a peripheral implementation switches between input and output.
+pub type ConfigurablePin = DynamicPin;
+
+/// Converts a selected raw pin token into a pin its implementation
+/// configures. Its output stays disabled until the implementation configures
+/// one.
+#[must_use]
+pub fn configurable_pin(pin: impl Pin + 'static) -> ConfigurablePin {
+    DynamicPin {
+        pin: Flex::new(pin),
+    }
 }
 
 /// Runtime-configurable ESP32 GPIO exposed through `embedded-hal`.
@@ -1032,7 +1562,7 @@ pub fn spi_device(
     )?
     .with_sck(sck)
     .with_mosi(mosi);
-    Ok(exclusive_spi_device(bus, chip_select))
+    Ok(exclusive_spi_device(bus, chip_select, frequency_hz))
 }
 
 /// Constructs one transmit-only SPI bus from Board-selected resources.
@@ -1042,12 +1572,13 @@ pub fn spi_bus(
     mosi: impl PeripheralOutput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<SpiBus, SpiConfigError> {
-    Ok(Spi::new(
+    let bus = Spi::new(
         spi,
         SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
     )?
     .with_sck(sck)
-    .with_mosi(mosi))
+    .with_mosi(mosi);
+    Ok(SpiBus(bus))
 }
 
 /// Constructs one data-only SPI waveform output from a Platform-owned controller.
@@ -1056,11 +1587,12 @@ pub fn spi_output(
     data: impl PeripheralOutput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<SpiBus, SpiConfigError> {
-    Ok(Spi::new(
+    let bus = Spi::new(
         spi,
         SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
     )?
-    .with_mosi(data))
+    .with_mosi(data);
+    Ok(SpiBus(bus))
 }
 
 /// Constructs one receive-only SPI bus from Board-selected resources.
@@ -1070,12 +1602,13 @@ pub fn spi_bus_rx_only(
     miso: impl PeripheralInput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<SpiBus, SpiConfigError> {
-    Ok(Spi::new(
+    let bus = Spi::new(
         spi,
         SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
     )?
     .with_sck(sck)
-    .with_miso(miso))
+    .with_miso(miso);
+    Ok(SpiBus(bus))
 }
 
 /// Constructs one full-duplex SPI bus from Board-selected resources.
@@ -1086,13 +1619,14 @@ pub fn spi_bus_full_duplex(
     miso: impl PeripheralInput<'static> + 'static,
     frequency_hz: u32,
 ) -> Result<SpiBus, SpiConfigError> {
-    Ok(Spi::new(
+    let bus = Spi::new(
         spi,
         SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
     )?
     .with_sck(sck)
     .with_mosi(mosi)
-    .with_miso(miso))
+    .with_miso(miso);
+    Ok(SpiBus(bus))
 }
 
 /// Constructs one receive-only SPI device from Board-selected resources.
@@ -1113,7 +1647,7 @@ pub fn spi_device_rx_only(
     )?
     .with_sck(sck)
     .with_miso(miso);
-    Ok(exclusive_spi_device(bus, chip_select))
+    Ok(exclusive_spi_device(bus, chip_select, frequency_hz))
 }
 
 /// Constructs one full-duplex SPI device from Board-selected resources.
@@ -1136,13 +1670,51 @@ pub fn spi_device_full_duplex(
     .with_sck(sck)
     .with_mosi(mosi)
     .with_miso(miso);
-    Ok(exclusive_spi_device(bus, chip_select))
+    Ok(exclusive_spi_device(bus, chip_select, frequency_hz))
 }
 
-fn exclusive_spi_device(bus: SpiBus, chip_select: impl OutputPin + 'static) -> SpiDevice {
+/// Constructs one three-wire SPI device whose `data` line carries both
+/// directions; reads run at `read_frequency_hz`.
+///
+/// # Errors
+///
+/// Returns [`SpiConfigError`] when either requested frequency is unsupported.
+pub fn spi_device_three_wire(
+    spi: impl SpiInstance + 'static,
+    sck: impl PeripheralOutput<'static> + 'static,
+    data: impl PeripheralInput<'static> + PeripheralOutput<'static> + 'static,
+    chip_select: impl OutputPin + 'static,
+    frequency_hz: u32,
+    read_frequency_hz: u32,
+) -> Result<ThreeWireSpiDevice, SpiConfigError> {
+    let write_config = SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz));
+    let read_config = SpiConfig::default().with_frequency(Rate::from_hz(read_frequency_hz));
+    let mut spi = Spi::new(spi, read_config)?.with_sck(sck).with_sio0(data);
+    spi.apply_config(&write_config)?;
     let chip_select = digital_output(chip_select, DigitalLevel::High);
+    let bus = ThreeWireSpiBus {
+        spi: SpiBus(spi),
+        write_config,
+        read_config,
+    };
     match ExclusiveDevice::new(bus, chip_select, Delay::new()) {
-        Ok(device) => device,
+        Ok(device) => Ok(device),
+        Err(never) => match never {},
+    }
+}
+
+fn exclusive_spi_device(
+    bus: Spi<'static, Blocking>,
+    chip_select: impl OutputPin + 'static,
+    frequency_hz: u32,
+) -> SpiDevice {
+    let chip_select = digital_output(chip_select, DigitalLevel::High);
+    match ExclusiveDevice::new(SpiBus(bus), chip_select, Delay::new()) {
+        Ok(device) => SpiDevice {
+            device,
+            config: SpiConfig::default().with_frequency(Rate::from_hz(frequency_hz)),
+            frequency_hz,
+        },
         Err(never) => match never {},
     }
 }
@@ -1202,3 +1774,493 @@ macro_rules! __barracuda_esp32_controller_binding_type {
 pub use __barracuda_esp32_controller_binding_type as controller_binding_type;
 #[doc(hidden)]
 pub use __barracuda_esp32_pin_binding_type as pin_binding_type;
+
+/// Counter clock of the remote-control transceiver: the 80 MHz default
+/// source on every ESP chip this file serves (the ESP32 accepts no other).
+const RMT_CLOCK_HZ: u32 = 80_000_000;
+
+/// Symbols one ESP32 receive records: its channel memory, 64 symbols, which
+/// the chip cannot refill during a reception. The other chips refill it.
+const RMT_RX_BLOCK_SYMBOLS: usize = 64;
+
+/// How often an awaited transfer checks the hardware. Infrared symbols last
+/// half a millisecond or more, so half a channel's memory takes over 10 ms
+/// to send or fill, and a check every 500 µs refills or drains it in time.
+const RMT_POLL_MICROS: u64 = 500;
+
+/// The Board's remote-control transceiver, whose channels its pulse-train
+/// bindings take one by one.
+///
+/// It runs in the vendor's blocking mode: the channels then move freely
+/// between tasks, and an awaited transfer polls the hardware between short
+/// timer waits instead of binding the transceiver's interrupt.
+pub type RmtController = esp_hal::rmt::Rmt<'static, Blocking>;
+
+/// Failure to build or use a transceiver channel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RmtError {
+    /// The transceiver rejected a clock, channel, or memory configuration.
+    Config(esp_hal::rmt::ConfigError),
+    /// A transmission or reception failed.
+    Transfer(esp_hal::rmt::Error),
+    /// The tick frequency is not the 80 MHz clock divided by 1 to 255.
+    Resolution,
+    /// The carrier cannot be built from the 80 MHz clock.
+    Carrier,
+}
+
+impl core::fmt::Display for RmtError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Config(error) => write!(formatter, "invalid RMT configuration: {error}"),
+            Self::Transfer(error) => write!(formatter, "RMT transfer failed: {error}"),
+            Self::Resolution => formatter.write_str("unreachable RMT tick frequency"),
+            Self::Carrier => formatter.write_str("unreachable RMT carrier"),
+        }
+    }
+}
+
+impl core::error::Error for RmtError {}
+
+/// Builds the transceiver once for every pulse-train binding of the Board.
+///
+/// # Errors
+///
+/// Returns [`RmtError::Config`] when the clock cannot be set.
+pub fn rmt_controller(
+    rmt: esp_hal::peripherals::RMT<'static>,
+) -> Result<RmtController, RmtError> {
+    esp_hal::rmt::Rmt::new(rmt, Rate::from_hz(RMT_CLOCK_HZ)).map_err(RmtError::Config)
+}
+
+/// Takes one channel of a transceiver built by [`rmt_controller`].
+#[macro_export]
+macro_rules! __barracuda_esp_rmt_channel {
+    ($rmt:ident, 0) => {
+        $rmt.channel0
+    };
+    ($rmt:ident, 1) => {
+        $rmt.channel1
+    };
+    ($rmt:ident, 2) => {
+        $rmt.channel2
+    };
+    ($rmt:ident, 3) => {
+        $rmt.channel3
+    };
+    ($rmt:ident, 4) => {
+        $rmt.channel4
+    };
+    ($rmt:ident, 5) => {
+        $rmt.channel5
+    };
+    ($rmt:ident, 6) => {
+        $rmt.channel6
+    };
+    ($rmt:ident, 7) => {
+        $rmt.channel7
+    };
+}
+
+#[doc(hidden)]
+pub use __barracuda_esp_rmt_channel as rmt_channel;
+
+/// Channel divider of the 80 MHz clock for `tick_hz`.
+fn rmt_divider(tick_hz: u32) -> Result<u8, RmtError> {
+    if tick_hz == 0 || !RMT_CLOCK_HZ.is_multiple_of(tick_hz) {
+        return Err(RmtError::Resolution);
+    }
+    u8::try_from(RMT_CLOCK_HZ / tick_hz)
+        .ok()
+        .filter(|divider| *divider != 0)
+        .ok_or(RmtError::Resolution)
+}
+
+const fn rmt_level(high: bool) -> Level {
+    if high {
+        Level::High
+    } else {
+        Level::Low
+    }
+}
+
+/// One transceiver channel that transmits pulse trains on its pin.
+///
+/// A blocking transfer keeps the CPU while the chain is clocked out, so the
+/// channel's memory is refilled without delay, as LED chains need; an awaited
+/// transfer polls, as infrared needs.
+pub struct PulseOutputChannel {
+    channel: esp_hal::rmt::Channel<'static, Blocking, esp_hal::rmt::Tx>,
+    config: esp_hal::rmt::TxChannelConfig,
+}
+
+/// Configures one transmit channel at 1 MHz ticks, resting low, and routes
+/// it to its pin.
+///
+/// # Errors
+///
+/// Returns [`RmtError::Config`] when the channel's memory is taken.
+pub fn rmt_output(
+    channel: impl esp_hal::rmt::TxChannelCreator<'static, Blocking>,
+    pin: impl PeripheralOutput<'static>,
+) -> Result<PulseOutputChannel, RmtError> {
+    let config = esp_hal::rmt::TxChannelConfig::default()
+        .with_clk_divider(rmt_divider(1_000_000)?)
+        .with_idle_output(true)
+        .with_idle_output_level(Level::Low);
+    let channel = channel
+        .configure_tx(&config)
+        .map_err(RmtError::Config)?
+        .with_pin(pin);
+    Ok(PulseOutputChannel { channel, config })
+}
+
+impl barracuda_board_hal::PulseOutput for PulseOutputChannel {
+    type Symbol = esp_hal::rmt::PulseCode;
+    type Error = RmtError;
+
+    fn symbol(
+        first: barracuda_board_hal::PulseLevel,
+        second: barracuda_board_hal::PulseLevel,
+    ) -> Self::Symbol {
+        esp_hal::rmt::PulseCode::new_clamped(
+            rmt_level(first.high),
+            first.ticks,
+            rmt_level(second.high),
+            second.ticks,
+        )
+    }
+
+    fn end_marker() -> Self::Symbol {
+        esp_hal::rmt::PulseCode::end_marker()
+    }
+
+    fn configure(
+        &mut self,
+        config: barracuda_board_hal::PulseOutputConfig,
+    ) -> Result<(), Self::Error> {
+        let (carrier_high, carrier_low) = match config.carrier {
+            Some(carrier) => {
+                if carrier.frequency_hz == 0 || !(1..=99).contains(&carrier.duty_percent) {
+                    return Err(RmtError::Carrier);
+                }
+                let period = RMT_CLOCK_HZ / carrier.frequency_hz;
+                let high = period * u32::from(carrier.duty_percent) / 100;
+                let low = period.saturating_sub(high);
+                (
+                    u16::try_from(high)
+                        .ok()
+                        .filter(|ticks| *ticks != 0)
+                        .ok_or(RmtError::Carrier)?,
+                    u16::try_from(low)
+                        .ok()
+                        .filter(|ticks| *ticks != 0)
+                        .ok_or(RmtError::Carrier)?,
+                )
+            }
+            None => (1, 1),
+        };
+        let updated = self
+            .config
+            .with_clk_divider(rmt_divider(config.tick_hz)?)
+            .with_idle_output_level(rmt_level(config.idle_high))
+            .with_carrier_modulation(config.carrier.is_some())
+            .with_carrier_high(carrier_high)
+            .with_carrier_low(carrier_low)
+            // The carrier rides on the level opposite the idle one.
+            .with_carrier_level(rmt_level(!config.idle_high));
+        self.channel
+            .apply_config(&updated)
+            .map_err(RmtError::Config)?;
+        self.config = updated;
+        Ok(())
+    }
+
+    fn transmit_blocking(&mut self, symbols: &[Self::Symbol]) -> Result<(), Self::Error> {
+        // A reborrowed channel goes back to `self` however the transfer ends.
+        self.channel
+            .reborrow()
+            .transmit(symbols)
+            .map_err(|(error, _)| RmtError::Transfer(error))?
+            .wait()
+            .map(drop)
+            .map_err(|(error, _)| RmtError::Transfer(error))
+    }
+
+    async fn transmit(&mut self, symbols: &[Self::Symbol]) -> Result<(), Self::Error> {
+        // Dropping the transfer stops the channel.
+        let mut transfer = self
+            .channel
+            .reborrow()
+            .transmit(symbols)
+            .map_err(|(error, _)| RmtError::Transfer(error))?;
+        while !transfer.poll() {
+            embassy_time::Timer::after_micros(RMT_POLL_MICROS).await;
+        }
+        transfer
+            .wait()
+            .map(drop)
+            .map_err(|(error, _)| RmtError::Transfer(error))
+    }
+}
+
+/// One transceiver channel that records the pulse trains on its pin.
+pub struct PulseInputChannel {
+    channel: esp_hal::rmt::Channel<'static, Blocking, esp_hal::rmt::Rx>,
+    config: esp_hal::rmt::RxChannelConfig,
+}
+
+/// Configures one receive channel at 1 MHz ticks, ending a reception after
+/// 12 ms at one level, and routes it from its pin.
+///
+/// # Errors
+///
+/// Returns [`RmtError::Config`] when the channel's memory is taken.
+pub fn rmt_input(
+    channel: impl esp_hal::rmt::RxChannelCreator<'static, Blocking>,
+    pin: impl PeripheralInput<'static>,
+) -> Result<PulseInputChannel, RmtError> {
+    let config = esp_hal::rmt::RxChannelConfig::default()
+        .with_clk_divider(rmt_divider(1_000_000)?)
+        .with_idle_threshold(12_000);
+    let channel = channel
+        .configure_rx(&config)
+        .map_err(RmtError::Config)?
+        .with_pin(pin);
+    Ok(PulseInputChannel { channel, config })
+}
+
+impl barracuda_board_hal::PulseInput for PulseInputChannel {
+    type Symbol = esp_hal::rmt::PulseCode;
+    type Error = RmtError;
+
+    fn empty_symbol() -> Self::Symbol {
+        esp_hal::rmt::PulseCode::end_marker()
+    }
+
+    fn levels(
+        symbol: Self::Symbol,
+    ) -> (
+        barracuda_board_hal::PulseLevel,
+        barracuda_board_hal::PulseLevel,
+    ) {
+        (
+            barracuda_board_hal::PulseLevel::new(symbol.level1() == Level::High, symbol.length1()),
+            barracuda_board_hal::PulseLevel::new(symbol.level2() == Level::High, symbol.length2()),
+        )
+    }
+
+    fn capacity(&self) -> usize {
+        if esp_hal::rmt::HAS_RX_WRAP {
+            usize::MAX
+        } else {
+            RMT_RX_BLOCK_SYMBOLS
+        }
+    }
+
+    fn configure(
+        &mut self,
+        config: barracuda_board_hal::PulseInputConfig,
+    ) -> Result<(), Self::Error> {
+        // The glitch filter counts cycles of the 80 MHz clock, at most 255.
+        let filter = u64::from(config.filter_ns) * u64::from(RMT_CLOCK_HZ) / 1_000_000_000;
+        let updated = self
+            .config
+            .with_clk_divider(rmt_divider(config.tick_hz)?)
+            .with_idle_threshold(config.idle_ticks)
+            .with_filter_threshold(u8::try_from(filter).unwrap_or(u8::MAX));
+        self.channel
+            .apply_config(&updated)
+            .map_err(RmtError::Config)?;
+        self.config = updated;
+        Ok(())
+    }
+
+    async fn receive(&mut self, symbols: &mut [Self::Symbol]) -> Result<usize, Self::Error> {
+        let limit = symbols.len().min(barracuda_board_hal::PulseInput::capacity(self));
+        let symbols = symbols.get_mut(..limit).unwrap_or_default();
+        // Dropping the reception stops the channel; the reborrowed channel
+        // goes back to `self` either way.
+        let mut reception = self
+            .channel
+            .reborrow()
+            .receive(symbols)
+            .map_err(|(error, _)| RmtError::Transfer(error))?;
+        while !reception.poll() {
+            embassy_time::Timer::after_micros(RMT_POLL_MICROS).await;
+        }
+        reception
+            .wait()
+            .map(|(count, _)| count)
+            .map_err(|(error, _)| RmtError::Transfer(error))
+    }
+}
+
+/// The Board's LEDC controller, enabled once, which its PWM outputs and the
+/// runtime PWM pool share; each takes its own timers and channels.
+///
+/// The vendor driver keeps the enabled controller in static storage at the
+/// Board call site; this handle only reaches its timers and channels, which
+/// address the controller's registers by number.
+#[cfg(feature = "runtime-pwm")]
+#[derive(Clone, Copy)]
+pub struct PwmController {
+    _enabled: (),
+}
+
+#[cfg(feature = "runtime-pwm")]
+impl PwmController {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn __enabled(_controller: &'static Ledc<'static>) -> Self {
+        Self { _enabled: () }
+    }
+
+    fn timer(self, number: LedcTimerNumber) -> Timer<'static, LowSpeed> {
+        Timer::new(esp_hal::peripherals::LEDC::regs(), number)
+    }
+
+    fn channel(
+        self,
+        number: LedcChannelNumber,
+        pin: impl PeripheralOutput<'static>,
+    ) -> Channel<'static, LowSpeed> {
+        Channel::new(number, pin)
+    }
+}
+
+/// Builds the LEDC controller once, in static storage at the Board call
+/// site, with its low-speed timers clocked from APB.
+#[macro_export]
+#[cfg(feature = "runtime-pwm")]
+macro_rules! __barracuda_esp_pwm_controller {
+    ($ledc:expr) => {{
+        static CONTROLLER: $crate::hal::__StaticCell<
+            $crate::hal::__vendor::ledc::Ledc<'static>,
+        > = $crate::hal::__StaticCell::new();
+        let mut controller = $crate::hal::__vendor::ledc::Ledc::new($ledc);
+        controller.set_global_slow_clock($crate::hal::__vendor::ledc::LSGlobalClkSource::APBClk);
+        $crate::hal::PwmController::__enabled(CONTROLLER.init(controller))
+    }};
+}
+
+#[doc(hidden)]
+#[cfg(feature = "runtime-pwm")]
+pub use __barracuda_esp_pwm_controller as pwm_controller;
+
+/// Duty resolution of a PWM output: ten bits reach about 76 Hz to 78 kHz
+/// from an 80 MHz clock, the whole audible range of a buzzer.
+#[cfg(feature = "runtime-pwm")]
+const PWM_OUTPUT_DUTY: LedcDuty = LedcDuty::Duty10Bit;
+#[cfg(feature = "runtime-pwm")]
+const PWM_OUTPUT_DUTY_STEPS: u64 = 1 << 10;
+/// Largest LEDC clock divisor, eight fractional bits included.
+#[cfg(feature = "runtime-pwm")]
+const PWM_OUTPUT_MAX_DIVISOR: u64 = 0x3_ffff;
+#[cfg(feature = "runtime-pwm")]
+const PWM_OUTPUT_INITIAL_HZ: u32 = 1_000;
+
+/// One LEDC timer and channel driving one pin at a retunable frequency.
+///
+/// The channel keeps the timer it was configured with in static storage;
+/// retuning reprograms the same hardware timer through a second handle with
+/// the same duty resolution, so the channel's duty stays a share of the
+/// period.
+#[cfg(feature = "runtime-pwm")]
+pub struct PwmOutput {
+    channel: Channel<'static, LowSpeed>,
+    retune: Timer<'static, LowSpeed>,
+    source_hz: u32,
+}
+
+/// Configures one LEDC timer at 1 kHz and its channel, silent, on `pin`.
+///
+/// # Errors
+///
+/// Returns [`ExposedPwmError`] when the timer or channel rejects its
+/// configuration.
+#[cfg(feature = "runtime-pwm")]
+pub fn pwm_output(
+    controller: PwmController,
+    timer: RuntimePwmTimer,
+    channel: LedcChannelNumber,
+    pin: impl PeripheralOutput<'static>,
+) -> Result<PwmOutput, ExposedPwmError> {
+    let config = LedcTimerConfig {
+        duty: PWM_OUTPUT_DUTY,
+        clock_source: LSClockSource::APBClk,
+        frequency: Rate::from_hz(PWM_OUTPUT_INITIAL_HZ),
+    };
+    let mut configured = controller.timer(timer.number);
+    configured
+        .configure(config)
+        .map_err(ExposedPwmError::Timer)?;
+    let source_hz = configured.freq().map_or(0, |rate| rate.as_hz());
+    let configured: &'static Timer<'static, LowSpeed> = timer.storage.init(configured);
+    let mut output = controller.channel(channel, pin);
+    output
+        .configure(esp_hal::ledc::channel::config::Config {
+            timer: configured,
+            duty_pct: 0,
+            drive_mode: DriveMode::PushPull,
+        })
+        .map_err(ExposedPwmError::Channel)?;
+    Ok(PwmOutput {
+        channel: output,
+        retune: controller.timer(timer.number),
+        source_hz,
+    })
+}
+
+// SAFETY: a `PwmOutput` is the only owner of its LEDC timer and channel. The
+// references inside the vendor handles point at the LEDC register block and
+// at the timer descriptor in static storage; neither is tied to the task or
+// core that built them, and only this owner touches its timer's and
+// channel's registers.
+#[allow(unsafe_code)]
+#[cfg(feature = "runtime-pwm")]
+unsafe impl Send for PwmOutput {}
+
+#[cfg(feature = "runtime-pwm")]
+impl embedded_hal::pwm::ErrorType for PwmOutput {
+    type Error = LedcChannelError;
+}
+
+#[cfg(feature = "runtime-pwm")]
+impl embedded_hal::pwm::SetDutyCycle for PwmOutput {
+    fn max_duty_cycle(&self) -> u16 {
+        self.channel.max_duty_cycle()
+    }
+
+    fn set_duty_cycle(&mut self, duty: u16) -> Result<(), Self::Error> {
+        self.channel.set_duty_cycle(duty)
+    }
+}
+
+#[cfg(feature = "runtime-pwm")]
+impl barracuda_board_hal::PwmFrequencyControl for PwmOutput {
+    fn frequency_range(&self) -> (u32, u32) {
+        // The timer divides its clock by 1 to 1024 (with eight fractional
+        // bits) and counts `PWM_OUTPUT_DUTY_STEPS` per period.
+        let source = u64::from(self.source_hz);
+        let lowest = (source << 8).div_ceil(PWM_OUTPUT_MAX_DIVISOR * PWM_OUTPUT_DUTY_STEPS);
+        let highest = source / PWM_OUTPUT_DUTY_STEPS;
+        (
+            u32::try_from(lowest).unwrap_or(u32::MAX),
+            u32::try_from(highest).unwrap_or(u32::MAX),
+        )
+    }
+
+    fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error> {
+        if frequency_hz == 0 {
+            return Err(LedcChannelError::Timer);
+        }
+        self.retune
+            .configure(LedcTimerConfig {
+                duty: PWM_OUTPUT_DUTY,
+                clock_source: LSClockSource::APBClk,
+                frequency: Rate::from_hz(frequency_hz),
+            })
+            .map_err(|_| LedcChannelError::Timer)
+    }
+}

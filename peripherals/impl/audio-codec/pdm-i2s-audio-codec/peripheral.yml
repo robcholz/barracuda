@@ -1,0 +1,41 @@
+id: pdm-i2s-audio-codec
+api-version: 1
+peripheral: audio-codec
+implementation:
+  package: barracuda-pdm-i2s-audio-codec
+  crate: barracuda_pdm_i2s_audio_codec
+  factory: "::{{crate}}::PdmI2sAudioCodecImplementation<{{binding.stream.type}}, {{binding.amplifier-enable.type}}, {{binding.pmic.type}}>"
+  bindings-expression: "::{{crate}}::PdmI2sAudioBindings::new({{binding.stream.value}}, {{binding.amplifier-enable.value}}, {{binding.pmic.value}})"
+  config-expression: "::{{crate}}::PdmI2sAudioConfig::new({{parameter.pmic-power}})"
+bindings:
+  # A PDM microphone, an I2S amplifier that needs no register setup (such as
+  # the NS4168), or both on one controller.
+  stream:
+    kind: pdm-i2s-stream
+  # The amplifier's enable line, when a GPIO switches it.
+  amplifier-enable:
+    kind: digital-output
+    required: false
+    initial: low
+  # The bus of the PMIC that powers the amplifier or the microphone, when
+  # `pmic-power` names one. The display may use the same PMIC; this
+  # implementation touches only the audio output.
+  pmic:
+    kind: i2c-device
+    required: false
+parameters:
+  # Which PMIC output powers the audio parts:
+  # - none: nothing;
+  # - core2-speaker: the Core2 and Tough NS4168 enable, AXP192 GPIO2 or, on
+  #   the Core2 v1.1, AXP2101 ALDO3 at 3.3 V (M5Unified
+  #   `_speaker_enabled_cb_core2`);
+  # - stickc-microphone: the StickC and StickC Plus SPM1423 supply, AXP192
+  #   LDOio0 at 2.8 V (M5Unified `_microphone_enabled_cb_stickc`).
+  pmic-power:
+    type: enum
+    values: [none, core2-speaker, stickc-microphone]
+    rust-values:
+      none: "::barracuda_pdm_i2s_audio_codec::PmicPower::None"
+      core2-speaker: "::barracuda_pdm_i2s_audio_codec::PmicPower::Core2Speaker"
+      stickc-microphone: "::barracuda_pdm_i2s_audio_codec::PmicPower::StickCMicrophone"
+    default: none

@@ -57,7 +57,7 @@ exposed-io:
     expansion-2: { pin: GPIO4 }
 ```
 
-每个可选的外设实现都拥有 `peripherals/impl/<peripheral>/<implementation-id>/peripheral.yml`，它声明该实现的绑定、参数、外设 API 和静态构造模板。`cargo board sync` 按约定发现各个实现。`board.yml` 仍然只是硬件数据，不包含 Cargo 包、crate 路径、Rust 类型或平台 feature 注册。选择过程会先解析并渲染完整的组合，再写入选择状态，然后只启用具体的外设实现包。GPIO、SPI、I2C、摄像头采集和 I2S 流的构造来自独立选择的平台 HAL。生成的 `SelectedBoardHal` 是单态化的；不会添加运行时注册表或 trait 对象。
+每个可选的外设实现都拥有 `peripherals/impl/<peripheral>/<implementation-id>/peripheral.yml`，它声明该实现的绑定、参数、外设 API 和静态构造模板。`cargo board sync` 按约定发现各个实现。`board.yml` 仍然只是硬件数据，不包含 Cargo 包、crate 路径、Rust 类型或平台 feature 注册。选择过程会先解析并渲染完整的组合，再写入选择状态，然后只启用具体的外设实现包。GPIO、SPI、I2C、摄像头采集、并行输出和 I2S 流的构造来自独立选择的平台 HAL。生成的 `SelectedBoardHal` 是单态化的；不会添加运行时注册表或 trait 对象。
 
 开发板 HAL 不取代 `embedded-hal`。它为暴露的物理资源提供一个共享的运行时所有者。功能提供者以原子方式占用引脚，并在需要时占用一个内部选择的控制器，请所选平台配置它们的复用，然后把具体的 `embedded-hal` 或 `embedded-hal-async` 值返回给使用方。它的构造、GPIO 模式和模拟扩展涵盖了 embedded-hal 1.0 没有定义的操作。
 
@@ -65,11 +65,83 @@ exposed-io:
 
 物理布局仍然放在该开发板包中，但使用启动生态的原生格式：
 
-- ESP32：`partitions.csv`（包括 OTA 槽位和 ESP 标志）。
+- ESP32：`partitions.csv`（包括应用槽位和 ESP 标志；参见下文的 ESP Flash 布局）。
 - STM32：`memory.x` 以及链接器/Embassy Boot 符号。
 - macOS 和 Linux：`file-layout.yml`，用于其以文件为后端的 NOR 镜像。
 
 这些原生文件是唯一的物理事实来源。平台构建代码对照它们校验 `board.yml` 的绑定，并把所选区域投射到 `embedded-storage`/Embassy 接口上。不要添加通用的 Barracuda 分区表，也不要添加生成厂商分区表的转换器。
+
+`hardware` 记录产品数据手册写明的事实，按它的模组或芯片型号读取：规范的 `chip`、实际焊接的 `flash-size`（`4mb`、`8mb`、`16mb` 等），以及产品带 PSRAM 时的 `external-memory`。原生布局必须在 `flash-size` 之内结束。
+
+```yaml
+hardware:
+  chip: esp32s3
+  # ESP32-S3-PICO-1-N8R8.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: octal-spi   # quad-spi、octal-spi，或 hex（ESP32-P4）
+    size-bytes: 8388608
+```
+
+`ethernet` 记录接在芯片以太网 MAC 上的有线以太网 PHY：PHY 型号和它的管理地址、接到其低电平有效复位脚的引脚，以及 RMII 引脚和 50 MHz 参考时钟的来源（`external` 表示由 PHY 或板上晶振把时钟送入 `input`；`internal` 表示由芯片从 `output` 输出，开发板再把它环回到 `input`）。和 `hardware` 的其余部分一样，它是原理图上的事实，而不是选择：所选平台在它上面构建 IP 协议栈，无法驱动该接口的平台会在 `cargo board select` 时拒绝这块开发板。它用到的引脚归平台所有，不会同时作为外设绑定或可用引脚。
+
+```yaml
+hardware:
+  chip: esp32p4
+  ethernet:
+    phy:
+      model: ip101gri
+      address: 1
+      reset: GPIO51
+    rmii:
+      reference-clock:
+        source: external
+        input: GPIO50
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
+```
+
+`wifi-coprocessor` 记录芯片通过 SDIO 访问的另一颗芯片上的 Wi-Fi 射频，例如 ESP32-P4 开发板，因为这颗芯片自身没有射频。它记录协处理器的 `chip`、它出厂运行的 `firmware`（`esp-hosted-mcu`，即 Espressif 的 ESP-Hosted-MCU）、SD 主机的 `slot` 及其时钟、命令和四根数据引脚与总线时钟、接到协处理器低电平有效复位脚的引脚，以及开发板通过 I/O 扩展芯片切换协处理器电源时，该扩展芯片的型号、I2C 总线、地址和输出。和 `ethernet` 一样，它是原理图上的事实。没有 `wifi-coprocessor-sdio` 绑定的平台会在 `cargo board select` 时拒绝这块开发板，它的引脚也不会同时作为外设绑定或可用引脚。协处理器独占它的 SD 主机槽位：microSD 卡（`peripherals.io.sdmmc-device`）要声明另一个 `slot`，位于同一槽位的存储卡会被 `cargo board select` 拒绝。
+
+```yaml
+hardware:
+  chip: esp32p4
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO12
+      cmd: GPIO13
+      d0: GPIO11
+      d1: GPIO10
+      d2: GPIO9
+      d3: GPIO8
+      frequency-hz: 40000000
+    reset: GPIO15
+    power-enable:          # 可选
+      expander: pi4ioe5v6408
+      i2c: { peripheral: I2C0, scl: GPIO32, sda: GPIO31 }
+      address: 68          # 44h
+      pin: 0
+```
+
+开发板可以同时声明 `ethernet` 和 `wifi-coprocessor`，但仍然只有一个 IP 协议栈：网线连通时平台在以太网上运行它，否则在 Wi-Fi 站点上运行，并在切换时重新运行 DHCP。
+
+`power-hold` 记录电池电源锁存引脚：像 M5StickC Plus2 这样的开发板在用电池供电时，松开电源键后会自行关机，除非这个引脚保持高电平。平台入口在芯片启动后、构建任何外设之前就把它驱动为高电平，并一直保持。没有 `power-hold` 绑定的平台会拒绝这块开发板，这个引脚也不会同时作为外设绑定或可用引脚。
+
+```yaml
+hardware:
+  chip: esp32
+  power-hold: GPIO4
+```
 
 先选择一次具体的开发板，然后使用普通的构建命令：
 
@@ -96,12 +168,28 @@ cargo run
 
 `nucleo-u5a5zj-q` 在 ESP 系列之外演示了同样的纯 YAML 组合。它的配置通过共享的 `indicator-led` 实现构建 PC7 上高电平有效的绿色 LD1，并把 PC13 显式暴露为动态 GPIO 名称 `user-button`。STM32 平台 HAL 取代了它以前开发板专用的 HAL crate。名称 `user-button` 标识物理引脚 PC13；应用在运行时获取它的数字功能。
 
+## ESP Flash 布局
+
+ESP 开发板的 `partitions.csv` 把 `nvs`、`otadata` 和 `phy_init` 放在 `0x20000` 以下，应用槽位从 `0x20000` 开始，之后是 `kv_database`、`system` 和 `resources`。应用槽位的数量取决于 Flash 大小：
+
+| Flash | 应用槽位 | 每个槽位的大小 |
+| --- | --- | --- |
+| 4 MiB | `ota_0` | 2816 KiB（`0x2c0000`） |
+| 8 MiB | `ota_0` | 6912 KiB（`0x6c0000`） |
+| 16 MiB | `ota_0`、`ota_1` | 7552 KiB（`0x760000`），数据分区更大的开发板上更小 |
+
+在 4 MiB 和 8 MiB 的开发板上，`ota_0` 占用了第二个槽位原本的空间，因此固件可以大一倍。数据分区的大小和偏移不变。
+
+`cargo run`、发布镜像和浏览器安装页在每块开发板上都写入 `ota_0`。`otadata` 被擦除时（发布镜像会擦除它），ESP-IDF bootloader 启动 `ota_0`；只有一个槽位时，无论 `otadata` 中是什么，它都启动 `ota_0`。因此分区表中没有 `factory` 应用（否则 bootloader 会改为启动它），槽位从 `ota_0` 开始连续编号；平台构建会拒绝其他分区表。请选择固件能装进槽位的 [profile](/zh/boards/profiles)。
+
 ## M5Stack 开发板覆盖范围
 
 Barracuda 为基于工作区当前已实现的每个 ESP 芯片系列的 M5Stack 控制器提供可选择的开发板包：ESP32、ESP32-C3、ESP32-C6、ESP32-S3 和 ESP32-P4。运行 `cargo board select` 并搜索 `m5stack-` 前缀，即可看到完整的当前目录。
 
-M5Stack Tab5 选择 `m5stack-tab5`。它的开发板 HAL 使用纯 `esp-hal` 绑定实例化板载的 ES8388/ES7210 音频通路、BMI270 惯性测量、INA226 电源监测、RX8130CE 实时时钟、microSD 存储，以及区分硬件版本的触摸和 DSI 显示屏。音频、显示和触摸实现私下组合 PI4IOE5V6408 芯片驱动，用于各自的使能线或复位线；这个扩展芯片不是 System 可见的外设。该开发板还通过共享的运行时 I/O 所有者暴露 HY2.0-4P PORT.A、背面的 M5-Bus，以及可用的 SIT3088 RS-485 信号。`m5stack-tab5x` 身份保持独立，不得仅凭烧录工具报告的 ESP32-P4 芯片版本就替换它。
+M5Stack Tab5 选择 `m5stack-tab5`。它的开发板 HAL 使用纯 `esp-hal` 绑定实例化区分硬件版本的 DSI 显示屏和触摸、BMI270 惯性测量、INA226 电源监测和 RX8130CE 实时时钟。显示和触摸实现私下组合 PI4IOE5V6408 芯片驱动，用于各自的复位线；这个扩展芯片不是 System 可见的外设。它的 microSD 卡位于 SD 主机的槽位 0，Wi-Fi 协处理器位于槽位 1。`m5stack-tab5x` 身份保持独立，不得仅凭烧录工具报告的 ESP32-P4 芯片版本就替换它。
+
+M5Stack CoreP4X 选择 `m5stack-corep4x`；它的 480x480 ST7102 DSI 面板由 `corep4x-dsi-display` 组合，该实现私下驱动 M5IOE1 扩展芯片控制面板的电源、复位和背光，并驱动 M5PM1 打开 5 V 升压。ESP32-P4-Function-EV-Board 和 M5Stack Unit PoE-P4 在 `hardware.ethernet` 下声明各自的 IP101GRI 以太网 PHY。Tab5、Tab5X 和 ESP32-P4-Function-EV-Board 在 `hardware.wifi-coprocessor` 下声明各自的 ESP32-C6 Wi-Fi 协处理器。
 
 板上配备的 SC202CS 摄像头仍然不在开发板外设集合中，因为 `esp-hal` 目前没有暴露 ESP32-P4 的 MIPI-CSI/ISP 数据面。在有真正的裸机驱动能够拥有该硬件之前，不得宣传它。
 
-所有开发板包都确立开发板身份、正确的 Rust 编译目标和原生的 ESP 分区布局。显示矩阵目前通过 `mipi-dbi-display` 组合 ILI9342C、ST7789 和 GC9A01 SPI LCD，并通过 `gdeh0154d67-display` 组合 CoreInk 和 AirQ 中的 GDEH0154D67 电子纸面板。这两个系列都暴露 Barracuda 稳定的 `DisplayPeripheral` API。其他固定外设在其可复用实现完成并在该开发板的 YAML 中被选用之前，仍然缺席。ESP32-C5 和 ESP32-H2 产品被有意排除，直到 Barracuda 中有这些平台为止。
+所有开发板包都确立开发板身份、正确的 Rust 编译目标和原生的 ESP 分区布局。显示矩阵目前通过 `mipi-dbi-display` 组合 ILI9342C、ST7789 和 GC9A01 SPI LCD，通过 `mipi-dbi-parallel-display` 组合 ESP32-S3-BOX-2 八位并行总线上的 ST7789，并通过 `tab5-dsi-display` 和 `corep4x-dsi-display` 组合 Tab5 和 CoreP4X 的 ESP32-P4 MIPI DSI 面板。Core2、Core2 for AWS、Tough、StickC、StickC Plus、Station、CoreS3、CoreS3 SE 和 StackChan 通过 PMIC 而不是 GPIO 为其 ILI9342C、ST7789 或 ST7735S LCD 供电、复位和点亮背光；`m5stack-pmic-display` 驱动这些屏幕，并私有地组合 AXP192、AXP2101 和 AW9523B 芯片驱动，因此 PMIC 和扩展芯片都不是 System 可见的外设。M5Stack 的电子墨水屏包括 CoreInk 和 AirQ 中的 1.54 英寸 GDEH0154D67 或 GDEW0154M09（`epaper-1in54-display`，启动时识别屏幕型号），由 IT8951E 驱动的 M5Paper（`it8951-display`），PaperS3 和 PaperDIY 中直接驱动的 ED047TC1（`ed047tc1-display`、`paper-diy-display`，与 BOX-2 使用同一种 `parallel-output` 绑定），以及 Paper Mono 和 PaperColor（`paper-mono-display`、`paper-color-display`）。ATOM Display 的 HDMI 输出（`m5hdmi-display`）在启动时加载 M5Stack 的 FPGA 设计，并驱动 FPGA 及其 LT8618SX 发送器。它们都暴露 Barracuda 稳定的 `DisplayPeripheral` API。其他固定外设在其可复用实现完成并在该开发板的 YAML 中被选用之前，仍然缺席。ESP32-C5 和 ESP32-H2 产品被有意排除，直到 Barracuda 中有这些平台为止。

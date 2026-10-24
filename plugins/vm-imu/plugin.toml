@@ -3,4 +3,4 @@ depends-on = ["vm"]
 description = "Registers the built-in IMU Lua package."
 
 [peripherals.inertial-measurement]
-device = { fill = "primary", optional = true }
+devices = "*"

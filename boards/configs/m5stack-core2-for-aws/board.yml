@@ -1,7 +1,154 @@
 name: m5stack-core2-for-aws
+profile: screen-connected
 hardware:
   chip: esp32
+  # ESP32-D0WDQ6-V3.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: quad-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5GFX/M5Unified: the internal bus (I2C_NUM_1) of the PMIC at 34h, an
+        # AXP192 on the original Core2 and an AXP2101 on Core2 v1.1. It runs at
+        # 100 kHz, M5Unified's `Power_Class` rate, because the ATECC608B on it
+        # wakes only on a 60 µs low pulse, which the zero byte that wakes it
+        # makes at 100 kHz and not at 400 kHz (Microchip; CryptoAuthLib
+        # `hal_i2c_wake` and ArduinoECCX08 `wakeup` slow the bus the same way).
+        peripheral: I2C1
+        scl: GPIO22
+        sda: GPIO21
+        frequency-hz: 100000
+    spi-device:
+      display-spi:
+        # M5GFX Core2: SPI3_HOST at 40 MHz. MISO (GPIO38) only serves the TF card.
+        peripheral: SPI3
+        sck: GPIO18
+        mosi: GPIO23
+        miso: GPIO38
+        chip-select: GPIO5
+        frequency-hz: 40000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5StackCore2, board_M5Tough): the
+        # microSD card shares the LCD's bus with its own chip select, GPIO4.
+        peripheral: SPI3
+        sck: GPIO18
+        mosi: GPIO23
+        miso: GPIO38
+        chip-select: GPIO4
+        frequency-hz: 20000000
+    pdm-i2s-stream:
+      audio:
+        # M5Unified `_begin_audio`: the SPM1423 PDM microphone (clock GPIO0,
+        # data GPIO34) and the NS4168 amplifier (BCK GPIO12, LRCK GPIO0,
+        # data GPIO2) share GPIO0, so one I2S controller serves them in
+        # turn. I2S0 is the ESP32's PDM receiver.
+        peripheral: I2S0
+        dma: DMA_I2S0
+        clk: GPIO0
+        din: GPIO34
+        bclk: GPIO12
+        dout: GPIO2
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
+    rmt-output:
+      led-bar-data:
+        # M5GO-Bottom for AWS: 10 SK6812 LEDs in one chain on GPIO25
+        # (docs.m5stack.com Core2 for AWS pin map, "SK6812*10"; M5Unified `_pin_table_other0` (RGBLED)).
+        # Clocked out of RMT channel 0, so the LED takes no SPI controller
+        # from the runtime SPI pool the exposed pins use.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO25
+  devices:
+    audio:
+      # Codec-less: the NS4168 is switched on through the PMIC, AXP192 GPIO2
+      # or AXP2101 ALDO3 (M5Unified `_speaker_enabled_cb_core2`).
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: audio, pmic: internal-i2c }
+      parameters:
+        pmic-power: core2-speaker
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    # The base's two five-LED side bars, one 10-LED chain, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: led-bar-data
+      parameters:
+        led-count: 10
+        color-order: grb
+    display:
+      # ILI9342C 320x240. LCD power, reset, and backlight are PMIC outputs; the
+      # implementation identifies which PMIC is fitted.
+      implementation: m5stack-pmic-display
+      bindings: { dc: GPIO15, i2c: internal-i2c, spi: display-spi }
+      parameters:
+        power-layout: core2
+        controller: ili9342c
+        width: 320
+        height: 240
+        invert-colors: true
+    touch:
+      # FT6336U at 38h on the internal bus (M5GFX Core2 `Touch_FT5x06`,
+      # interrupt GPIO39, unused: the implementation polls). Its span is
+      # 320x280: the area below the screen holds the three touch keys
+      # (M5GFX `y_max = 279` with an identity calibration). The display's
+      # PMIC power-up resets it with the panel (AXP192 GPIO4, AXP2101 ALDO2).
+      implementation: ft5x06-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        width: 320
+        height: 280
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # MPU6886 at 68h (M5Unified `IMU_Class::begin`).
+    inertial-measurement:
+      implementation: mpu6886-imu
+      bindings: { i2c: internal-i2c }
+    # The battery behind the AXP192 or AXP2101 the display also uses; on
+    # v1.1 an INA3221 at 40h senses its current (M5Unified
+    # `Power_Class::getBatteryCurrent`).
+    power-monitor:
+      implementation: axp192-axp2101-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters: { ina3221-battery-current: true }
+    # The power key on the PMIC's PWRON pin, M5Unified `BtnPWR`: the left
+    # power button, as on the Core2.
+    power-button:
+      implementation: axp192-axp2101-buttons
+      bindings: { i2c: internal-i2c }
+    # ATECC608B-TNGTLS (Trust&GO) at 35h on the internal bus
+    # (docs.m5stack.com Core2 for AWS: "ATECC608B-TNGTLSU-G (addr 0x35)",
+    # internal I2C G21/G22).
+    secure-element:
+      implementation: atecc608-secure-element
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 53
+    # The vibration motor on AXP192 LDO3 (Core2) or AXP2101 DLDO1 (Core2
+    # v1.1), the PMIC the display also uses (M5Unified
+    # `Power_Class::setVibration`).
+    vibration:
+      implementation: axp192-axp2101-vibration
+      bindings: { i2c: internal-i2c }
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:
+    # M5Unified `_pin_table_port_bc`.
+    port-a-scl: { pin: GPIO33 }
+    port-a-sda: { pin: GPIO32 }
+    port-b-g26: { pin: GPIO26 }
+    port-b-g36: { pin: GPIO36 }
+    port-c-g13: { pin: GPIO13 }
+    port-c-g14: { pin: GPIO14 }

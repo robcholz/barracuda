@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Prints every device Board, grouped by compilation target, as a GitHub
 # Actions matrix. CI checks and builds each group; the release workflow
-# builds and packages it. Boards sharing a target run on one runner so the
-# expensive dependency graph is reused.
+# builds and packages it. Boards sharing a target run on one runner, or a few
+# when there are many, so the expensive dependency graph is reused.
 set -euo pipefail
 
 entries='[]'
@@ -57,19 +57,30 @@ while IFS= read -r board_file; do
     '$entries + [$entry]')"
 done < <(find boards/configs -mindepth 2 -maxdepth 2 -type f -name board.yml | sort)
 
-matrix="$(jq -cn --argjson entries "$entries" '
+# A target with more Boards than this is split across runners, so no group
+# outlasts the Boards job's timeout; every part shares the target's cache.
+group_size=12
+
+matrix="$(jq -cn --argjson entries "$entries" --argjson size "$group_size" '
   {include: ($entries
     | sort_by(.key, .board)
     | group_by(.key)
-    | map({
-        key: .[0].key,
-        label: (if length == 1 then .[0].board
-          else "\(.[0].board) + \(length - 1) more"
-          end),
-        os: .[0].os,
-        toolchain: .[0].toolchain,
-        chip: .[0].chip,
-        c_toolchain: .[0].c_toolchain,
-        boards: map(.board)
-      }))}')"
+    | map(. as $target
+      | [range(0; $target | length; $size)]
+      | map($target[.:(. + $size)] as $part | {
+          key: $part[0].key,
+          group: (if ($target | length) > $size
+            then "\($part[0].key)-\(. / $size + 1)"
+            else $part[0].key
+            end),
+          label: (if ($part | length) == 1 then $part[0].board
+            else "\($part[0].board) + \(($part | length) - 1) more"
+            end),
+          os: $part[0].os,
+          toolchain: $part[0].toolchain,
+          chip: $part[0].chip,
+          c_toolchain: $part[0].c_toolchain,
+          boards: ($part | map(.board))
+        }))
+    | add)}')"
 jq -c . <<< "$matrix"

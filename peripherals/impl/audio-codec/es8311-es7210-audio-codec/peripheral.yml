@@ -6,17 +6,21 @@ implementation:
   crate: barracuda_es8311_es7210_audio_codec
   factory: "::{{crate}}::Es8311Es7210AudioCodecImplementation<{{binding.control.type}}, {{binding.stream.type}}, {{binding.codec-power-enable.type}}, {{binding.amplifier-enable.type}}, {{hal.delay.type}}>"
   bindings-expression: "::{{crate}}::Es8311Es7210Bindings::new({{binding.control.value}}, {{binding.stream.value}}, {{binding.codec-power-enable.value}}, {{binding.amplifier-enable.value}}, {{hal.delay.value}})"
-  config-expression: "::{{crate}}::Es8311Es7210Config::new({{parameter.output-address}}, {{parameter.input-address}})"
+  config-expression: "::{{crate}}::Es8311Es7210Config::new({{parameter.output-address}}, {{parameter.input-address}}).with_helper_enables(::{{crate}}::HelperEnables::new({{parameter.m5ioe1-supply-pin}}, {{parameter.m5ioe1-amplifier-pin}}, {{parameter.m5pm1-amplifier-pin}}))"
 bindings:
   control:
     kind: i2c-device
   stream:
     kind: i2s-stream
+  # The codec supply switch, when a GPIO controls it.
   codec-power-enable:
     kind: digital-output
+    required: false
     initial: low
+  # The speaker amplifier's enable, when a GPIO switches it.
   amplifier-enable:
     kind: digital-output
+    required: false
     initial: low
 parameters:
   output-address:
@@ -25,3 +29,15 @@ parameters:
   input-address:
     type: integer
     default: 64
+  # Pins of M5Stack's M5IOE1 expander (0x4F, pins 1 to 14) and M5PM1 power
+  # controller (0x6E, pins 0 to 4) on the control bus that switch the codec
+  # supply and the speaker amplifier; 0 and -1 mean none.
+  m5ioe1-supply-pin:
+    type: integer
+    default: 0
+  m5ioe1-amplifier-pin:
+    type: integer
+    default: 0
+  m5pm1-amplifier-pin:
+    type: integer
+    default: -1

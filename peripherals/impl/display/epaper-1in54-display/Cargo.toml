@@ -1,0 +1,25 @@
+[package]
+name = "barracuda-epaper-1in54-display"
+version = "0.1.0"
+edition = "2024"
+description = "Buffered 1.54-inch 200 x 200 e-paper implementation for Barracuda, GDEH0154D67 or GDEW0154M09 detected at start-up"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-jd79653a.workspace = true
+barracuda-peripheral.workspace = true
+embedded-graphics-core.workspace = true
+embedded-hal.workspace = true
+epd-waveshare.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

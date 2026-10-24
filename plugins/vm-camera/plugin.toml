@@ -3,4 +3,4 @@ depends-on = ["vm"]
 description = "Registers the built-in camera Lua package."
 
 [peripherals.camera]
-device = { fill = "primary", optional = true }
+devices = "*"

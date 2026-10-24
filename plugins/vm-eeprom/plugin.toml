@@ -1,0 +1,6 @@
+id = "eeprom"
+depends-on = ["vm"]
+description = "Registers the built-in EEPROM Lua package."
+
+[peripherals.eeprom]
+devices = "*"

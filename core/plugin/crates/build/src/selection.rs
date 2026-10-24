@@ -595,7 +595,7 @@ fn resolve_claims(
         }
     }
     for (kind, owner) in rest_owner {
-        let rest = devices
+        let mut rest = devices
             .by_kind
             .get(kind)
             .into_iter()
@@ -603,6 +603,9 @@ fn resolve_claims(
             .filter(|device| !taken.contains_key(*device))
             .filter_map(|device| devices.device(kind, device))
             .collect::<Vec<_>>();
+        // The primary device, when the slot receives it, comes first, so a
+        // Plugin that defaults to its first device defaults to the primary.
+        rest.sort_by_key(|device| devices.primary.get(kind) != Some(&device.name));
         filled.insert(owner.clone(), Filled::Many(rest));
     }
 

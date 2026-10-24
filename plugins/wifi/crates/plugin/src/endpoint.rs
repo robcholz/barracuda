@@ -75,6 +75,9 @@ impl HttpEndpoint for WifiEndpoint {
                             WifiControlErrorKind::Device => {
                                 Self::static_response(422, br#"{"error":"connection_failed"}"#)
                             }
+                            WifiControlErrorKind::Unsupported => {
+                                Self::static_response(409, br#"{"error":"platform_managed"}"#)
+                            }
                         };
                     };
                     // the setup hotspot closes right after this reply, so it carries
@@ -101,7 +104,8 @@ impl HttpEndpoint for WifiEndpoint {
                                 Self::static_response(500, br#"{"error":"storage"}"#)
                             }
                             WifiControlErrorKind::InvalidConfiguration
-                            | WifiControlErrorKind::Device => {
+                            | WifiControlErrorKind::Device
+                            | WifiControlErrorKind::Unsupported => {
                                 Self::static_response(500, br#"{"error":"wifi"}"#)
                             }
                         };

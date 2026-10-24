@@ -11,7 +11,7 @@ M5Stack M5GO 是 M5Stack 推出的 ESP32 开发板。
 - 芯片：ESP32
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32-none-elf`
-- Profile：[`screen`](/zh/boards/profiles)
+- Profile：[`screen-connected`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-m5go/partitions.csv`
 
 ## 构建和运行
@@ -28,4 +28,32 @@ cargo image deploy
 
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
+| `led-strip` | 10 个串联的 RGB LED（SK6812，GPIO15） | [`light`](/zh/plugins/vm-led-strip) |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `power-monitor` | 电池电量（IP5306） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `inertial-measurement` | 运动传感器（MPU6886，早期单元为 MPU9250；装有 BMM150 磁力计时一并读取） | [`motion`](/zh/plugins/vm-imu) |
+| `buttons` | 按键 A、B、C（GPIO39、GPIO38、GPIO37） | [`buttons`](/zh/plugins/vm-buttons) |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
+
+IP5306 只以 25% 的步长报告电池电量和是否在充电；它不测量电压和电流，所以在这块开发板上 `measure` 会失败。
+
+microSD 卡通过自己的片选与显示屏共用 SPI 总线。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g36` | `GPIO36` |
+| `port-c-g16` | `GPIO16` |
+| `port-c-g17` | `GPIO17` |
+
+Port A 就是内部 I2C 总线（`GPIO21` / `GPIO22`），所以没有开放。
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-b-g26", "up")
+print(pin:read())
+```

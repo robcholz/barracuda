@@ -24,7 +24,9 @@ build of the selected Board; see [Package a release](#package-a-release).
 The Board-native `resources` partition entry chooses `fatfs` or `littlefs`:
 file-region layouts use that region's `filesystem` field, ESP layouts use its
 partition subtype, and linker layouts use its inline `filesystem` annotation.
-The `resources` region must be read-only at runtime.
+The `resources` region must be read-only at runtime. A LittleFS image spans
+the block count `barracuda_vfs_littlefs::filesystem_block_count` gives for the
+region, the same one firmware mounts it with.
 
 The shared Platform resolver discovers `platforms/*/platform.yml`, checks the
 selected Board's chip and declared toolchain target, and reads that Platform's
@@ -86,6 +88,10 @@ application:
     arguments: [save-image, --chip, "{chip}", --merge, --skip-padding, --flash-size, "{flash-size}", --partition-table, "{layout}", --target-app-partition, ota_0, "{application}", "{output}"]
     offset: 0
 ```
+
+`ota_0` is the first app slot on every ESP Board and the only one on Boards
+with less than 16 MiB of flash, so one argument list serves every Board of a
+Platform; see [ESP flash layout](/boards/overview#esp-flash-layout).
 
 A command runs without a shell. Besides `{chip}` and `{layout}`, it may name
 `{application}`, the built application; `{output}`, the file to write; and

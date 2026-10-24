@@ -29,3 +29,36 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `inertial-measurement` | Motion sensor (BMI270) | [`motion`](/plugins/vm-imu) |
+| `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `buttons` | Buttons A and B (GPIO11, GPIO12) | [`buttons`](/plugins/vm-buttons) |
+| `power-button` | Power button (M5PM1 power key) | [`buttons`](/plugins/vm-buttons) |
+| `audio-codec` | Audio codec (ES8311) | [`audio`](/plugins/vm-audio) |
+| `infrared` | Infrared transmitter and receiver (GPIO46, GPIO42) | [`infrared`](/plugins/vm-infrared) |
+
+The M5PM1 measures the battery voltage only; whether the battery charges comes
+from the charger's status line on an M5PM1 pin.
+
+The power button is read from the M5PM1's button status and reads pressed while
+the key is down. The Board turns off the M5PM1's single-click reset, so a single click is an
+application button: scripts and Plugins receive it as a click instead of the
+Board resetting. A double click still turns the Board off, and a long press
+still enters download mode. The M5PM1 keeps this setting until it loses power,
+across resets and reflashing; `single-click-reset: keep` on the device brings
+back the factory single-click reset.
+`buttons` is the primary `buttons` device.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO10` |
+| `port-a-sda` | `GPIO9` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

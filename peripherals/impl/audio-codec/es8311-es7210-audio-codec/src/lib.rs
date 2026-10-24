@@ -1,8 +1,17 @@
 //! Full-duplex audio implementation for an ES8311 DAC and ES7210 microphone ADC.
+//!
+//! The codec supply and the speaker amplifier are each switched by a GPIO,
+//! by a pin of M5Stack's M5IOE1 or M5PM1 helper chip on the control bus (the
+//! CoreP4X), or by nothing (the ESP32-S3-BOX-3 and Korvo-2 power their
+//! codecs from the 3.3 V rail).
 
 #![no_std]
 
+mod enables;
+
 use core::marker::PhantomData;
+
+pub use enables::{HelperEnables, HelperError};
 
 use barracuda_driver_es7210::{Es7210, Es7210Error};
 use barracuda_driver_es8311::{Es8311, Es8311Error};
@@ -17,16 +26,25 @@ use embedded_hal::{delay::DelayNs, digital::OutputPin, i2c::I2c};
 pub struct Es8311Es7210Config {
     output_address: u8,
     input_address: u8,
+    enables: HelperEnables,
 }
 
 impl Es8311Es7210Config {
-    /// Creates a paired-codec configuration.
+    /// Creates a paired-codec configuration with no helper-chip enables.
     #[must_use]
     pub const fn new(output_address: u8, input_address: u8) -> Self {
         Self {
             output_address,
             input_address,
+            enables: HelperEnables::new(0, 0, -1),
         }
+    }
+
+    /// Switches the codec supply and amplifier through helper-chip pins.
+    #[must_use]
+    pub const fn with_helper_enables(mut self, enables: HelperEnables) -> Self {
+        self.enables = enables;
+        self
     }
 }
 
@@ -34,8 +52,8 @@ impl Es8311Es7210Config {
 pub struct Es8311Es7210Bindings<I2C, I2S, POWER, AMP, DELAY> {
     control: I2C,
     stream: I2S,
-    codec_power_enable: POWER,
-    amplifier_enable: AMP,
+    codec_power_enable: Option<POWER>,
+    amplifier_enable: Option<AMP>,
     delay: DELAY,
 }
 
@@ -45,8 +63,8 @@ impl<I2C, I2S, POWER, AMP, DELAY> Es8311Es7210Bindings<I2C, I2S, POWER, AMP, DEL
     pub const fn new(
         control: I2C,
         stream: I2S,
-        codec_power_enable: POWER,
-        amplifier_enable: AMP,
+        codec_power_enable: Option<POWER>,
+        amplifier_enable: Option<AMP>,
         delay: DELAY,
     ) -> Self {
         Self {
@@ -74,6 +92,8 @@ pub enum Es8311Es7210InitError<ControlError, PowerError, AmplifierError> {
     InputControl(Es7210Error<ControlError>),
     /// The external power amplifier could not be enabled.
     Amplifier(AmplifierError),
+    /// A helper chip switching the codec supply or amplifier failed.
+    Helper(HelperError<ControlError>),
 }
 
 /// Paired-codec control or stream failure.
@@ -89,8 +109,8 @@ pub enum Es8311Es7210Error<ControlError, StreamError> {
 pub struct Es8311Es7210AudioCodec<I2C, I2S, POWER, AMP> {
     control: I2C,
     stream: I2S,
-    _codec_power_enable: POWER,
-    _amplifier_enable: AMP,
+    _codec_power_enable: Option<POWER>,
+    _amplifier_enable: Option<AMP>,
     output: Es8311,
     descriptor: AudioDescriptor,
 }
@@ -133,10 +153,13 @@ where
             Es8311::new(config.output_address).ok_or(Es8311Es7210InitError::InvalidAddress)?;
         let input =
             Es7210::new(config.input_address).ok_or(Es8311Es7210InitError::InvalidAddress)?;
-        bindings
-            .codec_power_enable
-            .set_high()
-            .map_err(Es8311Es7210InitError::Power)?;
+        if let Some(power) = bindings.codec_power_enable.as_mut() {
+            power.set_high().map_err(Es8311Es7210InitError::Power)?;
+        }
+        config
+            .enables
+            .supply_on(&mut bindings.control)
+            .map_err(Es8311Es7210InitError::Helper)?;
         bindings.delay.delay_ms(10);
         output
             .initialize(&mut bindings.control, &mut bindings.delay)
@@ -144,10 +167,15 @@ where
         input
             .initialize(&mut bindings.control)
             .map_err(Es8311Es7210InitError::InputControl)?;
-        bindings
-            .amplifier_enable
-            .set_high()
-            .map_err(Es8311Es7210InitError::Amplifier)?;
+        config
+            .enables
+            .amplifier_on(&mut bindings.control)
+            .map_err(Es8311Es7210InitError::Helper)?;
+        if let Some(amplifier) = bindings.amplifier_enable.as_mut() {
+            amplifier
+                .set_high()
+                .map_err(Es8311Es7210InitError::Amplifier)?;
+        }
 
         Ok(Es8311Es7210AudioCodec {
             control: bindings.control,

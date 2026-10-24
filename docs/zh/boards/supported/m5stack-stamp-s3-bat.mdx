@@ -26,4 +26,11 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-stamp-s3-bat/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `power-button` | 电源键（M5PM1） | [`buttons`](/zh/plugins/vm-buttons) |
+
+M5PM1 只测量电池电压；是否在充电取自接在 M5PM1 引脚上的充电器状态线。
+
+电源键从 M5PM1 的按键状态读取，按住时读为按下。开发板关闭了 M5PM1 的单击复位，所以单击是一个应用按键：脚本和插件把它当作一次单击收到，开发板不再复位。双击仍会关机，长按仍会进入下载模式。M5PM1 会一直保留这个设置直到自身断电，复位和重新烧录都不会改变它；在该设备上设置 `single-click-reset: keep` 可恢复出厂的单击复位。

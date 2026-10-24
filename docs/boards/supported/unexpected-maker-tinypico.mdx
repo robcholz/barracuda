@@ -10,7 +10,7 @@ The TinyPICO is an ESP32 Board from Unexpected Maker.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`connected`](/boards/profiles)
 - Flash layout: `boards/configs/unexpected-maker-tinypico/partitions.csv`
 
 ## Build and run
@@ -28,3 +28,4 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `led-strip` | LED strip (APA102) | [`light`](/plugins/vm-led-strip) |
+| `battery` | Battery voltage (ADC resistor divider) and charge status | [`power_monitor`](/plugins/vm-power-monitor) |

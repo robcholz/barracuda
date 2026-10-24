@@ -1,7 +1,43 @@
 name: m5stack-stamp-c3-mate
+profile: connected
 hardware:
   chip: esp32c3
+  # Stamp-C3 (ESP32-C3, 4 MB flash).
+  flash-size: 4mb
 toolchain:
   target: riscv32imc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    rmt-output:
+      rgb-led-data:
+        # SK6812 on GPIO2 (M5Unified `_pin_table_other0` (RGBLED), board_M5StampC3; EBM
+        # `m5stack_stamp_c3`, GRB). GPIO2 is a strapping pin sampled only at reset.
+        # Clocked out of RMT channel 0, so the LED takes no SPI controller
+        # from the runtime SPI pool the exposed pins use.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO2
+  devices:
+    # The RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
+    # The button on GPIO3, active low, with the internal pull-up M5Unified
+    # enables.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO3
+      parameters:
+        pull: up
+exposed-io:
+  pins:
+    # Grove port G0/G1 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g0: { pin: GPIO0 }
+    grove-g1: { pin: GPIO1 }

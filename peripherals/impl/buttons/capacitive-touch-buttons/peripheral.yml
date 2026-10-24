@@ -6,7 +6,7 @@ implementation:
   crate: barracuda_capacitive_touch_buttons
   factory: "::{{crate}}::CapacitiveTouchButtonsImplementation<{{binding.channels.type}}, {{hal.delay.type}}>"
   bindings-expression: "::{{crate}}::CapacitiveTouchButtonsBindings::new({{binding.channels.value}}, {{hal.delay.value}})"
-  config-expression: "::{{crate}}::CapacitiveTouchButtonsConfig::new({{parameter.threshold-basis-points}})"
+  config-expression: "::{{crate}}::CapacitiveTouchButtonsConfig::new({{parameter.threshold-basis-points}}, {{parameter.debounce-ms}}, {{parameter.long-press-ms}})"
 bindings:
   channels:
     kind: capacitive-touch
@@ -15,3 +15,14 @@ parameters:
     type: integer
     # 150 basis points is the 1.5% delta used by Espressif's ESP-VoCat BSP.
     default: 150
+  # How long a new touch state must hold before a press or release counts.
+  # 10 ms is M5Unified's `Button_Class` default.
+  debounce-ms:
+    type: integer
+    default: 10
+  # How long a touch lasts before it is a long press, reported while the pad
+  # is still touched; a shorter touch is a click. 500 ms is M5Unified's
+  # `Button_Class` hold time.
+  long-press-ms:
+    type: integer
+    default: 500

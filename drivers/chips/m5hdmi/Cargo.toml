@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-driver-m5hdmi"
+version = "0.1.0"
+edition = "2024"
+description = "M5Stack HDMI FPGA (Gowin GW1NR-9) command protocol, SRAM configuration over JTAG, and video-mode arithmetic"
+# The code is Apache-2.0; bitstream/m5hdmi-fs.rle is M5Stack's FPGA
+# configuration from M5GFX 0.2.34 (`Panel_M5HDMI_FS.h`), MIT-licensed.
+license = "Apache-2.0 AND MIT"
+include = ["src/**", "bitstream/**", "Cargo.toml"]
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

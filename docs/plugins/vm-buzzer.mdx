@@ -1,0 +1,59 @@
+---
+title: "Buzzer Plugin"
+sidebarTitle: "Buzzer"
+description: "Play tones and melodies on the Board's buzzer from Lua with the `buzzer` package."
+---
+
+Installs the `buzzer` Lua package over the Board's buzzers, the primary one
+by default.
+
+- Plugin ID: `buzzer`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `buzzer.devices` (`*`)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `buzzer`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes every `Buzzer` of the Board that no other Plugin claims,
+the primary one first, and installs the `buzzer` Lua package. It consumes the
+semantic peripheral and never reaches its PWM output.
+
+Lua API:
+
+- `buzzer.list() -> { name, ... }`: the Board names of the buzzers, the
+  primary one first
+- `buzzer.available([name]) -> boolean`
+- `buzzer.range([name]) -> lowest_hz, highest_hz`
+- `buzzer.tone(frequency_hz, duration_ms[, volume[, name]]) -> true` sounds one
+  tone and returns when it ends; a zero frequency rests
+- `buzzer.play(notes[, volume[, name]]) -> true` plays
+  `\{ \{frequency_hz, duration_ms\}, ... \}`, at most 256 notes, and returns
+  when the melody ends
+- `buzzer.start(frequency_hz[, volume[, name]]) -> true` sounds a tone until
+  `stop`
+- `buzzer.stop([name]) -> true`
+
+`name` is a Board device name from `list`; without it a call uses the primary
+buzzer, so a script written for one buzzer runs unchanged on a Board with
+several. To name a buzzer without choosing a volume, pass `nil` for the volume.
+
+`volume` is 0 through 100 percent and defaults to 50. A frequency outside
+`range`, a volume above 100, an unknown name, or a call while another is
+playing on the same buzzer returns `nil, error`. Cancelling `tone` or `play`, for example by stopping the script,
+silences the buzzer.
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2. Boards without a buzzer still install
+the package; `available` returns false and every other call returns
+`nil, error`. Plugin revocation prevents every further call.
+
+```lua
+local buzzer = require("buzzer")
+buzzer.play({ { 523, 150 }, { 659, 150 }, { 784, 300 } }, 40)
+```

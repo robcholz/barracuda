@@ -4,12 +4,12 @@ sidebarTitle: "Power"
 description: "通过 `Power` 能力读取开发板的电源监测器和电池电量。"
 ---
 
-拥有开发板的主电源监测器，并把它的读数和电池电量以 `Power` 的形式发布给其他插件。
+拥有开发板的电源监测器，并把它们的读数和电池电量以 `Power` 的形式发布给其他插件。
 
 - 插件 ID：`power`
 - 依赖：无
 - 设置：无
-- 上下文资源：外设槽位 `power-monitor.device`（`primary`，可选）
+- 上下文资源：外设槽位 `power-monitor.devices`（`*`）
 - 提供的能力：`Power`
 - 所需能力：无
 - Workflow：无
@@ -19,10 +19,14 @@ description: "通过 `Power` 能力读取开发板的电源监测器和电池电
 - 任务：无
 - 存储：无
 
-本插件只获取一次开发板的主 `PowerMonitor`，并把它放在一把锁后面。`Power` 的克隆开销很小，每个克隆读取的都是同一个监测器，所以系统界面的电池显示和一个 Lua 句柄可以同时读取它：
+本插件获取开发板上没有被其他插件占用的每个 `PowerMonitor`，主监测器排在最前，每个只获取一次，并各自放在自己的锁后面。主监测器是产品的主要监测器，通常是电池的电量计。`Power` 克隆的开销很小，每个克隆读取的都是同一组监测器，所以系统界面的电量和 Lua 句柄可以同时读取：
 
 - `Power::is_present()`：开发板是否有电源监测器。
-- `Power::measure()`：一次一致的采样（`PowerMeasurement`）；没有监测器或读取失败时返回 `PowerError`。
-- `Power::battery()`：电池电量（带有 `percent` 和 `charging` 的 `BatteryState`），来自作为电池电量计的监测器，例如 BQ27220；其他监测器或读取失败时返回 `None`。
+- `Power::measure()`：从主监测器读取一次一致的采样（`PowerMeasurement`）；没有监测器或读取失败时返回 `PowerError`。
+- `Power::battery()`：主监测器是电池电量计（例如 BQ27220）时返回电池电量（`BatteryState`，包含 `percent` 和 `charging`）；其他监测器或读取失败时返回 `None`。
+- `Power::names()`：各监测器在开发板上的名称，主监测器排在最前。
+- `Power::monitor(name)`：返回该开发板名称对应的监测器（`None` 时为主监测器），类型为 `Monitor`，提供 `name()`、`measure()` 和 `battery()`；开发板没有该监测器时返回 `None`。
 
-I2C 的所有权、芯片初始化、校准以及到整数 SI 子单位的换算，都留在所选的实现和生成的开发板 HAL 中。本插件不做后台采样，也不拥有长时间运行的任务。
+需要电池数据的调用方使用 `measure` 和 `battery`，它们总是读取主监测器，所以开发板增加监测器（例如 M5Stack Station 在 AXP192 电量计之外的六个 Grove 端口 INA3221 通道）不会影响它们。
+
+I2C 所有权、芯片初始化、校准以及换算成整数 SI 子单位，仍由所选的实现和生成的开发板 HAL 负责。本插件不做后台采样，也不拥有长时间运行的任务。

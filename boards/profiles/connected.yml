@@ -1,0 +1,7 @@
+# Online scripting without the Agent: lua and network, plus the Lua packages
+# that need the network but not the Agent. For Boards whose flash cannot hold
+# the Agent; headless adds it. See docs/boards/profiles.mdx.
+extends: [lua, network]
+enable:
+  - vm-http
+  - vm-webserver

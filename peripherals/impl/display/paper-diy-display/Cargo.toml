@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-paper-diy-display"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda display implementation for the M5Stack PaperDIY: the ED047TC1 panel with its supply switched by the M5PM1"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-m5pm1.workspace = true
+barracuda-ed047tc1-display.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

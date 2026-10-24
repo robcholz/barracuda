@@ -18,7 +18,7 @@ Barracuda 设备上的每项能力都是一个插件。每个插件页面都会�
 | [Wi-Fi](/zh/plugins/wifi) | 拥有 Wi-Fi 策略：站点（station）和配置接入点的生命周期、持久保存的站点凭据，以及配网页面和 API。 |
 | [System Wi-Fi](/zh/plugins/system-wifi) | 在系统界面中显示 Wi-Fi：状态栏上的连接、主屏幕的离线卡片、控制中心的 Wi-Fi 磁贴，以及门户磁贴打开的设置热点。 |
 | [Captive Portal](/zh/plugins/captive-portal) | 把可插拔的网页入口和资源提供者汇集到门户外壳中。 |
-| [Power](/zh/plugins/power) | 拥有开发板的主电源监测器，并把它的读数和电池电量以 `Power` 的形式发布给其他插件。 |
+| [Power](/zh/plugins/power) | 拥有开发板的电源监测器，并把它们的读数和电池电量以 `Power` 的形式发布给其他插件。 |
 | [Sound](/zh/plugins/sound) | 拥有开发板的主音频编解码器，以 `Sound` 的形式一次只把它借给一个使用者，并以 `Volume` 的形式保存设备的输出音量，这个音量由用户为所有声音统一设置。 |
 | [Time](/zh/plugins/time) | Time 插件通过 SNTP 同步 UTC 时间，维护开发板的实时时钟，并把时间作为类型化的只读时钟能力发布出去。 |
 | [Scheduler](/zh/plugins/scheduler) | Scheduler 插件拥有持久的计划，并在某个计划到期时发出一个 Workflow Event。 |
@@ -68,21 +68,34 @@ Barracuda 设备上的每项能力都是一个插件。每个插件页面都会�
 | [VM](/zh/plugins/vm) | VM 插件拥有隔离的 Lua 执行：它发布类型化的 `Vm` 能力、供 VM 包插件扩展的 `LuaPackageRegistry`，以及运行 Lua 脚本的 Workflow Action。 |
 | [VM Agent](/zh/plugins/vm-agent) | VM Agent 插件把隔离的、不持久保存的 Agent 提问作为只能 require 的 `agent` Lua 包暴露给 Lua 代码。 |
 | [Analog](/zh/plugins/vm-analog) | Analog 插件把开发板可用引脚上的模拟输入和输出作为 `analog` Lua 包暴露给 Lua 代码。 |
+| [Buttons](/zh/plugins/vm-buttons) | 基于开发板的按键安装 `buttons` Lua 包，默认使用主按键设备。 |
+| [Buzzer](/zh/plugins/vm-buzzer) | 基于开发板的蜂鸣器安装 `buzzer` Lua 包，默认使用主蜂鸣器。 |
 | [Audio](/zh/plugins/vm-audio) | Audio 插件把开发板音频编解码器（由 `sound` 插件拥有）上的播放和录音作为 `audio` Lua 包暴露给 Lua 代码。 |
-| [Camera](/zh/plugins/vm-camera) | Camera 插件拥有开发板的主摄像头，并把帧采集作为 `camera` Lua 包暴露给 Lua 代码。 |
+| [Camera](/zh/plugins/vm-camera) | Camera 插件拥有开发板的摄像头，并把帧采集作为 `camera` Lua 包暴露给 Lua 代码，默认使用主摄像头。 |
+| [CAN](/zh/plugins/vm-can) | 基于开发板的 CAN 总线安装 `can` Lua 包，默认使用主 CAN 总线。 |
+| [Digital I/O](/zh/plugins/vm-digital-io) | 基于开发板的继电器和隔离数字输入设备安装 `digital_io` Lua 包，默认使用主设备。 |
 | [Display](/zh/plugins/vm-display) | Display 插件拥有所有未被其他插件占用的开发板显示屏，并把绘制和面板控制作为 `display` Lua 包暴露给 Lua 代码。 |
 | [VM Filesystem](/zh/plugins/vm-filesystem) | VM Filesystem 插件通过 Lua 标准的 `io` 和 `os` 文件 API，把它的插件作用域 VFS 暴露给 Lua 代码。 |
 | [GPIO](/zh/plugins/vm-gpio) | GPIO 插件把开发板可用引脚上的数字输入和输出作为 `gpio` Lua 包暴露给 Lua 代码。 |
 | [VM HTTP](/zh/plugins/vm-http) | VM HTTP 插件把 HTTP 插件的有界出站请求作为只能 require 的 `http` Lua 包暴露给 Lua 代码。 |
 | [I2C](/zh/plugins/vm-i2c) | I2C 插件把开发板可用引脚上的 I2C 总线传输作为 `i2c` Lua 包暴露给 Lua 代码。 |
 | [I2S](/zh/plugins/vm-i2s) | I2S 插件把开发板可用引脚上的 I2S PCM 流传输作为 `i2s` Lua 包暴露给 Lua 代码。 |
-| [IMU](/zh/plugins/vm-imu) | 基于开发板的主 IMU 安装 `motion` Lua 包。 |
-| [LED Strip](/zh/plugins/vm-led-strip) | 基于开发板的主 LED 灯带安装 `light` Lua 包。 |
+| [EEPROM](/zh/plugins/vm-eeprom) | 基于开发板的 EEPROM 安装 `eeprom` Lua 包，默认使用主 EEPROM。 |
+| [环境传感器](/zh/plugins/vm-environment-sensor) | 基于开发板的环境传感器安装 `environment` Lua 包，默认使用主环境传感器。 |
+| [IMU](/zh/plugins/vm-imu) | 基于开发板的 IMU 安装 `motion` Lua 包，默认使用主 IMU。 |
+| [Infrared](/zh/plugins/vm-infrared) | 基于开发板的红外发射器和接收器安装 `infrared` Lua 包，默认使用主设备。 |
+| [Keyboard](/zh/plugins/vm-keyboard) | 基于开发板的键盘安装 `keyboard` Lua 包，默认使用主键盘。 |
+| [Rotary Encoder](/zh/plugins/vm-rotary-encoder) | 基于开发板的旋转编码器安装 `encoder` Lua 包，默认使用主旋转编码器。 |
+| [LED Strip](/zh/plugins/vm-led-strip) | 基于开发板的 LED 灯带安装 `light` Lua 包，默认使用主灯带。 |
+| [LoRa](/zh/plugins/vm-lora) | 基于开发板的 LoRa 射频模块安装 `lora` Lua 包，默认使用主模块。 |
 | [Message Queue](/zh/plugins/vm-message-queue) | 安装只能 require 的 `message_queue` Lua 包：一组有界的共享 FIFO 队列，相互独立的 Lua 执行用它们交换消息。 |
-| [Power Monitor](/zh/plugins/vm-power-monitor) | 基于开发板的电源监测器（由 `power` 插件拥有）安装 `power_monitor` Lua 包。 |
+| [NFC](/zh/plugins/vm-nfc) | 基于开发板的 NFC 读卡器安装 `nfc` Lua 包，默认使用主读卡器。 |
+| [Power Monitor](/zh/plugins/vm-power-monitor) | 基于开发板的电源监测器（由 `power` 插件拥有）安装 `power_monitor` Lua 包，默认使用主监测器。 |
+| [Secure Element](/zh/plugins/vm-secure-element) | 基于开发板的安全芯片安装 `secure_element` Lua 包，默认使用主安全芯片。 |
 | [PWM](/zh/plugins/vm-pwm) | 基于开发板的可用 I/O 引脚安装 `pwm` Lua 包。 |
 | [SPI](/zh/plugins/vm-spi) | 基于开发板的可用 I/O 引脚安装只能 require 的 `spi` Lua 包。 |
 | [VM System Info](/zh/plugins/vm-systeminfo) | 把所选的平台和开发板标识作为只能 require 的 `systeminfo` 包暴露给 Lua。 |
 | [VM Time](/zh/plugins/vm-time) | 通过标准的 `os` 时间函数把 Time 插件的 UTC 时钟暴露给 Lua。 |
 | [UART](/zh/plugins/vm-uart) | 基于开发板的可用 I/O 引脚安装 `uart` Lua 包。 |
+| [Vibration](/zh/plugins/vm-vibration) | 基于开发板的振动马达安装 `vibration` Lua 包，默认使用主振动马达。 |
 | [VM WebServer](/zh/plugins/vm-webserver) | 通过只能 require 的 `webserver` 包，让 Lua 执行处理 `/vm` 下的入站 HTTP 请求，并把 VM 文件以流的形式作为响应返回。 |

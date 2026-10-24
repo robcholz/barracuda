@@ -14,7 +14,6 @@ portable-atomic.workspace = true
 barracuda-board-hal.workspace = true
 barracuda-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
-critical-section = "1"
 
 [dev-dependencies]
 barracuda-vm-runtime = { path = "../../../vm/crates/runtime", features = ["test-fixture", "vendored"] }

@@ -11,7 +11,7 @@ The M5Stack StamPLC is an ESP32-S3 Board from M5Stack.
 - Chip: ESP32-S3
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32s3-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-stamp-plc/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,60 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-stamp-plc/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | Display (MIPI DBI, backlight on the PI4IOE5V6408 expander) | [`display`](/plugins/vm-display) |
+| `power-monitor` | Power monitor (INA226) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `environment-sensor` | Temperature sensor (LM75B) | [`environment`](/plugins/vm-environment-sensor) |
+| `real-time-clock` | Real-time clock (RX8130CE) | — |
+| `buttons` | Buttons A, B, C (PI4IOE5V6408 P2, P1, P0) | [`buttons`](/plugins/vm-buttons) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
+| `led-strip` | RGB LED (WS2812, GPIO21) | [`light`](/plugins/vm-led-strip) |
+| `buzzer` | Passive buzzer (GPIO44) | [`buzzer`](/plugins/vm-buzzer) |
+| `can` | CAN bus (TWAI, SIT1044 transceiver, TX GPIO42, RX GPIO43) | [`can`](/plugins/vm-can) |
+| `plc-io` | Relays 1-4 and isolated inputs 1-8 (AW9523B at `59h`) | [`digital_io`](/plugins/vm-digital-io) |
+
+The Stamp-S3A switches the RGB LED's supply with GPIO38; the LED turns it
+on at start.
+
+The buttons share the PI4IOE5V6408 at `43h` with the display's backlight; each
+implementation configures only its own pins.
+
+The microSD card shares the display's SPI bus through its own chip select.
+
+The relays sit on P0_0 to P0_3 of the AW9523B and the optocoupler inputs on
+P0_4 to P0_7 and P1_4 to P1_7. The expander's reset is the display's reset
+line (GPIO3), so the relays and inputs are set up after the display.
+
+The CAN controller stays off the bus until a script starts it at the bus's
+bit rate.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO1` |
+| `port-a-sda` | `GPIO2` |
+| `port-c-g4` | `GPIO4` |
+| `port-c-g5` | `GPIO5` |
+| `rs485-tx` | `GPIO0` |
+| `rs485-rx` | `GPIO39` |
+| `rs485-dir` | `GPIO46` |
+
+`rs485-tx`, `rs485-rx`, and `rs485-dir` are the UART and direction pins of the
+on-board RS485 transceiver. Open them as one RS485 port, with `rs485-dir` as
+the driver-enable pin, and the port drives the bus only while it writes:
+
+```lua
+local uart = require("uart")
+local bus <close> = uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")
+bus:write("\x01\x03\x00\x00\x00\x01\x84\x0a")
+```
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

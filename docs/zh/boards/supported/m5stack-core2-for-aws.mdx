@@ -11,7 +11,7 @@ M5Stack Core2 for AWS 是 M5Stack 推出的 ESP32 开发板。
 - 芯片：ESP32
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen-connected`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-core2-for-aws/partitions.csv`
 
 ## 构建和运行
@@ -26,4 +26,47 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-core2-for-aws/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `led-strip` | 10 个串联的 RGB LED（SK6812，GPIO25） | [`light`](/zh/plugins/vm-led-strip) |
+| `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `touch` | 触摸控制器（FT6336U） | — |
+| `real-time-clock` | 实时时钟（BM8563） | — |
+| `inertial-measurement` | 运动传感器（MPU6886） | [`motion`](/zh/plugins/vm-imu) |
+| `power-monitor` | 电量计（AXP192 或 AXP2101） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `power-button` | 电源键（AXP192 或 AXP2101） | [`buttons`](/zh/plugins/vm-buttons) |
+| `audio` | 音频（NS4168 功放、SPM1423 PDM 麦克风） | [`audio`](/zh/plugins/vm-audio) |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
+| `vibration` | 振动马达（AXP192 LDO3 或 AXP2101 DLDO1） | [`vibration`](/zh/plugins/vm-vibration) |
+| `secure-element` | 安全芯片（ATECC608B Trust&GO，`35h`） | [`secure_element`](/zh/plugins/vm-secure-element) |
+
+触摸屏报告的范围是 320x280：屏幕下方的一条区域是三个触摸按键。显示屏实现的 PMIC 上电过程会连同面板一起复位触摸控制器。
+
+电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。
+
+v1.1 单元的 AXP2101 不测量电流，改由 `40h` 的 INA3221 检测电池电流。
+
+microSD 卡通过自己的片选与显示屏共用 SPI 总线。
+
+内部 I2C 总线以 100 kHz 运行：ATECC608B 只有在 SDA 上的低电平脉冲长于 400 kHz 总线所能产生的脉冲时才会唤醒。它的设备密钥位于槽位 0。
+
+电源键通过 PMIC 读取：按键松开时 PMIC 锁存一次短按，按住达到长按时间时锁存一次长按；每次按下，按键在一次采样中读为按下。短按在事件中报告为单击，长按报告为长按。它只设置和清除 PMIC 中电源键自己的中断位。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO33` |
+| `port-a-sda` | `GPIO32` |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g36` | `GPIO36` |
+| `port-c-g13` | `GPIO13` |
+| `port-c-g14` | `GPIO14` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

@@ -2,9 +2,9 @@
 //!
 //! # Targets without native 32-bit atomic CAS
 //!
-//! Model mount identities use `core::sync::atomic::AtomicU32` when the target
-//! supports it. Other targets use `portable-atomic`, including the atomics in
-//! the re-exported `heapless` containers. **The host selects the fallback.**
+//! Model mount identities and the atomics in the re-exported `heapless`
+//! containers use `portable-atomic`, which compiles to the native atomic where
+//! the target has one. **The host selects the fallback.**
 //!
 //! Hosts with a `critical-section` implementation can enable MicroTS's
 //! `critical-section` feature. The final binary must provide an implementation

@@ -1,4 +1,4 @@
-//! Lua package for the Board's primary built-in LED strip.
+//! Lua package for the Board's built-in LED strips.
 
 #![no_std]
 
@@ -13,29 +13,37 @@ use barracuda_board_hal::led_strip::{LedStrip, LedStripPeripheral, Rgb8};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
-    UserDataMethods,
+    BoardDevices, Error, LentDevice, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package,
+    Result, UserData, UserDataMethods, Variadic,
 };
-use core::cell::RefCell;
 use portable_atomic::{AtomicBool, Ordering};
 use portable_atomic_util::Arc;
 
-/// Owns the Board's primary LED-strip capability and publishes it to Lua.
+/// Owns the Board's LED strips and publishes them to Lua.
 #[barracuda_plugin::macros::plugin]
 pub struct LedStripPlugin<Strip> {
-    strip: Option<Strip>,
+    strips: Vec<(&'static str, Strip)>,
 }
 
 impl<Strip> LedStripPlugin<Strip> {
-    /// Takes the built-in LED strip from the generated Board capability set.
+    /// Takes the built-in LED strips from the generated Board capability set,
+    /// the primary one first.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self
     where
         Builtins: LedStripPeripheral<LedStrip = Strip>,
     {
         Self {
-            strip: config::peripherals::LED_STRIP_DEVICE
-                .and_then(|instance| context.hal.peripherals.take_led_strip(instance)),
+            strips: config::peripherals::LED_STRIP_DEVICES
+                .iter()
+                .filter_map(|(name, instance)| {
+                    context
+                        .hal
+                        .peripherals
+                        .take_led_strip(*instance)
+                        .map(|strip| (*name, strip))
+                })
+                .collect(),
         }
     }
 }
@@ -56,28 +64,22 @@ where
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
-            .register(LedStripPackage::new(self.strip.take()))
+            .register(LedStripPackage::new(core::mem::take(&mut self.strips)))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
     }
 }
 
-/// The strip while no handle holds it; a handle gives it back when it closes.
-type SharedStrip<Strip> = Arc<critical_section::Mutex<RefCell<Option<Strip>>>>;
-
 struct LedStripPackage<Strip> {
-    /// Whether the Board has the device, which makes the package a capability.
-    present: bool,
-    strip: SharedStrip<Strip>,
+    strips: BoardDevices<Strip>,
     active: Arc<AtomicBool>,
 }
 
 impl<Strip> LedStripPackage<Strip> {
-    fn new(strip: Option<Strip>) -> Self {
+    fn new(strips: Vec<(&'static str, Strip)>) -> Self {
         Self {
-            present: strip.is_some(),
-            strip: Arc::new(critical_section::Mutex::new(RefCell::new(strip))),
+            strips: BoardDevices::new(strips),
             active: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -89,55 +91,64 @@ where
     Strip::Error: core::fmt::Debug,
 {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available_strip = Arc::clone(&self.strip);
-        let available_active = Arc::clone(&self.active);
-        let open_strip = Arc::clone(&self.strip);
-        let open_active = Arc::clone(&self.active);
-        let fill_strip = Arc::clone(&self.strip);
-        let fill_active = Arc::clone(&self.active);
-        let off_strip = Arc::clone(&self.strip);
-        let off_active = Arc::clone(&self.active);
+        let available = (self.strips.clone(), Arc::clone(&self.active));
+        let list = self.strips.clone();
+        let open = (self.strips.clone(), Arc::clone(&self.active));
+        let fill = (self.strips.clone(), Arc::clone(&self.active));
+        let off = (self.strips.clone(), Arc::clone(&self.active));
         lua.register_lib("light", move |package| {
-            package.register("fill", move |color: String| {
+            package.register("fill", move |values: Variadic<String>| {
+                let (strips, active) = &fill;
+                let values: Vec<String> = values.into();
                 Some(
-                    lend(&fill_strip, &fill_active, |strip| {
-                        let rgb = parse_color(&color)?;
-                        let pixels = alloc::vec![rgb; strip.len()];
-                        strip.write(&pixels).map_err(strip_error)
+                    match values.as_slice() {
+                        [color] => Ok((color, None)),
+                        [color, name] => Ok((color, Some(name.as_str()))),
+                        _ => Err(Error::runtime(
+                            "expected a color and an optional strip name",
+                        )),
+                    }
+                    .and_then(|(color, name)| {
+                        lend(strips, active, name, |strip| {
+                            let rgb = parse_color(color)?;
+                            let pixels = alloc::vec![rgb; strip.len()];
+                            strip.write(&pixels).map_err(strip_error)
+                        })
                     })
                     .map(|()| true),
                 )
             })?;
-            package.register("off", move |(): ()| {
+            package.register("off", move |name: Variadic<String>| {
+                let (strips, active) = &off;
                 Some(
-                    lend(&off_strip, &off_active, |strip| {
+                    lend(strips, active, name.first().map(String::as_str), |strip| {
                         strip.clear().map_err(strip_error)
                     })
                     .map(|()| true),
                 )
             })?;
-            package.register("available", move |(): ()| {
-                Some(Ok(available_active.load(Ordering::Acquire)
-                    && critical_section::with(|section| {
-                        available_strip.borrow(section).borrow().is_some()
-                    })))
+            package.register("available", move |name: Variadic<String>| {
+                let (strips, active) = &available;
+                Some(Ok(active.load(Ordering::Acquire)
+                    && strips.is_available(name.first().map(String::as_str))))
             })?;
-            package.register_with("open", move |lua, (): ()| {
-                if !open_active.load(Ordering::Acquire) {
+            package.register_with("list", move |lua, (): ()| Some(list.list(lua)))?;
+            package.register_with("open", move |lua, name: Variadic<String>| {
+                let (strips, active) = &open;
+                if !active.load(Ordering::Acquire) {
                     return Some(Err(Error::runtime("LED-strip package has been revoked")));
                 }
-                let strip = critical_section::with(|section| {
-                    open_strip.borrow(section).borrow_mut().take()
-                });
-                Some(match strip {
-                    Some(strip) => lua.create_userdata(LedStripHandle::new(
-                        strip,
-                        Arc::clone(&open_strip),
-                        Arc::clone(&open_active),
-                    )),
-                    None => Err(Error::runtime(
-                        "built-in LED strip is unavailable or already open",
-                    )),
+                let name = name.first().map(String::as_str);
+                Some(match strips.lend(name) {
+                    Some(strip) => {
+                        lua.create_userdata(LedStripHandle::new(strip, Arc::clone(active)))
+                    }
+                    None => Err(Error::runtime(match name {
+                        Some(name) => {
+                            alloc::format!("LED strip `{name}` is unavailable or already open")
+                        }
+                        None => String::from("built-in LED strip is unavailable or already open"),
+                    })),
                 })
             })
         })
@@ -154,11 +165,10 @@ where
     }
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
-        self.present
-            .then_some(barracuda_vm_plugin::PackageInterface::Stable {
-                version: 2,
-                purpose: "Control lights",
-            })
+        (!self.strips.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
+            version: 3,
+            purpose: "Control lights",
+        })
     }
 
     fn revoke(&self) {
@@ -167,45 +177,40 @@ where
 }
 
 struct LedStripHandle<Strip> {
-    strip: Option<Strip>,
-    /// Where the strip goes back when the handle closes.
-    home: SharedStrip<Strip>,
+    /// The strip, which goes back to the package when the handle closes.
+    strip: Option<LentDevice<Strip>>,
     active: Arc<AtomicBool>,
 }
 
 impl<Strip> LedStripHandle<Strip> {
-    fn new(strip: Strip, home: SharedStrip<Strip>, active: Arc<AtomicBool>) -> Self {
+    fn new(strip: LentDevice<Strip>, active: Arc<AtomicBool>) -> Self {
         Self {
             strip: Some(strip),
-            home,
             active,
         }
     }
 
     fn close(&mut self) {
-        if let Some(strip) = self.strip.take() {
-            critical_section::with(|section| {
-                self.home.borrow(section).replace(Some(strip));
-            });
-        }
+        self.strip.take();
     }
 }
 
-/// Runs `use` on the strip while no handle holds it.
+/// Runs `using` on the strip `name`, or the primary one, while no handle
+/// holds it.
 fn lend<Strip>(
-    strip: &SharedStrip<Strip>,
+    strips: &BoardDevices<Strip>,
     active: &AtomicBool,
+    name: Option<&str>,
     using: impl FnOnce(&mut Strip) -> Result<()>,
 ) -> Result<()> {
     ensure_active(active)?;
-    critical_section::with(
-        |section| match strip.borrow(section).borrow_mut().as_mut() {
-            Some(strip) => using(strip),
-            None => Err(Error::runtime(
-                "built-in LED strip is unavailable or open in a handle",
-            )),
-        },
-    )
+    match strips.lend(name) {
+        Some(mut strip) => using(&mut strip),
+        None => Err(Error::runtime(match name {
+            Some(name) => alloc::format!("LED strip `{name}` is unavailable or open in a handle"),
+            None => String::from("built-in LED strip is unavailable or open in a handle"),
+        })),
+    }
 }
 
 /// A color as `#RRGGBB` or one of a few names.
@@ -275,14 +280,14 @@ where
     fn strip(&self) -> Result<&Strip> {
         ensure_active(&self.active)?;
         self.strip
-            .as_ref()
+            .as_deref()
             .ok_or_else(|| Error::runtime("LED-strip handle is closed"))
     }
 
     fn strip_mut(&mut self) -> Result<&mut Strip> {
         ensure_active(&self.active)?;
         self.strip
-            .as_mut()
+            .as_deref_mut()
             .ok_or_else(|| Error::runtime("LED-strip handle is closed"))
     }
 
@@ -351,7 +356,7 @@ mod tests {
 
     #[test]
     fn lua_takes_and_writes_the_builtin_strip_once() {
-        let package = LedStripPackage::new(Some(TestStrip { pixels: 2 }));
+        let package = LedStripPackage::new(std::vec![("ring", TestStrip { pixels: 2 })]);
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install package");
 
@@ -364,7 +369,7 @@ mod tests {
 
     #[test]
     fn unavailable_board_reports_no_strip() {
-        let package = LedStripPackage::<TestStrip>::new(None);
+        let package = LedStripPackage::<TestStrip>::new(Vec::new());
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install package");
 
@@ -377,7 +382,7 @@ mod tests {
 
     #[test]
     fn fill_and_off_use_the_strip_while_no_handle_holds_it() {
-        let package = LedStripPackage::new(Some(TestStrip { pixels: 3 }));
+        let package = LedStripPackage::new(std::vec![("ring", TestStrip { pixels: 3 })]);
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install package");
 
@@ -403,6 +408,31 @@ mod tests {
     }
 
     #[test]
+    fn lua_names_a_strip_and_defaults_to_the_primary() {
+        let package = LedStripPackage::new(std::vec![
+            ("ring", TestStrip { pixels: 3 }),
+            ("bar", TestStrip { pixels: 5 }),
+        ]);
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install package");
+
+        let result: bool = lua
+            .load(
+                "local light = require('light')\n\
+                 local names = light.list()\n\
+                 assert(#names == 2 and names[1] == 'ring' and names[2] == 'bar')\n\
+                 local ring <close> = assert(light.open())\n\
+                 assert(light.fill('white', 'bar') and light.off('bar'))\n\
+                 local bar <close> = assert(light.open('bar'))\n\
+                 local missing, err = light.open('missing')\n\
+                 return ring:len() == 3 and bar:len() == 0 and missing == nil and err:find('missing') ~= nil",
+            )
+            .eval()
+            .expect("use both strips");
+        assert!(result);
+    }
+
+    #[test]
     fn colors_read_as_hex_or_names() {
         assert_eq!(parse_color("#ff8000").ok(), Some(Rgb8::new(255, 128, 0)));
         assert_eq!(parse_color("0000FF").ok(), Some(Rgb8::new(0, 0, 255)));
@@ -411,7 +441,7 @@ mod tests {
 
     #[test]
     fn package_fits_the_vm_package_budget() {
-        let package = LedStripPackage::new(Some(TestStrip { pixels: 2 }));
+        let package = LedStripPackage::new(std::vec![("ring", TestStrip { pixels: 2 })]);
         assert!(barracuda_vm_runtime::fits_package_budget(&package));
     }
 }

@@ -1,0 +1,29 @@
+[package]
+name = "barracuda-mpu6886-bmi270-imu"
+version = "0.1.0"
+edition = "2024"
+description = "Six-axis IMU implementation that identifies an MPU6886-family sensor or a BMI270 at one address"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-bmi270-imu.workspace = true
+barracuda-driver-mpu6886.workspace = true
+barracuda-mpu6886-imu.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

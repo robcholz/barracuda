@@ -8,7 +8,7 @@
 # at the commit docs/plugins/app-manager/pocketjs.mdx names.
 set -euo pipefail
 
-POCKETJS_COMMIT=e9e417308f094ead706754164acf91436e4d05a8
+POCKETJS_COMMIT=96e5f4084c2da45d72997c443fd478bcffb92dc7
 RUST_VERSION=1.98.1
 BUN_VERSION=1.4.0
 

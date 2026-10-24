@@ -11,7 +11,7 @@ The M5Stack StickC is an ESP32 Board from M5Stack.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen-offline`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-stickc/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,42 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-stickc/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `status-led` | Indicator LED | — |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `inertial-measurement` | Motion sensor (MPU6886) | [`motion`](/plugins/vm-imu) |
+| `power-monitor` | Battery gauge (AXP192) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `buttons` | Buttons A and B (GPIO37, GPIO39) | [`buttons`](/plugins/vm-buttons) |
+| `power-button` | Power button (AXP192 power key) | [`buttons`](/plugins/vm-buttons) |
+| `microphone` | Microphone (SPM1423 PDM) | [`audio`](/plugins/vm-audio) |
+| `infrared` | Infrared transmitter (GPIO9) | [`infrared`](/plugins/vm-infrared) |
+
+The battery gauge shares the PMIC with the display: it reads only the PMIC's
+measurement registers, and the display keeps its regulators.
+
+Early units carry an SH200Q instead of the MPU6886, which no implementation
+drives; on them the motion sensor fails to start and the Board starts without
+it.
+
+The power button is read through the PMIC, which latches a short press when the
+key is released and a long press once it has been held for the long-press time;
+the button reads pressed in one sample for each, and its events report
+a short press as a click and a long press as a long press. It sets and clears only the
+key's own interrupt bits of the PMIC. `buttons` is the primary `buttons` device.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g32` | `GPIO32` |
+| `grove-g33` | `GPIO33` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g32", "up")
+print(pin:read())
+```

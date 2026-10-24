@@ -146,9 +146,22 @@ fn rejects_empty_and_oversized_descriptions() {
 
 #[test]
 fn rejects_unknown_fields() {
-    let manifest = format!("{VALID}\nplatform = \"linux\"\n");
+    let manifest = format!("{VALID}\nboard = \"linux\"\n");
 
     assert!(parse(&manifest).is_err());
+}
+
+#[test]
+fn parses_the_platform_mechanisms_a_plugin_takes() {
+    assert!(!parse(VALID).expect("no claims").platform.wifi);
+    let manifest = parse(&format!("{VALID}\n[platform]\nwifi = true\n")).expect("Wi-Fi claim");
+    assert!(manifest.platform.wifi);
+    for claim in ["radio = true", "wifi = \"yes\""] {
+        assert!(
+            parse(&format!("{VALID}\n[platform]\n{claim}\n")).is_err(),
+            "accepted {claim:?}"
+        );
+    }
 }
 
 #[test]

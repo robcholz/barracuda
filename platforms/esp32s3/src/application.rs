@@ -2,9 +2,10 @@
 
 use crate::{
     Esp32S3Flash as Flash, Esp32S3PlatformBindings as PlatformBindings,
-    Esp32S3PlatformError as PlatformError, Esp32S3WifiDevice as WifiDevice,
-    Esp32S3WifiError as WifiError,
+    Esp32S3PlatformError as PlatformError, Esp32S3Wifi as Wifi,
 };
+#[cfg(feature = "wifi")]
+use crate::{Esp32S3WifiDevice as WifiDevice, Esp32S3WifiError as WifiError};
 
 /// The chip named in bootstrap failures.
 #[doc(hidden)]
@@ -34,6 +35,10 @@ pub fn initialize_bulk_memory(
     let mode = match memory.interface() {
         barracuda_board::ExternalMemoryInterface::QuadSpi => esp_hal::psram::PsramMode::QuadSpi,
         barracuda_board::ExternalMemoryInterface::OctalSpi => esp_hal::psram::PsramMode::OctalSpi,
+        barracuda_board::ExternalMemoryInterface::Hex => {
+            esp_println::println!("ESP32-S3 has no hex PSRAM bus; external memory stays unused");
+            return;
+        }
     };
     let config = esp_hal::psram::PsramConfig {
         mode,

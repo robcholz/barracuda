@@ -4,13 +4,13 @@ sidebarTitle: "Camera"
 description: "Capture camera frames from Lua with the `camera` package."
 ---
 
-The Camera Plugin owns the Board's primary camera and exposes frame
-capture to Lua code as the `camera` Lua package.
+The Camera Plugin owns the Board's cameras and exposes frame capture to Lua
+code as the `camera` Lua package, the primary camera by default.
 
 - Plugin ID: `camera`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: peripheral slot `camera.device` (`primary`, optional)
+- Context resources: peripheral slot `camera.devices` (`*`)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -20,29 +20,36 @@ capture to Lua code as the `camera` Lua package.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary `Camera` capability exactly
-once and installs the `camera` Lua package. OV2640/OV3660 control buses,
+This Plugin takes every `Camera` of the Board that no other Plugin claims,
+the primary one first, and installs the `camera` Lua package. OV2640, OV3660,
+and GC0308 control buses,
 parallel capture, and DMA remain owned by the implementation and Platform HAL.
 
 Lua API:
 
-- `camera.available() -> boolean`
-- `camera.open() -> handle`
-- `camera.snap([capacity]) -> bytes, pixel_format` takes one frame, with room
-  for 128 KiB unless given
+- `camera.list() -> { name, ... }`: the Board names of the cameras, the
+  primary one first
+- `camera.available([name]) -> boolean`: whether the named camera, or
+  the primary one, can be opened
+- `camera.open([name]) -> handle`: opens the named camera, or the
+  primary one
+- `camera.snap([capacity[, name]]) -> bytes, pixel_format` takes one frame
+  with the named camera, or the primary one, with room for 128 KiB of JPEG,
+  or exactly one uncompressed frame, unless given
 - `handle:descriptor() -> width, height, pixel_format`
 - `handle:capture(capacity) -> bytes`
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
 While the Board has the device, the package declares a stable interface
-(`PackageInterface::Stable`), version 2; version 2 added `camera.snap`.
+(`PackageInterface::Stable`), version 3; version 2 added `camera.snap`, and
+version 3 added `camera.list` and the camera names.
 
 `snap`, from version 2, uses the camera while no handle holds it and
 returns `nil, error` while one does.
 
 Capture storage is caller-sized and bounded to 512 KiB in bulk memory. Boards
-without a camera report unavailable. One handle is open at a time: explicit
+without a camera report unavailable. One handle per camera is open at a time: explicit
 close, lexical `<close>`, and collection prevent further operations on it and
 give the camera back, so `open` works again; Plugin revocation prevents every
 further operation.

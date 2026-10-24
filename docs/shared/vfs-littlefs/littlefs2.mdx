@@ -1,0 +1,27 @@
+---
+title: "littlefs2, patched for Barracuda"
+sidebarTitle: "littlefs2 patch"
+description: "Review the change Barracuda makes to the published littlefs2 crate, and why."
+---
+
+This is [littlefs2](https://github.com/trussed-dev/littlefs2) 0.8.1 as
+published on crates.io (upstream commit
+`f9a154aeb8a83282972367d559293761c7a0e590`), vendored in
+`shared/vfs-littlefs/littlefs2/` and used through `[patch.crates-io]` in the
+workspace manifest. The upstream tests, example, and their `[[test]]`,
+`[[example]]`, and `[dev-dependencies]` entries are dropped; everything else is
+the published crate plus the change below. It is a candidate to send upstream.
+
+| Change | Files | Why |
+| --- | --- | --- |
+| `Storage::block_count(&self)`, a provided method returning `BLOCK_COUNT`; the filesystem formats, mounts, and reports its size with it instead of the constant | `src/driver.rs`, `src/fs.rs`, `src/object_safe.rs` | A partition's size is known only at run time. With the block count a constant, `barracuda-vfs-littlefs` compiled the whole filesystem once per supported size, 16 copies and about 140 KiB in every firmware; now one `PartitionStorage` type serves every size |
+
+The littlefs C library (2.9, bundled by `littlefs2-sys` 0.4) already takes the
+block count at run time from its `lfs_config`. A storage that keeps the default
+`block_count` behaves exactly as upstream.
+
+`barracuda-vfs-littlefs` keeps the on-flash geometry its earlier releases
+wrote: `filesystem_block_count` rounds a partition's erase blocks down to the
+same fixed set of sizes, so a filesystem formatted by an earlier firmware still
+mounts and a blank partition formats to the same block count. The image builder
+lays out LittleFS resource images with the same function.

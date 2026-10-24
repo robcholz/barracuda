@@ -1,7 +1,48 @@
 name: m5stack-atom-s3-lite
 hardware:
   chip: esp32s3
+  # ESP32-S3FN8.
+  flash-size: 8mb
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    spi-output:
+      rgb-led-data:
+        # WS2812C-2020 on GPIO35 (M5Unified `_pin_table_other0` (RGBLED);
+        # EBM `m5stack_atoms3_lite`, from Sch_M5_AtomS3_v1.0, GRB).
+        data: GPIO35
+        frequency-hz: 2400000
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO4, active high (Espressif `m5stack_atoms3_lite`,
+        # Sch_M5_AtomS3 "RGB & IR" block).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO4
+  devices:
+    # The RGB LED under the button, one LED, GRB order.
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
+    # The button under the LED, GPIO41, active low with the Board's pull-up
+    # (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO41
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+exposed-io:
+  pins:
+    # Grove (PORT.CUSTOM) G1/G2: M5Stack AtomS3 Lite pin map.
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }

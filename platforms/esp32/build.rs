@@ -3,7 +3,13 @@
 use std::{env, error::Error, fs, path::PathBuf};
 
 use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
-use esp_idf_part::{AppType, DataType, Flags, Partition, PartitionTable, SubType, Type};
+use esp_idf_part::{DataType, Flags, Partition, PartitionTable, SubType};
+
+#[path = "build_app_slots.rs"]
+mod app_slots;
+
+#[path = "build_power_hold.rs"]
+mod power_hold;
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=BARRACUDA_LOG_LEVEL");
@@ -25,6 +31,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
 
+    // The Board's battery power latch, which the entry drives high. An
+    // inactive Platform gets a macro that does nothing.
+    println!("cargo:rerun-if-changed=build_power_hold.rs");
+    let power_hold = board
+        .hardware()
+        .power_hold()
+        .filter(|_| board.hardware().chip() == "esp32");
+    fs::write(
+        output.join("power_hold.rs"),
+        power_hold::power_hold_macro(power_hold)?,
+    )?;
+
     // This Platform is an unconditional dependency of the selected-Platform
     // composition, so its build script runs for every selected Board, not only
     // for esp32 Boards. When the selected Board targets a different chip this
@@ -38,29 +56,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
+    // The top linker script `platform.yml` names, and the memory map it
+    // includes in place of esp-hal's.
+    let linker_scripts = manifest.join("ld");
+    println!("cargo:rerun-if-changed={}", linker_scripts.display());
+    println!("cargo:rustc-link-search={}", linker_scripts.display());
+
     let table_path = bundle.join(board.native_layout().artifact());
     println!("cargo:rerun-if-changed={}", table_path.display());
+    println!("cargo:rerun-if-changed=build_app_slots.rs");
     let table = PartitionTable::try_from_str(fs::read_to_string(table_path)?)?;
     table.validate()?;
-    for slot in [AppType::Ota_0, AppType::Ota_1] {
-        if table
-            .find_by_subtype(Type::App, SubType::App(slot))
-            .is_none()
-        {
-            return Err(format!("ESP32 native table is missing `{slot:?}`").into());
-        }
-    }
-    let ota_slots = table
-        .partitions()
-        .iter()
-        .filter(|partition| {
-            partition.ty() == Type::App
-                && matches!(
-                    partition.subtype(),
-                    SubType::App(slot) if slot != AppType::Factory && slot != AppType::Test
-                )
-        })
-        .count();
+    let ota_slots =
+        app_slots::app_slot_count(&table).map_err(|error| format!("ESP32 native table {error}"))?;
 
     let mut generated = String::from("const BOARD_ESP32_REGIONS: &[Esp32Region] = &[\n");
     for partition in table.partitions() {

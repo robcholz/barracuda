@@ -1,0 +1,59 @@
+---
+title: "Keyboard Plugin"
+sidebarTitle: "Keyboard"
+description: "Read key presses and typed characters from the Board's keyboard in Lua with the `keyboard` package."
+---
+
+Installs the `keyboard` Lua package over the Board's keyboards, the
+primary one by default.
+
+- Plugin ID: `keyboard`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `keyboard.devices` (`*`)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `keyboard`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes every `Keyboard` of the Board that no other Plugin claims,
+the primary one first, and installs the `keyboard` Lua package. Matrix scanning or the key controller,
+the keymap, and modifier state stay with the selected implementation.
+
+Lua API:
+
+- `keyboard.list() -> { name, ... }`: the Board names of the keyboards, the
+  primary one first
+- `keyboard.available([name]) -> boolean`: whether the named keyboard, or
+  the primary one, can be opened
+- `keyboard.open([name]) -> handle`: opens the named keyboard, or the
+  primary one
+- `handle:read() -> key, pressed, text, modifiers, code`, or nothing when no
+  key changed
+- `handle:wait(timeout_ms) -> key, pressed, text, modifiers, code`, or nothing
+  when no key changed before the timeout; it checks every 10 ms
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+`key` names what the key does: its unshifted legend for a printable key
+(`"a"`, `"1"`, `";"`, `" "`), or `"enter"`, `"backspace"`, `"delete"`,
+`"tab"`, `"escape"`, `"shift"`, `"control"`, `"alt"`, `"option"`, `"fn"`,
+`"up"`, `"down"`, `"left"`, `"right"`, or `"f1"` through `"f24"`. `pressed`
+is `true` when the key went down. `text` is the character a press types
+under the keymap and the held modifiers, and `nil` for a release or a key
+that types nothing. `modifiers` adds Shift 1, Control 2, Alt 4, Option 8, and
+Fn 16 for the modifiers held after the event. `code` is the key's position,
+stable for one Board.
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2.
+
+Boards without a keyboard report unavailable. The move-only built-in
+capability permits one handle per device and boot; explicit close, lexical `<close>`,
+collection, and Plugin revocation prevent further operations. The Plugin
+performs no background scanning and owns no long-running tasks: a script
+that stops reading stops the keyboard's scan.

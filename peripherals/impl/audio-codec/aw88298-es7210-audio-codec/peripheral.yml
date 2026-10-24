@@ -1,0 +1,36 @@
+id: aw88298-es7210-audio-codec
+api-version: 1
+peripheral: audio-codec
+implementation:
+  package: barracuda-aw88298-es7210-audio-codec
+  crate: barracuda_aw88298_es7210_audio_codec
+  factory: "::{{crate}}::Aw88298Es7210AudioCodecImplementation<{{binding.control.type}}, {{binding.stream.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Aw88298Es7210Bindings::new({{binding.control.value}}, {{binding.stream.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Aw88298Es7210Config::new({{parameter.amplifier-address}}, {{parameter.input-address}}, {{parameter.power-layout}})"
+bindings:
+  # The internal bus of the amplifier, the microphone ADC, and the helper
+  # chips that power and reset them.
+  control:
+    kind: i2c-device
+  # Full-duplex I2S: the amplifier on DOUT, the ES7210 on DIN, and the
+  # ES7210's MCLK.
+  stream:
+    kind: i2s-stream
+parameters:
+  amplifier-address:
+    type: integer
+    default: 54
+  input-address:
+    type: integer
+    default: 64
+  # Which helper chips power and reset the audio parts:
+  # - cores3: M5Stack CoreS3, CoreS3 SE, and StackChan. AXP2101 (34h) ALDO1
+  #   at 1.8 V supplies the AW88298 and ALDO2 at 3.3 V the ES7210; AW9523B
+  #   (58h) P0_2 releases the AW88298's reset (M5Unified
+  #   `Power_Class::begin`, `_speaker_enabled_cb_cores3`).
+  power-layout:
+    type: enum
+    values: [cores3]
+    rust-values:
+      cores3: "::barracuda_aw88298_es7210_audio_codec::PowerLayout::CoreS3"
+    default: cores3

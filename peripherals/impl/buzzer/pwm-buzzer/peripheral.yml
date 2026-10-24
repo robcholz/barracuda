@@ -1,0 +1,14 @@
+id: pwm-buzzer
+api-version: 1
+peripheral: buzzer
+implementation:
+  package: barracuda-pwm-buzzer
+  crate: barracuda_pwm_buzzer
+  factory: "::{{crate}}::PwmBuzzerImplementation<{{binding.output.type}}>"
+  bindings-expression: "{{binding.output.value}}"
+  config-expression: "::{{crate}}::PwmBuzzerConfig::new()"
+# A passive (magnetic or piezo) buzzer on a PWM output whose timer the
+# implementation retunes for each tone; the duty cycle sets the volume.
+bindings:
+  output:
+    kind: pwm-output

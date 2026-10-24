@@ -2,12 +2,22 @@ name: m5stack-dial
 profile: screen
 hardware:
   chip: esp32s3
+  # StampS3 (ESP32-S3FN8).
+  flash-size: 8mb
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # Internal bus SCL G12, SDA G11 on M5Unified's `In_I2C` controller (M5GFX
+        # `board_M5Dial` touch configuration; M5Unified `_pin_table_i2c_ex_in`).
+        peripheral: I2C1
+        scl: GPIO12
+        sda: GPIO11
+        frequency-hz: 400000
     spi-device:
       display-spi:
         peripheral: SPI2
@@ -16,7 +26,46 @@ peripherals:
         mosi: GPIO5
         chip-select: GPIO7
         frequency-hz: 80000000
+    rmt-output:
+      rgb-led-data:
+        # StampS3 module WS2812B-2020 on GPIO21 (M5Unified `_pin_table_other0` (RGBLED)).
+        # Clocked out of RMT channel 0, so the LED takes no SPI controller
+        # from the runtime SPI pool the exposed pins use.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO21
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO3 (M5Unified `_begin_audio` board_M5Dial:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO3
+    pulse-counter:
+      knob:
+        # The knob's encoder: A GPIO41, B GPIO40 (M5Dial and M5DinMeter
+        # `DIAL_ENCODER_PIN_A`, `DIAL_ENCODER_PIN_B`), with the pull-ups and
+        # every-edge count of the PJRC Encoder library they ship.
+        peripheral: PCNT
+        a: GPIO41
+        b: GPIO40
   devices:
+    rotary-encoder:
+      implementation: quadrature-rotary-encoder
+      bindings: { counter: knob }
+    # The StampS3's RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: rgb-led-data
+        # Dial v1.1's Stamp-S3A switches the LED supply on with GPIO38 high
+        # (docs.m5stack.com K130-V11); on the StampS3 of v1.0 GPIO38 is the
+        # unused screen-FPC backlight line, so driving it is harmless.
+        power-enable: GPIO38
+      parameters:
+        led-count: 1
+        color-order: grb
     display:
       implementation: mipi-dbi-display
       bindings:
@@ -32,3 +81,45 @@ peripherals:
         invert-colors: true
         orientation: deg0
         width: 240
+    # FT3267 at 38h (M5GFX board_M5Dial `Touch_FT5x06`, 0..239 x 0..239).
+    # It leaves reset at power-on; the interrupt (GPIO14) is unused: the
+    # implementation polls.
+    touch:
+      implementation: ft5x06-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        width: 240
+        height: 240
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # WS1850S (MFRC522-compatible) RFID reader at 28h on the internal bus
+    # (M5Dial library `RC522_I2C_ADDRESS`, UIFlow `hardware/rfid.py` on
+    # SCL G12 / SDA G11). The M5Dial library starts it with a soft reset and
+    # drives no reset or interrupt pin, so neither is declared.
+    nfc-reader:
+      implementation: mfrc522-nfc-reader
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 40
+    # Buttons A (the knob's press, GPIO42) and B (GPIO0), active low with
+    # the Board's pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO42
+        button-2: GPIO0
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Port B: M5Unified
+    # `_pin_table_port_bc`.
+    port-a-scl: { pin: GPIO15 }
+    port-a-sda: { pin: GPIO13 }
+    port-b-g1: { pin: GPIO1 }
+    port-b-g2: { pin: GPIO2 }

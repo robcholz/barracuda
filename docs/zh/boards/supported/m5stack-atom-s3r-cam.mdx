@@ -26,4 +26,25 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-atom-s3r-cam/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `camera` | 摄像头（GC0308，320x240 RGB565；AtomS3R-M12 上为 OV3660，320x240 JPEG） | [`camera`](/zh/plugins/vm-camera) |
+| `inertial-measurement` | 运动传感器（BMI270，其辅助总线上带 BMM150 磁力计） | [`motion`](/zh/plugins/vm-imu) |
+| `infrared` | 红外发射器（GPIO47） | [`infrared`](/zh/plugins/vm-infrared) |
+
+AtomS3R-M12 在相同接线上装有 OV3660，也使用此 Board。摄像头实现先探测 GC0308，GC0308 无应答时再探测 OV3660；`camera:descriptor()` 给出所找到传感器的格式。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g1` | `GPIO1` |
+| `grove-g2` | `GPIO2` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g1", "up")
+print(pin:read())
+```

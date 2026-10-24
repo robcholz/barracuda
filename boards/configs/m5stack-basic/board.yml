@@ -1,22 +1,68 @@
 name: m5stack-basic
-profile: screen
+profile: screen-connected
 hardware:
   chip: esp32
+  # ESP32-D0WDQ6-V3 with 16 MB flash (units before 2020.6 had 4 MB).
+  flash-size: 16mb
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_ex_in` board_M5Stack: the internal bus, SCL G22 /
+        # SDA G21 at 400 kHz, is also Port A.
+        peripheral: I2C1
+        scl: GPIO22
+        sda: GPIO21
+        frequency-hz: 400000
     spi-device:
       display-spi:
         peripheral: SPI3
         sck: GPIO18
         mosi: GPIO23
+        # The microSD card's data out; the LCD only listens.
+        miso: GPIO19
         chip-select: GPIO14
         frequency-hz: 40000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5Stack): the microSD card shares
+        # the LCD's bus with its own chip select, GPIO4. 20 MHz stays within
+        # the SD default-speed mode's 25 MHz.
+        peripheral: SPI3
+        sck: GPIO18
+        mosi: GPIO23
+        miso: GPIO19
+        chip-select: GPIO4
+        frequency-hz: 20000000
   devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO32, dc: GPIO27, reset: GPIO33, spi: display-spi }
       parameters: { controller: ili9342c, width: 320, height: 240, invert-colors: true }
+    # IP5306 at 75h (M5Unified `Power_Class::begin`, board_M5Stack): battery
+    # level in 25 % steps and charger state only.
+    power-monitor:
+      implementation: ip5306-power-monitor
+      bindings: { i2c: internal-i2c }
+    # Buttons A, B, C on GPIO39, GPIO38, GPIO37, active low with the Board's
+    # pull-ups (M5Unified `M5Unified::update`); GPIO34-39 have no internal bias.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO39
+        button-2: GPIO38
+        button-3: GPIO37
+exposed-io:
+  pins:
+    # Ports B and C (M5Unified `_pin_table_port_bc`). Port A is the internal I2C bus
+    # (G21/G22) and stays unexposed.
+    port-b-g26: { pin: GPIO26 }
+    port-b-g36: { pin: GPIO36 }
+    port-c-g16: { pin: GPIO16 }
+    port-c-g17: { pin: GPIO17 }

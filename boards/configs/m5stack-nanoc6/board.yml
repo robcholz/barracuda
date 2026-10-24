@@ -1,7 +1,62 @@
 name: m5stack-nanoc6
+profile: connected
 hardware:
   chip: esp32c6
+  # ESP32-C6FH4.
+  flash-size: 4mb
 toolchain:
   target: riscv32imac-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    rmt-output:
+      rgb-led-data:
+        # WS2812 on GPIO20 (M5Unified `_pin_table_other0` (RGBLED); Espressif
+        # `m5stack_nanoc6` led_strip; Arduino `RGB_LED_DATA_PIN`).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO20
+      ir-transmit:
+        # IR LED on GPIO3, active high (Espressif `m5stack_nanoc6` ir_tx;
+        # Arduino `IR_TX_PIN`), on RMT channel 1 beside the RGB LED.
+        peripheral: RMT
+        channel: 1
+        pin: GPIO3
+  devices:
+    # The button on GPIO9, active low, with the internal pull-up M5Unified
+    # enables.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO9
+      parameters:
+        pull: up
+    status-led:
+      implementation: indicator-led
+      bindings:
+        # Blue LED on GPIO7, active high (Espressif m5stack_nanoc6; M5Unified
+        # `M5NanoC6_LED_PIN`).
+        pin: GPIO7
+      parameters:
+        active-level: high
+    # The RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: rgb-led-data
+        # The LED supply switch, on while GPIO19 is high (M5Unified `_setup_led`
+        # `pin_power`; Espressif `m5stack_nanoc6` led_power, active level 1).
+        power-enable: GPIO19
+      parameters:
+        led-count: 1
+        color-order: grb
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+exposed-io:
+  pins:
+    # Grove port G1/G2 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }

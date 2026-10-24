@@ -1,0 +1,30 @@
+[package]
+name = "barracuda-spi-sd-fat-removable-storage"
+version = "0.1.0"
+edition = "2024"
+description = "FAT removable-filesystem peripheral over a microSD card in SPI mode"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-board-hal.workspace = true
+barracuda-peripheral.workspace = true
+barracuda-sdmmc-fat-removable-storage.workspace = true
+embedded-hal.workspace = true
+embedded-io = "0.7"
+embedded-io-async = "0.7"
+embedded-sdmmc = { version = "0.9.0", default-features = false }
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

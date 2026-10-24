@@ -1,12 +1,28 @@
-//! Validates the selected Board against its native ESP-IDF partition table.
+//! Validates the selected Board against its native ESP-IDF partition table
+//! and projects the network links it declares, wired Ethernet and a Wi-Fi
+//! co-processor, and the SD host slots its co-processor and card use.
 
 use std::{env, error::Error, fs, path::PathBuf};
 
 use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
-use esp_idf_part::{AppType, DataType, Flags, Partition, PartitionTable, SubType, Type};
+use esp_idf_part::{DataType, Flags, Partition, PartitionTable, SubType};
+
+#[path = "../esp32/build_app_slots.rs"]
+mod app_slots;
+
+#[path = "../esp32/build_power_hold.rs"]
+mod power_hold;
+
+#[path = "build_network.rs"]
+mod network;
+
+#[path = "build_sd_host.rs"]
+mod sd_host;
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=BARRACUDA_LOG_LEVEL");
+    println!("cargo:rerun-if-changed=build_network.rs");
+    println!("cargo:rerun-if-changed=build_sd_host.rs");
     let log_level = generated_log_level()?;
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let root = manifest.join("../..");
@@ -25,6 +41,46 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
 
+    // The Board's battery power latch, which the entry drives high. An
+    // inactive Platform gets a macro that does nothing.
+    println!("cargo:rerun-if-changed=../esp32/build_power_hold.rs");
+    let power_hold = board
+        .hardware()
+        .power_hold()
+        .filter(|_| board.hardware().chip() == "esp32p4");
+    fs::write(
+        output.join("power_hold.rs"),
+        power_hold::power_hold_macro(power_hold)?,
+    )?;
+
+    println!("cargo:rustc-check-cfg=cfg(barracuda_esp32p4_ethernet)");
+    println!("cargo:rustc-check-cfg=cfg(barracuda_esp32p4_wifi_coprocessor)");
+    println!("cargo:rustc-check-cfg=cfg(barracuda_esp32p4_sd_card)");
+    let active = board.hardware().chip() == "esp32p4";
+    let ethernet = board.hardware().ethernet().filter(|_| active);
+    // The co-processor is the Platform's Wi-Fi radio, built only with the
+    // `wifi` feature, which the Plugin selection enables when an enabled
+    // Plugin takes the Platform's Wi-Fi. Without it the co-processor stays
+    // unpowered and the IP stack runs over Ethernet alone, or has no link.
+    let wifi = env::var_os("CARGO_FEATURE_WIFI").is_some();
+    let coprocessor = board
+        .hardware()
+        .wifi_coprocessor()
+        .filter(|_| active && wifi);
+    if ethernet.is_some() {
+        println!("cargo:rustc-cfg=barracuda_esp32p4_ethernet");
+    }
+    if coprocessor.is_some() {
+        println!("cargo:rustc-cfg=barracuda_esp32p4_wifi_coprocessor");
+    }
+    // The entry takes slot 0 of the SD host for the Board composition when
+    // the Board wires a card to it.
+    if active && sd_host::board_card_slot(&board)? {
+        println!("cargo:rustc-cfg=barracuda_esp32p4_sd_card");
+    }
+    let network = network::network_tokens(ethernet, coprocessor)?;
+    fs::write(output.join("esp32p4_network.rs"), network)?;
+
     // This Platform is an unconditional dependency of the selected-Platform
     // composition, so its build script runs for every selected Board, not only
     // for esp32p4 Boards. When the selected Board targets a different chip this
@@ -38,29 +94,30 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let table_path = bundle.join(board.native_layout().artifact());
-    println!("cargo:rerun-if-changed={}", table_path.display());
-    let table = PartitionTable::try_from_str(fs::read_to_string(table_path)?)?;
-    table.validate()?;
-    for slot in [AppType::Ota_0, AppType::Ota_1] {
-        if table
-            .find_by_subtype(Type::App, SubType::App(slot))
-            .is_none()
-        {
-            return Err(format!("ESP32 native table is missing `{slot:?}`").into());
+    // The top linker script `platform.yml` names, and the memory map it
+    // includes in place of esp-hal's. That map fixes the L2 cache split to
+    // esp-hal's default, so another split esp-hal would link for is refused.
+    println!("cargo:rerun-if-env-changed=ESP_HAL_CONFIG_L2_CACHE_SIZE");
+    if let Ok(l2_cache) = env::var("ESP_HAL_CONFIG_L2_CACHE_SIZE") {
+        if l2_cache.trim_matches('"') != "256KB" {
+            return Err(format!(
+                "ESP_HAL_CONFIG_L2_CACHE_SIZE={l2_cache}: the ESP32-P4 memory map in \
+                 platforms/esp32p4/ld assumes esp-hal's default 256KB L2 cache"
+            )
+            .into());
         }
     }
-    let ota_slots = table
-        .partitions()
-        .iter()
-        .filter(|partition| {
-            partition.ty() == Type::App
-                && matches!(
-                    partition.subtype(),
-                    SubType::App(slot) if slot != AppType::Factory && slot != AppType::Test
-                )
-        })
-        .count();
+    let linker_scripts = manifest.join("ld");
+    println!("cargo:rerun-if-changed={}", linker_scripts.display());
+    println!("cargo:rustc-link-search={}", linker_scripts.display());
+
+    let table_path = bundle.join(board.native_layout().artifact());
+    println!("cargo:rerun-if-changed={}", table_path.display());
+    println!("cargo:rerun-if-changed=../esp32/build_app_slots.rs");
+    let table = PartitionTable::try_from_str(fs::read_to_string(table_path)?)?;
+    table.validate()?;
+    let ota_slots = app_slots::app_slot_count(&table)
+        .map_err(|error| format!("ESP32-P4 native table {error}"))?;
 
     let mut generated = String::from("const BOARD_ESP32P4_REGIONS: &[Esp32P4Region] = &[\n");
     for partition in table.partitions() {

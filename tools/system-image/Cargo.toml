@@ -17,6 +17,7 @@ barracuda-plugin = { workspace = true, features = ["manifest"] }
 barracuda-plugin-build = { path = "../../core/plugin/crates/build" }
 barracuda-vfs.workspace = true
 barracuda-vfs-fat.workspace = true
+barracuda-vfs-littlefs.workspace = true
 clap = { version = "4", features = ["derive"] }
 critical-section = { version = "1", features = ["std"] }
 embedded-io = "0.7"
@@ -32,7 +33,6 @@ sha2 = "0.10"
 yaml-peg = { version = "1.0.8", features = ["serde"] }
 
 [dev-dependencies]
-barracuda-vfs-littlefs.workspace = true
 embedded-storage = "0.3"
 tempfile = "3"
 

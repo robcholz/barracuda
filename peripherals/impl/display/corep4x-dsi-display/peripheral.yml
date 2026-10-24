@@ -1,0 +1,23 @@
+id: corep4x-dsi-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-corep4x-dsi-display
+  crate: barracuda_corep4x_dsi_display
+  factory: "::{{crate}}::CoreP4xDsiDisplayImplementation<{{binding.host.type}}, {{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::CoreP4xDsiDisplayBindings::new({{binding.host.value}}, {{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::CoreP4xDsiDisplayConfig::new({{parameter.expander-address}}, {{parameter.power-address}})"
+bindings:
+  host:
+    kind: dsi-host
+  i2c:
+    kind: i2c-device
+parameters:
+  # M5IOE1 I/O expander: panel power, reset, and PWM backlight.
+  expander-address:
+    type: integer
+    default: 79
+  # M5PM1 power-management controller: the 5 V boost converter.
+  power-address:
+    type: integer
+    default: 110

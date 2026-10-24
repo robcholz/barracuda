@@ -1,0 +1,28 @@
+[package]
+name = "barracuda-ltr553-environment-sensor"
+version = "0.1.0"
+edition = "2024"
+description = "LTR-553ALS illuminance and proximity environment sensor over embedded-hal I2C"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-axp2101.workspace = true
+barracuda-driver-ltr553.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

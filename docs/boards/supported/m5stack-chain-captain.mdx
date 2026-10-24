@@ -11,7 +11,7 @@ The M5Stack Chain Captain is an ESP32-S3 Board from M5Stack.
 - Chip: ESP32-S3
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32s3-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-chain-captain/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,31 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-chain-captain/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | Display (JD9853) | [`display`](/plugins/vm-display) |
+| `real-time-clock` | Real-time clock (RX8130CE) | — |
+| `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `buttons` | Buttons A, B, C (GPIO1, GPIO4, GPIO5) | [`buttons`](/plugins/vm-buttons) |
+| `audio-codec` | Audio codec (ES8311) | [`audio`](/plugins/vm-audio) |
+
+The M5PM1 measures the battery voltage only. This Board does not route the
+charger's status to it, so the battery reads as charging while VIN is present
+and the cell is below 4.1 V.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO6` |
+| `port-a-sda` | `GPIO7` |
+| `port-b-g17` | `GPIO17` |
+| `port-b-g18` | `GPIO18` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

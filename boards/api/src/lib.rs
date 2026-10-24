@@ -164,6 +164,8 @@ pub enum ExternalMemoryInterface {
     QuadSpi,
     /// Eight-data-line SPI.
     OctalSpi,
+    /// Sixteen-data-line DDR bus, as in the ESP32-P4's in-package PSRAM.
+    Hex,
 }
 
 /// Board-bundled native physical-layout artifact.

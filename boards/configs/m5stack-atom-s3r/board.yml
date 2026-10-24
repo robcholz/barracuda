@@ -1,7 +1,85 @@
 name: m5stack-atom-s3r
+profile: screen
 hardware:
   chip: esp32s3
+  # ESP32-S3-PICO-1-N8R8.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified internal bus (SCL G0, SDA G45); Espressif m5stack_boards
+        # `m5_atom_s3r` `i2c_internal` agrees.
+        peripheral: I2C0
+        scl: GPIO0
+        sda: GPIO45
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        # M5GFX `board_M5AtomS3R`: SPI3, SCLK G15, MOSI G21 as the one
+        # bidirectional data line, CS G14, written at 40 MHz and probed at 8 MHz.
+        peripheral: SPI3
+        sck: GPIO15
+        mosi: GPIO21
+        three-wire: true
+        read-frequency-hz: 8000000
+        chip-select: GPIO14
+        frequency-hz: 40000000
+    rmt-output:
+      ir-transmit:
+        # IR LED driver `IR_LED_DRV` on GPIO47 (docs.m5stack.com AtomS3R,
+        # AtomS3R-CAM, and AtomS3R-Ext pin maps, "BMI270 & IR": the block's
+        # other pins are the BMI270 bus G0/G45 and the button G41 in
+        # M5Unified).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO47
+  devices:
+    display:
+      # GC9107 or ST7735S, identified from the panel's ID at start-up, lit by
+      # the LP5562 at 0x30 (M5GFX `Light_M5StackAtomS3R`).
+      implementation: atom-s3r-display
+      bindings:
+        spi: display-spi
+        dc: GPIO42
+        reset: GPIO48
+        backlight: internal-i2c
+      parameters:
+        backlight-address: 48
+    # The button under the screen, GPIO41, active low with the Board's pull-up
+    # (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO41
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 68h (M5Stack AtomS3R pin map; Espressif m5_atom_s3r).
+        address: 104
+        # M5Unified `IMU_Class::begin` (AtomS3R, -CAM, -Ext): the BMI270's X and Y
+        # swapped and the new Y inverted; the BMM150 at 10h on its auxiliary
+        # bus (`BMI270_Class::begin`), X and Z inverted, in the same Board axes.
+        axis-x: "+y"
+        axis-y: "-x"
+        magnetometer: bmm150
+        magnetometer-axis-x: "-x"
+        magnetometer-axis-z: "-z"
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+exposed-io:
+  pins:
+    # Grove (PORT.CUSTOM) G1/G2: M5Stack AtomS3R pin map.
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }

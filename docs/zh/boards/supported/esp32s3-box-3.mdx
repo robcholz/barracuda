@@ -10,7 +10,7 @@ ESP32-S3-BOX-3 是 Espressif 推出的 ESP32-S3 开发板。
 - 芯片：ESP32-S3
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32s3-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/esp32s3-box-3/partitions.csv`
 
 ## 构建和运行
@@ -25,4 +25,41 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/esp32s3-box-3/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `touch` | 触摸控制器（GT911 或 TT21100，启动时识别） | — |
+| `inertial-measurement` | 运动传感器（ICM-42607-P） | [`motion`](/zh/plugins/vm-imu) |
+| `buttons` | BOOT 按键（GPIO0） | [`buttons`](/zh/plugins/vm-buttons) |
+| `audio-codec` | 音频编解码器（ES8311 和 ES7210） | [`audio`](/zh/plugins/vm-audio) |
+
+与乐鑫 BSP 一样，触摸实现先在 `5Dh` 和 `14h` 查找 GT911，再在 `24h` 查找 TT21100；两者都由显示屏的复位线（GPIO48）复位。静音开关的状态线（GPIO1）不是按键，没有声明。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `pmod1-io1` | `GPIO42` |
+| `pmod1-io3` | `GPIO39` |
+| `pmod1-io4` | `GPIO40` |
+| `pmod1-io5` | `GPIO21` |
+| `pmod1-io7` | `GPIO38` |
+| `pmod1-io8` | `GPIO41` |
+| `pmod2-io1` | `GPIO13` |
+| `pmod2-io2` | `GPIO9` |
+| `pmod2-io3` | `GPIO12` |
+| `pmod2-io4` | `GPIO44` |
+| `pmod2-io5` | `GPIO10` |
+| `pmod2-io6` | `GPIO14` |
+| `pmod2-io7` | `GPIO11` |
+| `pmod2-io8` | `GPIO43` |
+
+这些引脚位于 ESP32-S3-BOX-3-DOCK 的 PMOD1 和 PMOD2 排针上，标注为 IO1 到 IO8。PMOD1 的 IO2 和 IO6 是 USB D+ 和 D- 线，没有开放。
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("pmod1-io1", "up")
+print(pin:read())
+```

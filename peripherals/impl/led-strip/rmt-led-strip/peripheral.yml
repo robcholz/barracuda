@@ -1,0 +1,32 @@
+id: rmt-led-strip
+api-version: 1
+peripheral: led-strip
+implementation:
+  package: barracuda-rmt-led-strip
+  crate: barracuda_rmt_led_strip
+  factory: "::{{crate}}::RmtLedStripImplementation<{{binding.data.type}}, {{binding.power-enable.type}}>"
+  bindings-expression: "::{{crate}}::RmtLedStripBindings::new({{binding.data.value}}, {{binding.power-enable.value}})"
+  config-expression: "::{{crate}}::RmtLedStripConfig::new({{parameter.led-count}}, {{parameter.color-order}})"
+# A WS2812 or SK6812 chain clocked out of one transmit channel of the
+# remote-control transceiver, so it takes no SPI controller.
+bindings:
+  data:
+    kind: rmt-output
+  # A switch some products put in the LEDs' supply, on while high (the
+  # M5Stack NanoC6's GPIO19, the Stamp-S3A's GPIO38). It starts off and the
+  # implementation switches it on.
+  power-enable:
+    kind: digital-output
+    required: false
+    initial: low
+parameters:
+  led-count:
+    type: integer
+    required: true
+  color-order:
+    type: enum
+    values: [grb, rgb]
+    default: grb
+    rust-values:
+      grb: "::barracuda_rmt_led_strip::ColorOrder::Grb"
+      rgb: "::barracuda_rmt_led_strip::ColorOrder::Rgb"

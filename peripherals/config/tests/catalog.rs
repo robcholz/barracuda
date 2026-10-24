@@ -6,9 +6,10 @@ use std::fs;
 
 use barracuda_board_config::{PeripheralParameter, parse};
 use barracuda_peripheral_config::{
-    ResolveError, load_catalog, render_board_hal, render_board_hal_for_platform, resolve_board,
+    GenerateError, ResolveError, load_catalog, render_board_hal, render_board_hal_for_platform,
+    resolve_board, validate_platform_hal,
 };
-use barracuda_platform_config::{discover_platforms, resolve_board_platform};
+use barracuda_platform_config::{HalBinding, discover_platforms, resolve_board_platform};
 use tempfile::tempdir;
 
 const INDICATOR_MANIFEST: &str = r#"
@@ -205,7 +206,7 @@ exposed-io:
 }
 
 #[test]
-fn repository_esp32s3_devkit_exposes_runtime_gpio_i2c_and_spi() {
+fn repository_esp32s3_devkit_exposes_runtime_io_beside_its_led() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let board = parse(
         &fs::read_to_string(root.join("boards/configs/esp32s3-devkitc-1/board.yml"))
@@ -224,11 +225,15 @@ fn repository_esp32s3_devkit_exposes_runtime_gpio_i2c_and_spi() {
     let rust = render_board_hal_for_platform(&board, &resolved, &platform)
         .expect("generated ESP32-S3 runtime owner");
     assert_valid_rust(&rust);
-    assert!(rust.contains("hal::RuntimeIo<4, 2, 2, 1, 1, 1, 1>"));
+    // The on-board WS2812 holds SPI2, so only SPI3 joins the runtime pool.
+    assert!(rust.contains("hal::RuntimeIo<4, 2, 1, 1, 1, 1, 1>"));
     assert!(rust.contains("controller_binding_type!(I2C0)"));
     assert!(rust.contains("controller_binding_type!(I2C1)"));
     assert!(rust.contains("controller_binding_type!(SPI2)"));
     assert!(rust.contains("controller_binding_type!(SPI3)"));
+    assert!(rust.contains("pin_binding_type!(GPIO38)"));
+    assert!(rust.contains("runtime_controller_spi3"));
+    assert!(!rust.contains("runtime_controller_spi2"));
     assert!(rust.contains("controller_binding_type!(UART1)"));
     assert!(rust.contains("controller_binding_type!(ADC1)"));
     assert!(rust.contains("runtime_adc_channel!(ADC1_CH0, GPIO1)"));
@@ -372,6 +377,38 @@ peripherals:
     assert!(rust.contains("pin_binding_type!(GPIO3)"));
     assert!(rust.contains("hal::spi_device_full_duplex"));
 
+    let three_wire = parse(
+        r#"
+name: display-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    spi-device:
+      display:
+        peripheral: SPI3
+        sck: GPIO17
+        mosi: GPIO21
+        three-wire: true
+        chip-select: GPIO15
+        frequency-hz: 40000000
+  devices:
+    display:
+      implementation: test-display
+      bindings:
+        spi: display
+        dc: GPIO33
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&three_wire, &catalog).expect("resolved three-wire device");
+    let rust = render_board_hal(&three_wire, &resolved).expect("generated three-wire device");
+    assert!(rust.contains("hal::spi_device_three_wire"));
+    assert!(rust.contains("hal::ThreeWireSpiDevice"));
+    assert_valid_rust(&rust);
+
     let invalid = parse(
         r#"
 name: display-board
@@ -477,6 +514,165 @@ peripherals:
     assert!(rust.contains("hal::i2s_dma_buffers!(1024)"));
     assert!(rust.contains("hal::i2s_stream("));
     assert!(rust.contains("test_media::Implementation"));
+}
+
+#[test]
+fn renders_a_camera_receiver_without_a_master_clock() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-camera",
+        r#"
+id: test-camera
+api-version: 1
+peripheral: camera
+implementation:
+  package: test-camera
+  crate: test_camera
+  factory: "::{{crate}}::Implementation<{{binding.capture.type}}>"
+  bindings-expression: "::{{crate}}::Bindings::new({{binding.capture.value}})"
+  config-expression: "()"
+bindings:
+  capture:
+    kind: camera-capture
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: oscillator-camera-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    camera-capture:
+      camera:
+        peripheral: LCD_CAM
+        dma: DMA_CH0
+        pclk: GPIO4
+        vsync: GPIO5
+        href: GPIO6
+        data: [GPIO7, GPIO8, GPIO9, GPIO10, GPIO11, GPIO12, GPIO13, GPIO14]
+        dma-buffer-bytes: 153600
+  devices:
+    camera:
+      implementation: test-camera
+      bindings: { capture: camera }
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved camera Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated camera HAL");
+
+    assert_valid_rust(&rust);
+    assert!(rust.contains("hal::camera_capture_without_master_clock(bindings.camera_capture_controller, bindings.camera_capture_dma, bindings.camera_capture_pclk,"));
+    assert!(rust.contains("hal::camera_dma_buffer!(153600)"));
+    assert!(!rust.contains("camera_capture_xclk"));
+}
+
+const PARALLEL_MANIFEST: &str = r#"
+id: test-parallel
+api-version: 1
+peripheral: display
+implementation:
+  package: test-parallel
+  crate: test_parallel
+  factory: "::{{crate}}::Implementation<{{binding.bus.type}}>"
+  bindings-expression: "::{{crate}}::Bindings::new({{binding.bus.value}})"
+  config-expression: "()"
+bindings:
+  bus:
+    kind: parallel-output
+parameters: {}
+"#;
+
+#[test]
+fn renders_a_parallel_output_with_data_command() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-parallel", PARALLEL_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: parallel-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    parallel-output:
+      lcd:
+        peripheral: LCD_CAM
+        dma: DMA_CH1
+        wr: GPIO11
+        dc: GPIO12
+        chip-select: GPIO14
+        data: [GPIO13, GPIO9, GPIO8, GPIO7, GPIO6, GPIO5, GPIO4, GPIO3]
+        frequency-hz: 10000000
+        dma-buffer-bytes: 4096
+  devices:
+    display:
+      implementation: test-parallel
+      bindings: { bus: lcd }
+"#,
+    )
+    .expect("Board YAML");
+    assert!(board.peripheral_io().uses_controller("LCD_CAM"));
+    assert!(board.peripheral_io().uses_dma("DMA_CH1"));
+    let resolved = resolve_board(&board, &catalog).expect("resolved parallel Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated parallel HAL");
+
+    assert_valid_rust(&rust);
+    assert!(rust.contains("hal::parallel_output_dma_buffer!(4096)"));
+    assert!(rust.contains("hal::parallel_output(bindings.display_bus_controller, bindings.display_bus_dma, bindings.display_bus_wr, bindings.display_bus_dc, bindings.display_bus_cs, bindings.display_bus_d0,"));
+    assert!(rust.contains("hal::ParallelOutputBus"));
+    assert!(rust.contains("pin_binding_type!(GPIO12)"));
+    assert!(rust.contains("pin_binding_type!(GPIO13)"));
+}
+
+#[test]
+fn renders_a_data_only_parallel_output_with_its_static_dma_buffer() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-parallel", PARALLEL_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: panel-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    parallel-output:
+      source:
+        peripheral: LCD_CAM
+        dma: DMA_CH1
+        wr: GPIO16
+        chip-select: GPIO13
+        data: [GPIO6, GPIO14, GPIO7, GPIO12, GPIO9, GPIO11, GPIO8, GPIO10]
+        frequency-hz: 16000000
+        dma-buffer-bytes: 256
+  devices:
+    panel:
+      implementation: test-parallel
+      bindings: { bus: source }
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved panel Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated panel HAL");
+
+    assert_valid_rust(&rust);
+    assert!(rust.contains("hal::parallel_output_dma_buffer!(256)"));
+    assert!(rust.contains("hal::parallel_output_data_only(bindings.panel_bus_controller, bindings.panel_bus_dma, bindings.panel_bus_wr, bindings.panel_bus_cs, bindings.panel_bus_d0,"));
+    assert!(!rust.contains("panel_bus_dc"));
+    assert!(rust.contains("hal::ParallelOutputBus"));
+    assert!(rust.contains("controller_binding_type!(DMA_CH1)"));
+    assert!(rust.contains("pin_binding_type!(GPIO10)"));
 }
 
 #[test]
@@ -701,7 +897,7 @@ fn rejects_an_implementation_without_a_registered_peripheral_api() {
         r#"
 id: future-sensor
 api-version: 1
-peripheral: environment-sensor
+peripheral: radiation-counter
 implementation:
   package: future-sensor
   crate: future_sensor
@@ -788,6 +984,117 @@ peripherals:
     assert!(rust.contains("__platform::hal::I2cDevice"));
     assert!(rust.contains("shared_i2c_environment.device()"));
     assert!(rust.contains("future_i2c_sensor::Config::new(118)"));
+    // The shared bus is Board wiring: failing to build it fails the Board,
+    // while the device on it is only logged and left absent.
+    assert!(rust.contains("pub enum GeneratedBoardError {"));
+    assert!(rust.contains(".map_err(GeneratedBoardError::"));
+    assert!(
+        rust.contains("Board peripheral `environment` (future-i2c-sensor) failed to initialize")
+    );
+    assert!(!rust.contains("(<EnvironmentFactory as PeripheralImplementation>::Error)"));
+}
+
+#[test]
+fn renders_a_gpio_binding_as_a_configurable_platform_pin() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "strapped-touch",
+        r#"
+id: strapped-touch
+api-version: 1
+peripheral: touch
+implementation:
+  package: strapped-touch
+  crate: strapped_touch
+  factory: "::{{crate}}::Implementation<{{binding.strap.type}}>"
+  bindings-expression: "{{binding.strap.value}}"
+  config-expression: "()"
+bindings:
+  strap:
+    kind: gpio
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: strap-board
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  devices:
+    touch:
+      implementation: strapped-touch
+      bindings:
+        strap: GPIO23
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved gpio binding");
+
+    let rust = render_board_hal(&board, &resolved).expect("generated gpio binding");
+    assert_valid_rust(&rust);
+    assert!(rust.contains("__platform::hal::pin_binding_type!(GPIO23)"));
+    assert!(rust.contains("strapped_touch::Implementation<::barracuda_platform_selected::__platform::hal::ConfigurablePin>"));
+    assert!(rust.contains("__platform::hal::configurable_pin(bindings.touch_strap)"));
+}
+
+#[test]
+fn renders_absent_optional_input_bindings_as_typed_none() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "pin-buttons",
+        r#"
+id: pin-buttons
+api-version: 1
+peripheral: buttons
+implementation:
+  package: pin-buttons
+  crate: pin_buttons
+  factory: "::{{crate}}::Implementation<{{binding.first.type}}, {{binding.second.type}}, {{binding.sense.type}}>"
+  bindings-expression: "({{binding.first.value}}, {{binding.second.value}}, {{binding.sense.value}})"
+  config-expression: "()"
+bindings:
+  first:
+    kind: gpio
+  second:
+    kind: gpio
+    required: false
+  sense:
+    kind: digital-input
+    required: false
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: button-board
+hardware:
+  chip: esp32
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  devices:
+    buttons:
+      implementation: pin-buttons
+      bindings:
+        first: GPIO39
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved optional bindings");
+
+    let rust = render_board_hal(&board, &resolved).expect("generated optional bindings");
+    assert_valid_rust(&rust);
+    assert!(rust.contains(
+        "pin_buttons::Implementation<::barracuda_platform_selected::__platform::hal::ConfigurablePin, ::barracuda_platform_selected::__platform::hal::ConfigurablePin, ::barracuda_platform_selected::__platform::hal::DigitalInput>"
+    ));
+    assert!(rust.contains("(::barracuda_platform_selected::__platform::hal::configurable_pin(bindings.buttons_first), None, None)"));
 }
 
 #[test]
@@ -878,6 +1185,276 @@ peripherals:
     );
 }
 
+const DSI_DISPLAY_MANIFEST: &str = r#"
+id: test-dsi-display
+api-version: 1
+peripheral: display
+implementation:
+  package: test-dsi-display
+  crate: test_dsi_display
+  factory: "::{{crate}}::Implementation<{{binding.host.type}}>"
+  bindings-expression: "{{binding.host.value}}"
+  config-expression: "()"
+bindings:
+  host:
+    kind: dsi-host
+parameters: {}
+"#;
+
+fn dsi_board(backlight: &str) -> String {
+    format!(
+        r#"
+name: dsi-board
+hardware:
+  chip: esp32p4
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    dsi-host:
+      panel:
+        peripheral: MIPI_DSI
+        dma: VDMA_CH0
+{backlight}        data-lanes: 2
+        phy-power-channel: 3
+        phy-power-millivolts: 2500
+  devices:
+    screen:
+      implementation: test-dsi-display
+      bindings: {{ host: panel }}
+"#
+    )
+}
+
+#[test]
+fn renders_a_dsi_host_with_or_without_a_backlight_pin() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-dsi-display", DSI_DISPLAY_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let render = |backlight: &str| {
+        let board = parse(&dsi_board(backlight)).expect("DSI Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("resolved DSI display");
+        let rust = render_board_hal(&board, &resolved).expect("generated DSI HAL");
+        assert_valid_rust(&rust);
+        assert!(rust.contains("controller_binding_type!(MIPI_DSI)"));
+        assert!(rust.contains("controller_binding_type!(VDMA_CH0)"));
+        assert!(rust.contains(", 2, 3, 2500)"));
+        rust
+    };
+
+    let pin = render("        backlight: GPIO22\n");
+    assert!(pin.contains("pin_binding_type!(GPIO22)"));
+    assert!(pin.contains("hal::dsi_backlight_pin(bindings.screen_host_backlight)"));
+
+    let external = render("");
+    assert!(!external.contains("GPIO22"));
+    assert!(external.contains("hal::dsi_backlight_none()"));
+}
+
+#[test]
+fn only_a_platform_with_rmii_ethernet_accepts_a_wired_board() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog = load_catalog(&root).expect("repository Implementation catalog");
+    let wired = |chip: &str| {
+        format!(
+            r#"
+name: wired-board
+hardware:
+  chip: {chip}
+  ethernet:
+    phy: {{ model: ip101gri, address: 1 }}
+    rmii:
+      reference-clock: {{ source: external, input: GPIO50 }}
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
+native-layout:
+  artifact: partitions.csv
+"#
+        )
+    };
+    let validate = |chip: &str| {
+        let board = parse(&wired(chip)).expect("wired Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("resolved wired Board");
+        let platform = resolve_board_platform(&root, chip, None).expect("repository Platform");
+        validate_platform_hal(&board, &resolved, &platform)
+    };
+
+    assert_eq!(validate("esp32p4"), Ok(()));
+    assert!(matches!(
+        validate("esp32s3"),
+        Err(GenerateError::UnsupportedHalBinding {
+            binding: HalBinding::EthernetRmii,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn only_a_platform_with_sdio_coprocessors_accepts_a_wifi_coprocessor_board() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog = load_catalog(&root).expect("repository Implementation catalog");
+    let board = |chip: &str| {
+        format!(
+            r#"
+name: coprocessor-board
+hardware:
+  chip: {chip}
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio: {{ slot: 1, clk: GPIO12, cmd: GPIO13, d0: GPIO11, d1: GPIO10, d2: GPIO9, d3: GPIO8, frequency-hz: 40000000 }}
+    reset: GPIO15
+native-layout:
+  artifact: partitions.csv
+"#
+        )
+    };
+    let validate = |chip: &str| {
+        let board = parse(&board(chip)).expect("co-processor Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("resolved co-processor Board");
+        let platform = resolve_board_platform(&root, chip, None).expect("repository Platform");
+        validate_platform_hal(&board, &resolved, &platform)
+    };
+
+    assert_eq!(validate("esp32p4"), Ok(()));
+    assert!(matches!(
+        validate("esp32s3"),
+        Err(GenerateError::UnsupportedHalBinding {
+            binding: HalBinding::WifiCoprocessorSdio,
+            ..
+        })
+    ));
+}
+
+/// A microSD card on `slot` of the SD host, with `power` lines when any.
+fn card_board(chip: &str, slot: u8, width: &str, power: &str) -> String {
+    let data = if width == "4" {
+        "[GPIO39, GPIO40, GPIO41, GPIO42]"
+    } else {
+        "[GPIO39]"
+    };
+    format!(
+        r#"
+name: card-board
+hardware:
+  chip: {chip}
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    sdmmc-device:
+      micro-sd:
+        peripheral: SDHOST
+        slot: {slot}
+        clk: GPIO43
+        cmd: GPIO44
+        data: {data}
+        bus-width: {width}
+{power}  devices:
+    micro-sd:
+      implementation: sdmmc-fat-removable-storage
+      bindings: {{ device: micro-sd }}
+"#
+    )
+}
+
+const VO4: &str = "        power-channel: 4\n        power-millivolts: 3300\n";
+
+#[test]
+fn an_sdmmc_card_takes_its_slot_through_the_platform_hand_off() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog = load_catalog(&root).expect("repository Implementation catalog");
+    let board = parse(&card_board("esp32p4", 0, "4", VO4)).expect("card Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved card Board");
+    let platform = resolve_board_platform(&root, "esp32p4", None).expect("repository Platform");
+    assert_eq!(validate_platform_hal(&board, &resolved, &platform), Ok(()));
+    let rust = render_board_hal_for_platform(&board, &resolved, &platform).expect("card HAL");
+    assert_valid_rust(&rust);
+
+    // The binding's type and value are the Platform's: the value may take
+    // the slot from the hand-off the entry passes beside the peripherals.
+    assert!(rust.contains(
+        "micro_sd_device_slot: ::barracuda_platform_selected::__platform::hal::sdmmc_slot_binding_type!(SDHOST, 0),"
+    ));
+    assert!(rust.contains(
+        "$crate::__platform_selected::__platform::hal::sdmmc_slot_binding!($peripherals, $handoff, SDHOST, 0),"
+    ));
+    assert!(!rust.contains("$peripherals.SDHOST"));
+    assert!(rust.contains("$peripherals.GPIO43,"));
+    assert!(rust.contains(
+        "($peripherals:ident) => {\n        $crate::__barracuda_generated_board_bindings!($peripherals, ())\n    };"
+    ));
+    assert!(rust.contains(
+        "hal::sdmmc_device(bindings.micro_sd_device_slot, bindings.micro_sd_device_clk, bindings.micro_sd_device_cmd, bindings.micro_sd_device_d0, bindings.micro_sd_device_d1, bindings.micro_sd_device_d2, bindings.micro_sd_device_d3, 4, 4, 3300, 25000000)"
+    ));
+
+    // The ESP32-S3 keeps building its own controller for a one-bit card.
+    let board = parse(&card_board("esp32s3", 0, "1", "")).expect("ESP32-S3 card Board");
+    let resolved = resolve_board(&board, &catalog).expect("resolved ESP32-S3 card");
+    let platform = resolve_board_platform(&root, "esp32s3", None).expect("ESP32-S3 Platform");
+    assert_eq!(validate_platform_hal(&board, &resolved, &platform), Ok(()));
+    let rust = render_board_hal_for_platform(&board, &resolved, &platform).expect("S3 card HAL");
+    assert!(rust.contains(
+        "hal::sdmmc_device_1bit(bindings.micro_sd_device_slot, bindings.micro_sd_device_clk, bindings.micro_sd_device_cmd, bindings.micro_sd_device_d0, 25000000)"
+    ));
+}
+
+#[test]
+fn a_card_needs_a_slot_and_supply_its_platform_hands_out() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog = load_catalog(&root).expect("repository Implementation catalog");
+    let validate = |chip: &str, yaml: &str| {
+        let board = parse(yaml).expect("card Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("resolved card Board");
+        let platform = resolve_board_platform(&root, chip, None).expect("repository Platform");
+        validate_platform_hal(&board, &resolved, &platform)
+    };
+
+    // The ESP32-P4 keeps slot 1 for a co-processor and hands out slot 0.
+    assert_eq!(
+        validate("esp32p4", &card_board("esp32p4", 1, "4", VO4)),
+        Err(GenerateError::UnsupportedSdmmcSlot {
+            platform: String::from("esp32p4"),
+            resource: String::from("micro-sd"),
+            slot: 1,
+        })
+    );
+    // Slot 0's pads run from LDO VO4 at 3.3 V; a Board says so.
+    for power in [
+        "",
+        "        power-channel: 4\n        power-millivolts: 1800\n",
+        "        power-channel: 3\n        power-millivolts: 3300\n",
+    ] {
+        assert!(matches!(
+            validate("esp32p4", &card_board("esp32p4", 0, "1", power)),
+            Err(GenerateError::SdmmcSlotPower { slot: 0, .. })
+        ));
+    }
+    assert_eq!(
+        validate("esp32p4", &card_board("esp32p4", 0, "1", VO4)),
+        Ok(())
+    );
+    // The ESP32-S3 powers no SD pads itself.
+    assert!(matches!(
+        validate("esp32s3", &card_board("esp32s3", 0, "1", VO4)),
+        Err(GenerateError::SdmmcSlotPower { .. })
+    ));
+    // A Platform without the binding refuses the card outright.
+    assert!(matches!(
+        validate("esp32c6", &card_board("esp32c6", 0, "1", "")),
+        Err(GenerateError::UnsupportedHalBinding {
+            binding: HalBinding::SdmmcDevice,
+            ..
+        })
+    ));
+}
+
 #[test]
 fn every_repository_peripheral_composition_resolves_and_generates() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -935,6 +1512,9 @@ fn atom_matrix_reserves_a_platform_spi_controller_without_a_fake_clock_pin() {
     assert!(rust.contains("pin_binding_type!(GPIO27)"));
     assert!(rust.contains("hal::spi_output("));
     assert!(!rust.contains("led_strip_spi_sck"));
+    // The LED's controller leaves the runtime SPI pool for the Grove pins.
+    assert!(rust.contains("runtime_controller_spi3"));
+    assert!(!rust.contains("runtime_controller_spi2"));
 }
 
 #[test]
@@ -1038,30 +1618,595 @@ fn several_displays_render_one_enum_taken_by_instance() {
     );
 }
 
-#[test]
-fn single_instance_peripherals_reject_a_second_device() {
-    let root = tempdir().expect("temporary workspace");
-    add_driver(root.path(), "indicator-led", INDICATOR_MANIFEST);
-    let catalog = load_catalog(root.path()).expect("implementation catalog");
-    let board = parse(
-        &two_device_board("indicator-led", "")
-            .replace("enable:", "pin:")
-            .replace(
-                "        pin: PB0\n",
-                "        pin: PB0\n      parameters:\n        active-level: high\n",
-            )
-            .replace(
-                "        pin: PB1\n",
-                "        pin: PB1\n      parameters:\n        active-level: high\n",
-            ),
+/// A one-pin implementation of `kind`, enough to compose a Board of it.
+fn one_pin_manifest(kind: &str) -> String {
+    format!(
+        r#"
+id: test-{kind}
+api-version: 1
+peripheral: {kind}
+implementation:
+  package: test-{kind}
+  crate: test_{crate_name}
+  factory: "::{{{{crate}}}}::Implementation<{{{{binding.enable.type}}}}>"
+  bindings-expression: "{{{{binding.enable.value}}}}"
+  config-expression: "()"
+bindings:
+  enable:
+    kind: digital-output
+    initial: low
+parameters: {{}}
+"#,
+        crate_name = kind.replace('-', "_")
     )
-    .expect("Board YAML");
-    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
-    let error = render_board_hal(&board, &resolved).expect_err("two indicators");
+}
+
+/// Every kind Plugins claim by instance, its set macro, and its associated
+/// device type.
+const CLAIMABLE_KINDS: &[(&str, &str, &str)] = &[
+    ("audio-codec", "audio_codec_set", "AudioCodec"),
+    ("buttons", "buttons_set", "Buttons"),
+    ("buzzer", "buzzer_set", "Buzzer"),
+    ("camera", "camera_set", "Camera"),
+    ("can", "can_set", "Can"),
+    ("digital-io", "digital_io_set", "DigitalIo"),
+    ("display", "display_set", "Display"),
+    ("eeprom", "eeprom_set", "Eeprom"),
+    (
+        "environment-sensor",
+        "environment_sensor_set",
+        "EnvironmentSensor",
+    ),
+    ("indicator", "indicator_set", "Indicator"),
+    ("inertial-measurement", "imu_set", "Imu"),
+    ("infrared", "infrared_set", "Infrared"),
+    ("keyboard", "keyboard_set", "Keyboard"),
+    ("led-strip", "led_strip_set", "LedStrip"),
+    ("lora", "lora_set", "Lora"),
+    ("nfc-reader", "nfc_reader_set", "NfcReader"),
+    ("power-monitor", "power_monitor_set", "PowerMonitor"),
+    ("real-time-clock", "real_time_clock_set", "RealTimeClock"),
+    ("rotary-encoder", "rotary_encoder_set", "RotaryEncoder"),
+    ("secure-element", "secure_element_set", "SecureElement"),
+    ("touch", "touch_set", "Touch"),
+    ("vibration", "vibration_set", "Vibration"),
+];
+
+#[test]
+fn every_claimed_kind_is_registered_and_covered_here() {
+    let mut kinds = CLAIMABLE_KINDS
+        .iter()
+        .map(|(kind, _, _)| *kind)
+        .collect::<Vec<_>>();
+    kinds.push("removable-storage");
+    kinds.sort_unstable();
+    assert_eq!(kinds, barracuda_peripheral_config::PERIPHERAL_APIS);
+}
+
+#[test]
+fn several_devices_of_any_claimed_kind_render_one_set_taken_by_instance() {
+    for (kind, set_macro, associated) in CLAIMABLE_KINDS {
+        let root = tempdir().expect("temporary workspace");
+        add_driver(
+            root.path(),
+            &format!("test-{kind}"),
+            &one_pin_manifest(kind),
+        );
+        let catalog = load_catalog(root.path()).expect("implementation catalog");
+        let implementation = format!("test-{kind}");
+        let board =
+            parse(&two_device_board(&implementation, "      primary: true\n")).expect("Board YAML");
+        let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+
+        let rust = render_board_hal(&board, &resolved).expect("generated HAL");
+        assert_valid_rust(&rust);
+        let set = format!("Board{associated}");
+        assert!(
+            rust.contains(&format!("::barracuda_board_hal::{set_macro}! {{")),
+            "{kind}"
+        );
+        assert!(
+            rust.contains(&format!("type {associated} = {set};")),
+            "{kind}"
+        );
+        // Instances follow the Board's device names: `back` is 0, `front` is 1.
+        assert!(
+            rust.contains(&format!("0 => self.back.take().map({set}::Back),")),
+            "{kind}"
+        );
+        assert!(
+            rust.contains(&format!("1 => self.front.take().map({set}::Front),")),
+            "{kind}"
+        );
+    }
+}
+
+#[test]
+fn several_devices_of_a_kind_need_one_primary() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-power-monitor",
+        &one_pin_manifest("power-monitor"),
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let unmarked = parse(&two_device_board("test-power-monitor", "")).expect("Board YAML");
+    let resolved = resolve_board(&unmarked, &catalog).expect("resolved composition");
+    let error = render_board_hal(&unmarked, &resolved).expect_err("ambiguous primary monitor");
+    assert!(matches!(
+        &error,
+        GenerateError::AmbiguousPrimaryPeripheral { peripheral, devices }
+            if peripheral == "power-monitor" && devices == &["back", "front"]
+    ));
     assert!(
         error
             .to_string()
-            .contains("only `display` supports several"),
+            .contains("mark exactly one `primary: true`"),
         "{error}"
     );
+}
+
+#[test]
+fn one_device_of_a_kind_keeps_its_concrete_type() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "indicator-led", INDICATOR_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(&board(
+        "indicator-led",
+        "      pin: PB0\n",
+        "      active-level: high\n",
+    ))
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+
+    let rust = render_board_hal(&board, &resolved).expect("generated HAL");
+    assert_valid_rust(&rust);
+    assert!(rust.contains("type Indicator = StatusLedPeripheral;"));
+    assert!(rust.contains("0 => self.status_led.take(),"));
+    assert!(!rust.contains("indicator_set!"));
+    // Kinds the Board lacks take nothing.
+    assert!(rust.contains("type Buzzer = ::barracuda_board_hal::UnavailableBuzzer;"));
+}
+
+#[test]
+fn a_board_declares_at_most_one_removable_slot() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-removable-storage",
+        &one_pin_manifest("removable-storage"),
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(&two_device_board(
+        "test-removable-storage",
+        "      primary: true\n",
+    ))
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+    let error = render_board_hal(&board, &resolved).expect_err("two removable slots");
+    assert!(matches!(
+        &error,
+        GenerateError::DuplicatePeripheral { peripheral } if peripheral == "removable-storage"
+    ));
+}
+
+#[test]
+fn a_device_that_fails_to_initialize_is_logged_and_left_absent() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "indicator-led", INDICATOR_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(&board(
+        "indicator-led",
+        "      pin: PB0\n",
+        "      active-level: high\n",
+    ))
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved composition");
+
+    let rust = render_board_hal(&board, &resolved).expect("generated HAL");
+    assert_valid_rust(&rust);
+    assert!(rust.contains(
+        "let status_led = match <StatusLedFactory as PeripheralImplementation>::initialize("
+    ));
+    assert!(rust.contains("Ok(peripheral) => Some(peripheral),"));
+    assert!(rust.contains(
+        "::barracuda_board_hal::__private::log::error!(\"Board peripheral `status-led` (indicator-led) failed to initialize; the Board starts without it: {:?}\", error);"
+    ));
+    assert!(rust.contains("let peripherals = GeneratedPeripherals {\n            status_led,\n"));
+    // Without a shared bus nothing else can fail the Board.
+    assert!(rust.contains("type GeneratedBoardError = core::convert::Infallible;"));
+}
+
+const ANALOG_MANIFEST: &str = r#"
+id: test-analog
+api-version: 1
+peripheral: buttons
+implementation:
+  package: test-analog
+  crate: test_analog
+  factory: "::{{crate}}::Implementation<{{binding.sense.type}}, {{binding.charging.type}}>"
+  bindings-expression: "::{{crate}}::Bindings::new({{binding.sense.value}}, {{binding.charging.value}})"
+  config-expression: "()"
+bindings:
+  sense:
+    kind: analog-input
+  charging:
+    kind: digital-input
+    required: false
+parameters: {}
+"#;
+
+const ANALOG_MONITOR_MANIFEST: &str = r#"
+id: test-analog-monitor
+api-version: 1
+peripheral: power-monitor
+implementation:
+  package: test-analog-monitor
+  crate: test_analog_monitor
+  factory: "::{{crate}}::Implementation<{{binding.sense.type}}>"
+  bindings-expression: "{{binding.sense.value}}"
+  config-expression: "()"
+bindings:
+  sense:
+    kind: analog-input
+parameters: {}
+"#;
+
+#[test]
+fn analog_inputs_on_one_controller_share_one_converter() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-analog", ANALOG_MANIFEST);
+    add_driver(root.path(), "test-analog-monitor", ANALOG_MONITOR_MANIFEST);
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: analog-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    analog-input:
+      ladder:
+        peripheral: ADC1
+        pin: GPIO5
+      battery-sense:
+        peripheral: ADC1
+        pin: GPIO6
+  devices:
+    buttons:
+      implementation: test-analog
+      bindings: { sense: ladder }
+    battery:
+      implementation: test-analog-monitor
+      bindings: { sense: battery-sense }
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved analog Implementations");
+    let rust = render_board_hal(&board, &resolved).expect("generated analog HAL");
+
+    assert_valid_rust(&rust);
+    assert_eq!(rust.matches("hal::analog_converter!(ADC1").count(), 1);
+    assert_eq!(
+        rust.matches("hal::analog_channel(&mut shared_adc_adc1_config")
+            .count(),
+        2
+    );
+    // The converter is built after both channels are enabled.
+    let converter = rust.find("hal::analog_converter!").expect("converter");
+    let last_channel = rust.rfind("hal::analog_channel(").expect("channel");
+    assert!(last_channel < converter);
+    assert!(rust.contains(
+        "hal::AnalogInputChannel<::barracuda_platform_selected::__platform::hal::controller_binding_type!(ADC1), ::barracuda_platform_selected::__platform::hal::pin_binding_type!(GPIO6)>"
+    ));
+    assert!(rust.contains("hal::analog_input(shared_adc_adc1, analog_channel_buttons_sense)"));
+    // An optional digital input left out is `None` of the Platform's input type.
+    assert!(rust.contains("analog_channel_buttons_sense), None)"));
+    assert!(board.peripheral_io().uses_controller("ADC1"));
+}
+
+#[test]
+fn renders_a_pdm_microphone_and_amplifier_stream() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-pdm",
+        r#"
+id: test-pdm
+api-version: 1
+peripheral: audio-codec
+implementation:
+  package: test-pdm
+  crate: test_pdm
+  factory: "::{{crate}}::Implementation<{{binding.stream.type}}>"
+  bindings-expression: "{{binding.stream.value}}"
+  config-expression: "()"
+bindings:
+  stream:
+    kind: pdm-i2s-stream
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let yaml = |amplifier: &str| {
+        format!(
+            "name: pdm-board\nhardware:\n  chip: test-chip\nnative-layout:\n  artifact: memory.x\nperipherals:\n  io:\n    pdm-i2s-stream:\n      audio:\n        peripheral: I2S0\n        dma: DMA_I2S0\n        clk: GPIO33\n        din: GPIO23\n{amplifier}        sample-rate-hz: 16000\n        dma-buffer-bytes: 4096\n  devices:\n    audio:\n      implementation: test-pdm\n      bindings: {{ stream: audio }}\n"
+        )
+    };
+    let board = parse(&yaml("        bclk: GPIO19\n        dout: GPIO22\n")).expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved PDM Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated PDM HAL");
+    assert_valid_rust(&rust);
+    assert!(rust.contains("hal::i2s_dma_buffers!(4096)"));
+    assert!(rust.contains("hal::pdm_i2s_stream(bindings.audio_stream_controller, bindings.audio_stream_dma, ::barracuda_platform_selected::__platform::hal::runtime_pin(bindings.audio_stream_clk), Some(::barracuda_platform_selected::__platform::hal::runtime_pin(bindings.audio_stream_din)), Some("));
+    assert!(rust.contains("16000, tx_dma, rx_dma"));
+    assert!(board.peripheral_io().uses_dma("DMA_I2S0"));
+    assert!(board.peripheral_io().uses_controller("I2S0"));
+
+    let microphone = parse(&yaml("")).expect("microphone-only Board YAML");
+    let resolved = resolve_board(&microphone, &catalog).expect("resolved PDM Implementation");
+    let rust = render_board_hal(&microphone, &resolved).expect("generated PDM HAL");
+    assert!(rust.contains("runtime_pin(bindings.audio_stream_din)), None, None, 16000"));
+
+    let half_amplifier = parse(&yaml("        bclk: GPIO19\n"));
+    assert!(half_amplifier.is_err());
+}
+
+#[test]
+fn spi_devices_on_one_controller_share_one_bus_owner() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(root.path(), "test-display", DISPLAY_MANIFEST);
+    add_driver(
+        root.path(),
+        "test-card",
+        r#"
+id: test-card
+api-version: 1
+peripheral: removable-storage
+implementation:
+  package: test-card
+  crate: test_card
+  factory: "::{{crate}}::Implementation<{{binding.spi.type}}>"
+  bindings-expression: "{{binding.spi.value}}"
+  config-expression: "()"
+bindings:
+  spi:
+    kind: spi-device
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let yaml = |card_miso: &str| {
+        format!(
+            "name: shared-spi\nhardware:\n  chip: test-chip\nnative-layout:\n  artifact: memory.x\nperipherals:\n  io:\n    spi-device:\n      display-spi:\n        peripheral: SPI3\n        sck: GPIO18\n        mosi: GPIO23\n        miso: GPIO38\n        chip-select: GPIO5\n        frequency-hz: 40000000\n      card-spi:\n        peripheral: SPI3\n        sck: GPIO18\n        mosi: GPIO23\n        miso: {card_miso}\n        chip-select: GPIO4\n        frequency-hz: 20000000\n  devices:\n    display:\n      implementation: test-display\n      bindings: {{ spi: display-spi, dc: GPIO15 }}\n    card:\n      implementation: test-card\n      bindings: {{ spi: card-spi }}\n"
+        )
+    };
+    let board = parse(&yaml("GPIO38")).expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved shared SPI");
+    let rust = render_board_hal(&board, &resolved).expect("generated shared SPI HAL");
+
+    assert_valid_rust(&rust);
+    assert_eq!(rust.matches("hal::spi_bus_manager!(").count(), 1);
+    assert!(rust.contains("hal::spi_bus_full_duplex(bindings.shared_spi_spi3_controller, bindings.shared_spi_spi3_sck, bindings.shared_spi_spi3_mosi, bindings.shared_spi_spi3_miso, "));
+    assert!(rust.contains(
+        "hal::shared_spi_device(shared_spi_spi3, bindings.display_spi_chip_select, 40000000)"
+    ));
+    assert!(rust.contains(
+        "hal::shared_spi_device(shared_spi_spi3, bindings.card_spi_chip_select, 20000000)"
+    ));
+    assert!(rust.contains("hal::SharedSpiDevice"));
+    // One controller binding field, not one per device.
+    assert!(!rust.contains("display_spi_controller"));
+    assert!(!rust.contains("card_spi_controller"));
+
+    // Devices on one controller must agree on its lines.
+    assert!(parse(&yaml("GPIO19")).is_err());
+}
+
+#[test]
+fn renders_a_quadrature_pulse_counter_and_the_new_kinds() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-encoder",
+        r#"
+id: test-encoder
+api-version: 1
+peripheral: rotary-encoder
+implementation:
+  package: test-encoder
+  crate: test_encoder
+  factory: "::{{crate}}::Implementation<{{binding.counter.type}}>"
+  bindings-expression: "{{binding.counter.value}}"
+  config-expression: "()"
+bindings:
+  counter:
+    kind: pulse-counter
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: encoder-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    pulse-counter:
+      knob:
+        peripheral: PCNT
+        a: GPIO41
+        b: GPIO40
+  devices:
+    rotary-encoder:
+      implementation: test-encoder
+      bindings: { counter: knob }
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved encoder Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated encoder HAL");
+
+    assert_valid_rust(&rust);
+    assert!(rust.contains(
+        "hal::quadrature_counter(bindings.rotary_encoder_counter_controller, bindings.rotary_encoder_counter_a, bindings.rotary_encoder_counter_b)"
+    ));
+    assert!(rust.contains("controller_binding_type!(PCNT)"));
+    assert!(rust.contains(
+        "impl ::barracuda_board_hal::rotary_encoder::RotaryEncoderPeripheral for GeneratedPeripherals"
+    ));
+    // A Board without a keyboard still answers for one.
+    assert!(rust.contains("type Keyboard = ::barracuda_board_hal::UnavailableKeyboard;"));
+    assert!(board.peripheral_io().uses_controller("PCNT"));
+}
+
+fn repository_board(name: &str, edit: impl FnOnce(String) -> String) -> String {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    edit(
+        fs::read_to_string(root.join("boards/configs").join(name).join("board.yml"))
+            .expect("repository Board"),
+    )
+}
+
+fn render_repository_board(yaml: &str) -> Result<String, GenerateError> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let board = parse(yaml).expect("valid repository Board");
+    let catalog = load_catalog(&root).expect("repository Implementation catalog");
+    let resolved = resolve_board(&board, &catalog).expect("resolved repository Board");
+    let platform = resolve_board_platform(
+        &root,
+        board.hardware().chip(),
+        board.toolchain().map(|toolchain| toolchain.target()),
+    )
+    .expect("Board Platform");
+    validate_platform_hal(&board, &resolved, &platform)?;
+    render_board_hal_for_platform(&board, &resolved, &platform)
+}
+
+#[test]
+fn pulse_train_channels_share_one_transceiver() {
+    let rust = render_repository_board(&repository_board("m5stack-capsule", |yaml| yaml))
+        .expect("generated Capsule HAL");
+    assert_valid_rust(&rust);
+    // The LED and the infrared LED take channels 0 and 1 of one RMT.
+    assert_eq!(rust.matches("hal::rmt_controller(").count(), 1);
+    assert!(rust.contains("hal::rmt_output(::barracuda_platform_selected::__platform::hal::rmt_channel!(shared_rmt_rmt, 0)"));
+    assert!(rust.contains("hal::rmt_output(::barracuda_platform_selected::__platform::hal::rmt_channel!(shared_rmt_rmt, 1)"));
+    assert!(rust.contains("type Infrared = InfraredPeripheral;"));
+    // The LED no longer holds an SPI controller: both join the runtime pool.
+    assert!(rust.contains("runtime_controller_spi3"));
+}
+
+#[test]
+fn a_pwm_output_shares_its_controller_with_the_runtime_pool() {
+    let rust = render_repository_board(&repository_board("m5stack-dial", |yaml| yaml))
+        .expect("generated Dial HAL");
+    assert_valid_rust(&rust);
+    assert_eq!(rust.matches("hal::pwm_controller!(").count(), 1);
+    assert!(rust.contains("hal::pwm_output(shared_pwm_ledc, ::barracuda_platform_selected::__platform::hal::runtime_pwm_timer!(Timer1)"));
+    assert!(rust.contains("hal::runtime_pwm_resource(shared_pwm_ledc, &["));
+    assert!(!rust.contains("runtime_pwm_controller_ledc"));
+    // The LED's supply switch starts off.
+    assert!(rust.contains("DigitalLevel::Low"));
+    assert!(rust.contains("type Buzzer = BuzzerPeripheral;"));
+    // Kinds the Dial lacks are still claimable, as nothing.
+    assert!(rust.contains("type Vibration = ::barracuda_board_hal::UnavailableVibration;"));
+}
+
+#[test]
+fn rmt_channels_and_pwm_timers_stay_within_what_the_platform_offers() {
+    // Channel 5 receives on the ESP32-S3; it cannot transmit.
+    let receive_channel = repository_board("m5stack-capsule", |yaml| {
+        yaml.replace(
+            "channel: 1\n        pin: GPIO4",
+            "channel: 5\n        pin: GPIO4",
+        )
+    });
+    assert!(matches!(
+        render_repository_board(&receive_channel),
+        Err(GenerateError::UnsupportedRmtChannel { channel: 5, .. })
+    ));
+    // Timer0 belongs to the runtime PWM pool.
+    let pool_timer = repository_board("m5stack-dial", |yaml| {
+        yaml.replace("timer: Timer1", "timer: Timer0")
+    });
+    assert!(matches!(
+        render_repository_board(&pool_timer),
+        Err(GenerateError::PwmOutputInRuntimePool { .. })
+    ));
+    // One channel serves one device.
+    let shared_channel = repository_board("m5stack-capsule", |yaml| {
+        yaml.replace(
+            "channel: 1\n        pin: GPIO4",
+            "channel: 0\n        pin: GPIO4",
+        )
+    });
+    assert!(parse(&shared_channel).is_err());
+}
+
+#[test]
+fn renders_a_twai_controller_and_the_bus_kinds() {
+    let root = tempdir().expect("temporary workspace");
+    add_driver(
+        root.path(),
+        "test-can",
+        r#"
+id: test-can
+api-version: 1
+peripheral: can
+implementation:
+  package: test-can
+  crate: test_can
+  factory: "::{{crate}}::Implementation<{{binding.controller.type}}>"
+  bindings-expression: "{{binding.controller.value}}"
+  config-expression: "()"
+bindings:
+  controller:
+    kind: twai
+parameters: {}
+"#,
+    );
+    let catalog = load_catalog(root.path()).expect("implementation catalog");
+    let board = parse(
+        r#"
+name: plc-board
+hardware:
+  chip: test-chip
+native-layout:
+  artifact: memory.x
+peripherals:
+  io:
+    twai:
+      can-bus:
+        peripheral: TWAI0
+        tx: GPIO42
+        rx: GPIO43
+  devices:
+    can:
+      implementation: test-can
+      bindings: { controller: can-bus }
+"#,
+    )
+    .expect("Board YAML");
+    let resolved = resolve_board(&board, &catalog).expect("resolved CAN Implementation");
+    let rust = render_board_hal(&board, &resolved).expect("generated CAN HAL");
+
+    assert_valid_rust(&rust);
+    assert!(rust.contains(
+        "hal::twai_controller(bindings.can_controller_controller, bindings.can_controller_tx, bindings.can_controller_rx)"
+    ));
+    assert!(rust.contains("controller_binding_type!(TWAI0)"));
+    assert!(
+        rust.contains("impl ::barracuda_board_hal::can::CanPeripheral for GeneratedPeripherals")
+    );
+    // A Board without the other new kinds still answers for them.
+    assert!(rust.contains("type NfcReader = ::barracuda_board_hal::UnavailableNfcReader;"));
+    assert!(rust.contains("type Lora = ::barracuda_board_hal::UnavailableLora;"));
+    assert!(rust.contains("type DigitalIo = ::barracuda_board_hal::UnavailableDigitalIo;"));
+    assert!(board.peripheral_io().uses_controller("TWAI0"));
 }

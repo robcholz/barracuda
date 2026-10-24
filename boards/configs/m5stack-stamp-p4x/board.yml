@@ -1,6 +1,13 @@
 name: m5stack-stamp-p4x
 hardware:
   chip: esp32p4
+  # Stamp-P4 with an ESP32-P4 of revision v3.0 or later, as M5Unified tells
+  # them apart: ESP32-P4NRW32 with 16 MB flash and 32 MB PSRAM.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: hex
+    size-bytes: 33554432
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:

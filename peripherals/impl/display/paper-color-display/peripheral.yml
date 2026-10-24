@@ -1,0 +1,28 @@
+id: paper-color-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-paper-color-display
+  crate: barracuda_paper_color_display
+  factory: "::{{crate}}::PaperColorDisplayImplementation<{{binding.spi.type}}, {{binding.dc.type}}, {{binding.busy.type}}, {{binding.reset.type}}, {{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::PaperColorBindings::new({{binding.spi.value}}, {{binding.dc.value}}, {{binding.busy.value}}, {{binding.reset.value}}, {{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::PaperColorConfig::new({{parameter.m5pm1-address}})"
+bindings:
+  spi:
+    kind: spi-device
+  dc:
+    kind: digital-output
+    initial: low
+  # ED2208 BUSY, active low.
+  busy:
+    kind: digital-input
+  reset:
+    kind: digital-output
+    initial: high
+  # Internal bus with the M5PM1, whose G0 switches the panel supply.
+  i2c:
+    kind: i2c-device
+parameters:
+  m5pm1-address:
+    type: integer
+    default: 110

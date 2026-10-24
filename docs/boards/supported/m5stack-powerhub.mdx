@@ -26,7 +26,58 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-powerhub/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `buttons` | Button A (GPIO11) and button B (power co-processor) | [`buttons`](/plugins/vm-buttons) |
+| `can` | CAN bus (TWAI, SIT1044 transceiver, TX GPIO39, RX GPIO40) | [`can`](/plugins/vm-can) |
+| `led-strip` | 8 RGB LEDs (WS2812C, power co-processor) | [`light`](/plugins/vm-led-strip) |
+| `power-monitor` | Battery voltage and current (power co-processor) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `real-time-clock` | Real-time clock (RX8130CE, power co-processor) | — |
+
+The STM32G031 power co-processor at `50h` on the internal I2C bus (SDA
+`GPIO45`, SCL `GPIO48`, 100 kHz) relays the real-time clock, the battery
+monitor, the LEDs, and button B, which sit on its own bus. Each device
+touches only its own registers of it, as M5Unified uses them; M5Stack
+publishes no register map. The battery readings come from the PowerHub Kit's
+2S pack; without one, the monitor reports no battery.
+
+The co-processor's port power switches (USB, Port A, Port C, RS485/CAN), its
+per-port voltage and current readings, and the six INA226 monitors behind it
+are not declared.
+
+The CAN controller stays off the bus until a script starts it at the bus's bit
+rate.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO16` |
+| `port-a-sda` | `GPIO15` |
+| `port-c-g1` | `GPIO1` |
+| `port-c-g2` | `GPIO2` |
+| `header-g4` | `GPIO4` |
+| `header-g5` | `GPIO5` |
+| `header-g6` | `GPIO6` |
+| `header-g7` | `GPIO7` |
+| `header-g41` | `GPIO41` |
+| `header-g42` | `GPIO42` |
+| `header-g43` | `GPIO43` |
+| `header-g44` | `GPIO44` |
+| `rs485-tx` | `GPIO8` |
+| `rs485-rx` | `GPIO17` |
+| `rs485-dir` | `GPIO18` |
+
+The `header-*` pins are on the EXT 2.54-16P header. `rs485-tx`, `rs485-rx`,
+and `rs485-dir` are the UART and direction pins of the on-board RS485
+transceiver. Open them as one RS485 port, with `rs485-dir` as the
+driver-enable pin, and the port drives the bus only while it writes:
+`uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")`.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

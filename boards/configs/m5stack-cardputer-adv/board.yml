@@ -2,6 +2,8 @@ name: m5stack-cardputer-adv
 profile: screen
 hardware:
   chip: esp32s3
+  # Stamp-S3A (ESP32-S3FN8).
+  flash-size: 8mb
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
@@ -9,13 +11,80 @@ native-layout:
 peripherals:
   io:
     spi-device:
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5Cardputer, board_M5CardputerADV);
+        # the LCD keeps SPI3.
+        peripheral: SPI2
+        sck: GPIO40
+        mosi: GPIO14
+        miso: GPIO39
+        chip-select: GPIO12
+        frequency-hz: 20000000
       display-spi:
         peripheral: SPI3
         sck: GPIO36
         mosi: GPIO35
         chip-select: GPIO37
         frequency-hz: 40000000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` (DinMeter, Cardputer, Cardputer-ADV):
+        # the battery on ADC1 GPIO10 through a divider of two.
+        peripheral: ADC1
+        pin: GPIO10
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_in` (board_M5CardputerADV): SCL GPIO9,
+        # SDA GPIO8; the ES8311 answers at 18h.
+        peripheral: I2C0
+        scl: GPIO9
+        sda: GPIO8
+        frequency-hz: 400000
+    i2s-stream:
+      audio-stream:
+        # M5Unified `_begin_audio` (board_M5CardputerADV): BCK GPIO41, WS
+        # GPIO43, data out GPIO42, data in GPIO46; no MCLK.
+        peripheral: I2S0
+        dma: DMA_CH1
+        bclk: GPIO41
+        ws: GPIO43
+        dout: GPIO42
+        din: GPIO46
+        sample-rate-hz: 16000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+    rmt-output:
+      rgb-led-data:
+        # The Stamp module's WS2812B on GPIO21 (M5Unified `_pin_table_other0`
+        # (RGBLED)), on RMT channel 0 since both SPI controllers are taken.
+        # A Stamp-S3A powers it from the display backlight line, GPIO38, so
+        # it lights while the backlight is on (docs.m5stack.com Stamp-S3A).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO21
+      ir-transmit:
+        # IR LED on GPIO44, active high (Espressif `m5stack_cardputer_adv` ir_tx;
+        # docs.m5stack.com pin map), on RMT channel 1.
+        peripheral: RMT
+        channel: 1
+        pin: GPIO44
   devices:
+    audio-codec:
+      # ES8311 clocked from BCLK (M5Unified `_speaker_enabled_cb_cardputer_adv`:
+      # MCLK=BCLK, MULT_PRE=3); its NS4150B amplifier has no enable line.
+      implementation: es8311-audio-codec
+      bindings: { control: internal-i2c, stream: audio-stream }
+      parameters:
+        clock-source: bclk
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 2
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO38, dc: GPIO34, reset: GPIO33, spi: display-spi }
@@ -27,3 +96,39 @@ peripherals:
         offset-y: 40
         invert-colors: true
         orientation: deg90
+    # The G0 button, active low with the Board's pull-up (M5Unified
+    # `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO0
+    # TCA8418 at its fixed 34h on the internal bus, interrupt on GPIO11
+    # (M5Cardputer `TCA8418KeyboardReader`, Adafruit `TCA8418_DEFAULT_ADDR`).
+    keyboard:
+      implementation: cardputer-adv-keyboard
+      bindings: { i2c: internal-i2c, interrupt: GPIO11 }
+    # The Stamp module's RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+exposed-io:
+  pins:
+    # Grove (PORT.CUSTOM) G1/G2: M5Stack Cardputer-Adv pin map.
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }
+    # EXT 2.54-14P header pins that no on-board device uses (M5Stack Cardputer-Adv pin
+    # map). Its SPI pins are the microSD bus and its I2C pins the internal bus.
+    header-g3: { pin: GPIO3 }
+    header-g4: { pin: GPIO4 }
+    header-g5: { pin: GPIO5 }
+    header-g6: { pin: GPIO6 }
+    header-g13: { pin: GPIO13 }
+    header-g15: { pin: GPIO15 }

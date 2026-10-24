@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-mipi-dbi-parallel-display"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda display implementation for MIPI DBI panels on an eight-bit Intel 8080 parallel bus"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-mipi-dbi-display.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+mipidsi.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

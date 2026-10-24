@@ -586,6 +586,15 @@ pub fn digital_output(pin: VirtualPinToken, initial: DigitalLevel) -> DigitalOut
     }
 }
 
+/// A pin a peripheral implementation switches between input and output.
+pub type ConfigurablePin = VirtualDigitalPin;
+
+/// Hands a virtual pin to the implementation that configures it.
+#[must_use]
+pub fn configurable_pin(pin: VirtualPinToken) -> ConfigurablePin {
+    VirtualDigitalPin::new(pin.hardware, pin.pin)
+}
+
 /// Reads a virtual pin as a floating input.
 #[must_use]
 pub fn digital_input(pin: VirtualPinToken) -> DigitalInput {
@@ -654,6 +663,16 @@ impl barracuda_board_hal::QuadSpiBus for QuadSpiDevice {
         frame.extend_from_slice(&[opcode, high, middle, low]);
         frame.extend_from_slice(data);
         embedded_hal::spi::SpiDevice::write(&mut self.device, &frame)
+    }
+
+    // Virtual frames carry bytes, not line widths: both forms frame alike.
+    fn write_single_line(
+        &mut self,
+        opcode: u8,
+        address: u32,
+        data: &[u8],
+    ) -> Result<(), Self::Error> {
+        self.write(opcode, address, data)
     }
 }
 

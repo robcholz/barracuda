@@ -1,0 +1,7 @@
+# Products with a screen whose flash cannot hold the Agent: online scripting
+# and the system UI, with Wi-Fi in the system UI and the Settings app. No
+# Agent, so no Sessions app; screen adds both.
+extends: [connected, ui]
+enable:
+  - builtin-app-settings
+  - system-wifi

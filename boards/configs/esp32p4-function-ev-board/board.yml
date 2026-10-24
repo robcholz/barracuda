@@ -1,10 +1,114 @@
 name: esp32p4-function-ev-board
 hardware:
   chip: esp32p4
+  # ESP32-P4 with 32 MB in-package PSRAM.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: hex
+    size-bytes: 33554432
+  # ESP32-C6-MINI-1 with Espressif's factory ESP-Hosted-MCU slave firmware
+  # (0.0.6 per ESP-Hosted's "ESP-Hosted on the ESP32-P4-Function-EV-Board")
+  # on SDIO slot 1: CLK GPIO18, CMD GPIO19, D0-D3 GPIO14-17, and the C6's
+  # enable on GPIO54 (Espressif's esp32_p4_function_ev_board
+  # `CONFIG_ESP_HOSTED_PRIV_SDIO_*` defaults and ESP-Hosted's log of the
+  # board). 40 MHz is ESP-Hosted's SDIO clock for an ESP32-P4 host.
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO18
+      cmd: GPIO19
+      d0: GPIO14
+      d1: GPIO15
+      d2: GPIO16
+      d3: GPIO17
+      frequency-hz: 40000000
+    reset: GPIO54
+  # IP101GRI 10/100 PHY on the EMAC's RMII pads. The PHY drives the 50 MHz
+  # reference clock into GPIO50. Pins, reset and PHY address 1: ESP-IDF's
+  # ethernet_init Kconfig defaults for the ESP32-P4 and espp's
+  # esp32-p4-function-ev-board BSP. GPIO35 (BOOT) is RMII TXD1.
+  ethernet:
+    phy:
+      model: ip101gri
+      address: 1
+      reset: GPIO51
+    rmii:
+      reference-clock:
+        source: external
+        input: GPIO50
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2s-stream:
+      audio-stream:
+        # ES8311 on I2S0: MCLK G13, BCLK G12, WS G10, DOUT G9, DIN G11 (Espressif
+        # esp32_p4_function_ev_board `i2s_audio_out`). DOUT and DIN are named from
+        # the ESP32-P4's side.
+        peripheral: I2S0
+        dma: DMA_CH0
+        bclk: GPIO12
+        ws: GPIO10
+        dout: GPIO9
+        din: GPIO11
+        mclk: GPIO13
+        sample-rate-hz: 16000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+    i2c-device:
+      codec-control:
+        # Espressif esp32_p4_function_ev_board `i2c_master`: SDA G7, SCL G8.
+        peripheral: I2C0
+        scl: GPIO8
+        sda: GPIO7
+        frequency-hz: 400000
+    sdmmc-device:
+      # microSD on slot 0 of the SD host, four lines on its IO_MUX pads: CLK
+      # GPIO43, CMD GPIO44, D0-D3 GPIO39-42, no card-detect line (Espressif's
+      # esp-bsp esp32_p4_function_ev_board `BSP_SD_*` and
+      # `bsp_sdcard_sdmmc_get_slot`, SDMMC_SLOT_NO_CD). Espressif's
+      # esp32_p4_function_ev_board `fs_sdcard` and esp-bsp run it at
+      # SDMMC_FREQ_HIGHSPEED (40 MHz) with its I/O on on-chip LDO VO4
+      # (`ldo_chan_id: 4`) at ESP-IDF's default 3.3 V (`SDMMC_HOST_DEFAULT`
+      # `io_voltage`). The Wi-Fi co-processor holds slot 1 of the same host.
+      micro-sd:
+        peripheral: SDHOST
+        slot: 0
+        clk: GPIO43
+        cmd: GPIO44
+        data: [GPIO39, GPIO40, GPIO41, GPIO42]
+        bus-width: 4
+        power-channel: 4
+        power-millivolts: 3300
+        frequency-hz: 40000000
+  devices:
+    audio-codec:
+      # ES8311 at 18h; speaker amplifier enable G53, active high (Espressif
+      # esp32_p4_function_ev_board `audio_dac`, `gpio_pa_control`).
+      implementation: es8311-audio-codec
+      bindings:
+        control: codec-control
+        stream: audio-stream
+        amplifier-enable: GPIO53
+      parameters:
+        address: 24
+    micro-sd:
+      implementation: sdmmc-fat-removable-storage
+      bindings: { device: micro-sd }
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.

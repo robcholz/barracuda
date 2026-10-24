@@ -1,6 +1,12 @@
 name: esp32s3-korvo-2
 hardware:
   chip: esp32s3
+  # ESP32-S3-WROOM-1-N16R8.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
@@ -25,7 +31,63 @@ peripherals:
         data: [GPIO13, GPIO47, GPIO14, GPIO3, GPIO12, GPIO42, GPIO41, GPIO39]
         xclk-frequency-hz: 20000000
         dma-buffer-bytes: 65536
+    analog-input:
+      button-ladder:
+        # Espressif board manager `esp32_s3_korvo_2_3`: `adc_button_group`
+        # on ADC1 channel 4, GPIO5.
+        peripheral: ADC1
+        pin: GPIO5
+      battery-sense:
+        # esp-bsp `esp32_s3_korvo_2.h`: BSP_BATTERY_VOLTAGE_CHANNEL is ADC1
+        # channel 5 (GPIO6), BSP_BATTERY_VOLTAGE_DIV is 4.
+        peripheral: ADC1
+        pin: GPIO6
+    i2s-stream:
+      audio-stream:
+        # esp-bsp `esp32_s3_korvo_2.h`: MCLK GPIO16, SCLK GPIO9, LCLK GPIO45,
+        # DOUT GPIO8 to the ES8311, DSIN GPIO10 from the ES7210. The camera
+        # keeps DMA_CH0.
+        peripheral: I2S0
+        dma: DMA_CH1
+        bclk: GPIO9
+        ws: GPIO45
+        dout: GPIO8
+        din: GPIO10
+        mclk: GPIO16
+        sample-rate-hz: 48000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
   devices:
+    audio-codec:
+      # ES8311 (18h) and ES7210 (40h) on BSP_I2C (SCL GPIO18, SDA GPIO17),
+      # the bus the camera's SCCB uses; BSP_POWER_AMP_IO (GPIO48) enables the
+      # speaker amplifier. The codecs run from the 3.3 V rail.
+      implementation: es8311-es7210-audio-codec
+      bindings: { control: camera-control, stream: audio-stream, amplifier-enable: GPIO48 }
+    buttons:
+      # VOLUME_UP, VOLUME_DOWN, SET, PLAY, MUTE, REC in button-index order
+      # (`voltage_range`, `max_voltage` 3000 mV).
+      implementation: adc-ladder-buttons
+      primary: true
+      bindings: { sense: button-ladder }
+      parameters:
+        levels-millivolts: "380 820 1110 1650 1980 2410"
+        idle-millivolts: 3000
+    # BOOT on GPIO0, active low, with the pull-up Espressif's esp_boards
+    # `esp32_s3_korvo_2_3` enables. GPIO0 is also the MOSI of the optional
+    # LCD board's SPI bus, which this Board does not declare.
+    boot-button:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO0
+      parameters:
+        pull: up
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 4
     camera:
       implementation: ov3660-camera
       bindings:

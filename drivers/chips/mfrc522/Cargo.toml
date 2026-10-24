@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-driver-mfrc522"
+version = "0.1.0"
+edition = "2024"
+description = "Low-level NXP MFRC522 (and WS1850S) 13.56 MHz reader Driver over I2C"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-iso14443a.workspace = true
+embedded-hal.workspace = true
+embedded-hal-async.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"
