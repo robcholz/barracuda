@@ -11,6 +11,10 @@ runtime-pwm = []
 # Set by the ESP32 Platform, whose I2S master clock reaches only fixed pins;
 # declared here because this Platform shares its I2S stream adapter.
 fixed-mclk-pins = []
+# The Board's Wi-Fi co-processor, the Platform's radio. The Plugin selection
+# enables it when an enabled Plugin takes the Platform's Wi-Fi; without it the
+# co-processor stays unpowered.
+wifi = ["dep:barracuda-driver-esp-hosted"]
 
 [dependencies]
 barracuda-board.workspace = true
@@ -27,7 +31,7 @@ sdio = "0.5.1"
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
 barracuda-board-hal.workspace = true
-barracuda-driver-esp-hosted.workspace = true
+barracuda-driver-esp-hosted = { workspace = true, optional = true }
 barracuda-driver-pi4ioe5v6408.workspace = true
 barracuda-peripheral.workspace = true
 embassy-executor.workspace = true

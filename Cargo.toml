@@ -33,6 +33,7 @@ exclude = [
     "apps/live-editor/wasm",
     # Vendored third-party crate, patched below.
     "shared/tls/mbedtls-rs",
+    "shared/vfs-littlefs/littlefs2",
     "apps/barracuda-cli/rustyline",
 ]
 
@@ -328,6 +329,10 @@ static_cell = "2"
 # mbedtls-rs 0.1.0 with a verify callback and a fallible RNG; see
 # docs/shared/tls/mbedtls-rs.mdx.
 mbedtls-rs = { path = "shared/tls/mbedtls-rs" }
+# littlefs2 0.8.1 that takes its block count from the storage value, so one
+# LittleFS instantiation serves every partition size; see
+# docs/shared/vfs-littlefs/littlefs2.mdx.
+littlefs2 = { path = "shared/vfs-littlefs/littlefs2" }
 # rustyline 18.0.1 that reads buffered input before waiting; see
 # docs/tools/cli-rustyline.mdx.
 rustyline = { path = "apps/barracuda-cli/rustyline" }

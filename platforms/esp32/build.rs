@@ -56,6 +56,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
+    // The top linker script `platform.yml` names, and the memory map it
+    // includes in place of esp-hal's.
+    let linker_scripts = manifest.join("ld");
+    println!("cargo:rerun-if-changed={}", linker_scripts.display());
+    println!("cargo:rustc-link-search={}", linker_scripts.display());
+
     let table_path = bundle.join(board.native_layout().artifact());
     println!("cargo:rerun-if-changed={}", table_path.display());
     println!("cargo:rerun-if-changed=build_app_slots.rs");

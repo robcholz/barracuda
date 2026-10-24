@@ -183,10 +183,25 @@ Platforms without a radio supply an explicitly unsupported implementation, and
 System hands the mechanism to the one Plugin that takes it and owns the
 policy.
 
+A Platform builds its radio only for a firmware that has a Plugin to take it.
+That Plugin declares `[platform] wifi = true` in its `plugin.toml`; when an
+enabled Plugin does, the generated Plugin selection enables the `wifi` Cargo
+feature of whichever Platform is selected. Without the feature a Platform with
+a radio supplies the unsupported implementation, starts no radio, and links no
+radio code: on an ESP chip the IP stack then has no link, as no Plugin could
+ever join a network, and on the ESP32-P4 the Wi-Fi co-processor stays
+unpowered while Ethernet still carries the stack. A Platform without a radio
+declares no such feature.
+
 `entropy` is the Platform's source of unpredictable bytes, fit for
 cryptographic use: the operating system's generator on Host Platforms, a true
-random number generator fed by physical noise on devices. A Platform without
-one supplies `UnavailableEntropy`, never a weaker generator. System erases its
+random number generator fed by physical noise on devices. A device whose
+noise source cannot run beside the hardware it shares, such as an ESP chip
+without its radio, whose SAR ADC noise source blocks the ADC, runs the source
+at start-up only and seeds a ChaCha20 generator from it, the software DRBG
+Espressif recommends for this case; the generator re-keys itself after every
+fill, so its state reveals no earlier output. A Platform without a source
+supplies `UnavailableEntropy`, never a weaker generator. System erases its
 type into `PluginContext::entropy`, which every Plugin that needs randomness
 clones, and the radio into `PluginContext::wifi`.
 

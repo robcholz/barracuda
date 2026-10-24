@@ -2,6 +2,10 @@ id = "wifi"
 depends-on = ["webserver", "captive-portal"]
 description = "Owns Wi-Fi AP and station lifecycle, persistence, and configuration."
 
+# Takes `PluginContext::wifi`, so the firmware builds the Platform's radio.
+[platform]
+wifi = true
+
 [tasks.build]
 cwd = "."
 command = ["bun", "../../tools/web/build.ts"]

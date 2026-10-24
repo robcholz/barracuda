@@ -14,6 +14,9 @@ build:
     espup installs the esp toolchain beside an Xtensa target. Install them with:
       cargo install espup
       espup install --toolchain-version 1.98.1.0 --targets esp32s3,esp32p4 --esp-riscv-gcc
+  # esp-hal's linkall.x over a memory map whose flash window is the 64 MiB
+  # the chip maps, not esp-hal's 4 MiB (ld/, on the build script's link path).
+  linker-script: barracuda-esp32p4.x
 hal:
   bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, i2s-stream, dsi-host, ethernet-rmii, wifi-coprocessor-sdio, power-hold, rmt-output, rmt-input]
   runtime-i2c-controllers: [I2C0, I2C1]

@@ -171,6 +171,17 @@ plugins:
 
 构建期解析出的设备在运行时仍可能缺席：初始化失败的设备会被记录并略过，`take_<kind>` 对它返回 `None`。可选槽位把这种情况当作开发板没有这个设备。带必需槽位的插件在构造时保留这个 `Option`，在它为空时从 `register` 返回 `PluginError::PeripheralUnavailable { kind, slot }`；插件管理器记录这一点，不加载这个插件以及所有依赖它的插件，并注册其余插件。
 
+### 平台机制
+
+取走平台 Wi-Fi 无线电（`PluginContext::wifi`）的那个插件要声明这一点：
+
+```toml
+[platform]
+wifi = true
+```
+
+只有在有启用的插件这样声明时，固件才构建无线电：生成的插件选择会因此启用所选平台的 `wifi` 特性。没有这样的插件时，上下文中的 `wifi` 是平台的不受支持实现，也不链接任何无线电代码。`cargo plugin sync --check` 要求插件页面的上下文资源恰好在插件声明它时列出 `wifi`。
+
 ### 主机任务
 
 生成文件的插件要声明一个具名的主机任务：
@@ -241,14 +252,14 @@ impl ExamplePlugin {
 - 构造只是把资源从上下文中移出，并用它们构建插件自己的值。它永远不注册、不派生任务，也不触碰存储；这些属于 `register` 和 `start`。
 - 插件永远不保存上下文或对它的引用。
 
-`PluginContext` 只携带平台和开发板的原始资源，无论是否有插件使用，它们都存在：
+`PluginContext` 只携带平台和开发板的原始资源，无论是否有插件使用，它们都存在；Wi-Fi 无线电除外，固件只为声明了它的插件构建无线电（见[平台机制](#平台机制)）：
 
 | 字段 | 用法 |
 | --- | --- |
 | `target_identity` | 复制 |
 | `ip_stack` | 复制 |
 | `entropy` | 克隆 `SharedEntropy` |
-| `wifi` | 由唯一拥有 Wi-Fi 策略的插件 `take()` |
+| `wifi` | 由唯一拥有 Wi-Fi 策略的插件 `take()`，该插件声明 `[platform] wifi = true` |
 | `hal.peripherals` | 用插件的 `config::peripherals` 常量调用 `take_<peripheral>(instance)` |
 | `hal.exposed_io` | 克隆 `Arc` |
 

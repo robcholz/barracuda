@@ -53,6 +53,10 @@ run time: an optional slot treats it as absent, and a required slot returns
 out. A Lua package over Board devices takes a `"*"` slot, lists the devices,
 and defaults to the first, the primary one.
 
+The one Plugin that takes the Platform's radio with `context.wifi.take()`
+declares `[platform] wifi = true` in `plugin.toml` and names `wifi` in its
+page's Context resources; a firmware builds the radio only for such a Plugin.
+
 ## 4. Register and start
 
 In `register`, require capabilities from `depends-on` Plugins, build the

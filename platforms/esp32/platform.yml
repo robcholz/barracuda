@@ -15,6 +15,10 @@ build:
     The Espressif Rust toolchain is required. Install it with:
       cargo install espup
       espup install --toolchain-version 1.98.1.0
+  # esp-hal's linkall.x over a memory map whose instruction-flash window is
+  # the 3 MiB + 192 KiB the chip maps, not esp-hal's 3 MiB (ld/, on the build
+  # script's link path).
+  linker-script: barracuda-esp32.x
 hal:
   bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, i2s-stream, pdm-i2s-stream, analog-input, pulse-counter, power-hold, rmt-output, rmt-input, pwm-output]
   runtime-i2c-controllers: [I2C0, I2C1]

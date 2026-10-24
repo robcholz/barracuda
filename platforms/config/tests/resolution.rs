@@ -96,7 +96,7 @@ fn platform_declares_the_rustup_toolchain_for_ordinary_cargo_commands() {
         &manifest,
         yaml.replace(
             "selection:\n",
-            "build:\n  rustup-toolchain: acme\n  build-std: [core, alloc]\n  environment-file: ~/export-acme.sh\n  missing-toolchain-prompt: |\n    Install the Acme Rust toolchain first.\nselection:\n",
+            "build:\n  rustup-toolchain: acme\n  build-std: [core, alloc]\n  environment-file: ~/export-acme.sh\n  missing-toolchain-prompt: |\n    Install the Acme Rust toolchain first.\n  linker-script: acme-link.x\nselection:\n",
         ),
     )
     .expect("Platform build policy");
@@ -115,6 +115,27 @@ fn platform_declares_the_rustup_toolchain_for_ordinary_cargo_commands() {
         platform.build().missing_toolchain_prompt(),
         Some("Install the Acme Rust toolchain first.\n")
     );
+    assert_eq!(platform.build().linker_script(), Some("acme-link.x"));
+}
+
+#[test]
+fn rejects_a_linker_script_path() {
+    let root = tempdir().expect("temporary workspace");
+    add_platform(root.path(), "acme", "acme", "acme-none-elf");
+    let manifest = root.path().join("platforms/acme/platform.yml");
+    let yaml = fs::read_to_string(&manifest).expect("Platform manifest");
+    fs::write(
+        &manifest,
+        yaml.replace(
+            "selection:\n",
+            "build:\n  linker-script: ld/acme-link.x\nselection:\n",
+        ),
+    )
+    .expect("Platform linker script");
+
+    let error = discover_platforms(root.path()).expect_err("a path must fail");
+
+    assert!(error.to_string().contains("linker-script"));
 }
 
 #[test]

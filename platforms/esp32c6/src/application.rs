@@ -2,9 +2,10 @@
 
 use crate::{
     Esp32c6Flash as Flash, Esp32c6PlatformBindings as PlatformBindings,
-    Esp32c6PlatformError as PlatformError, Esp32c6WifiDevice as WifiDevice,
-    Esp32c6WifiError as WifiError,
+    Esp32c6PlatformError as PlatformError, Esp32c6Wifi as Wifi,
 };
+#[cfg(feature = "wifi")]
+use crate::{Esp32c6WifiDevice as WifiDevice, Esp32c6WifiError as WifiError};
 
 /// The chip named in bootstrap failures.
 #[doc(hidden)]

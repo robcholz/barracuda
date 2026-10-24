@@ -24,7 +24,9 @@ build of the selected Board; see [Package a release](#package-a-release).
 The Board-native `resources` partition entry chooses `fatfs` or `littlefs`:
 file-region layouts use that region's `filesystem` field, ESP layouts use its
 partition subtype, and linker layouts use its inline `filesystem` annotation.
-The `resources` region must be read-only at runtime.
+The `resources` region must be read-only at runtime. A LittleFS image spans
+the block count `barracuda_vfs_littlefs::filesystem_block_count` gives for the
+region, the same one firmware mounts it with.
 
 The shared Platform resolver discovers `platforms/*/platform.yml`, checks the
 selected Board's chip and declared toolchain target, and reads that Platform's

@@ -272,6 +272,7 @@
                       "shared/tls/c-runtime",
                       "shared/tls/roots",
                       "shared/tls/mbedtls-rs",
+                      "shared/vfs-littlefs/littlefs2",
                       "tools/cli-rustyline"
                     ]
                   },
@@ -794,6 +795,7 @@
                       "zh/shared/tls/c-runtime",
                       "zh/shared/tls/roots",
                       "zh/shared/tls/mbedtls-rs",
+                      "zh/shared/vfs-littlefs/littlefs2",
                       "zh/tools/cli-rustyline"
                     ]
                   },

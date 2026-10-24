@@ -1,0 +1,15 @@
+---
+title: "为 Barracuda 打过补丁的 littlefs2"
+sidebarTitle: "littlefs2 补丁"
+description: "查看 Barracuda 对已发布的 littlefs2 crate 所做的修改，以及原因。"
+---
+
+这是 crates.io 上发布的 [littlefs2](https://github.com/trussed-dev/littlefs2) 0.8.1（上游提交 `f9a154aeb8a83282972367d559293761c7a0e590`），放在 `shared/vfs-littlefs/littlefs2/` 中，通过工作区清单中的 `[patch.crates-io]` 使用。上游的测试、示例及其 `[[test]]`、`[[example]]` 和 `[dev-dependencies]` 条目已被删除；其余部分就是已发布的 crate 加上下面的修改。这个修改可以提交给上游。
+
+| 修改 | 文件 | 原因 |
+| --- | --- | --- |
+| `Storage::block_count(&self)`：一个返回 `BLOCK_COUNT` 的默认方法；文件系统用它而不是常量来格式化、挂载和报告自身大小 | `src/driver.rs`、`src/fs.rs`、`src/object_safe.rs` | 分区大小只有在运行时才知道。块数是常量时，`barracuda-vfs-littlefs` 要为每种支持的大小各编译一遍整个文件系统，每个固件里有 16 份、约 140 KiB；现在一个 `PartitionStorage` 类型就能服务所有大小 |
+
+littlefs C 库（2.9，由 `littlefs2-sys` 0.4 打包）本来就在运行时从它的 `lfs_config` 读取块数。保留默认 `block_count` 的存储与上游行为完全相同。
+
+`barracuda-vfs-littlefs` 保持它早期版本写入的闪存布局：`filesystem_block_count` 把分区的擦除块数向下取整到同一组固定大小，所以早期固件格式化的文件系统仍能挂载，空白分区也会格式化成相同的块数。镜像构建工具用同一个函数布置 LittleFS 资源镜像。

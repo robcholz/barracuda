@@ -41,6 +41,8 @@ profile 是分层的。每个 profile 在它所扩展的 profile 之上添加插
        screen-offline = lua + ui
 ```
 
+不带 Wi-Fi 的配置也不构建无线电：取走平台无线电的是 `wifi` 插件，所以没有它时，ESP 固件不链接 Wi-Fi 驱动、无线电固件和网络任务，IP 协议栈也没有链路。
+
 `ui` 是一个层，而不是一个产品：它没有用于硬件的 Lua 包，也无法联网。带屏幕的开发板应指定 `screen`、`screen-connected` 或 `screen-offline`。
 
 `connected` 和 `screen-connected` 就是去掉 Agent 的 `headless` 和 `screen`：可以联网，Lua 脚本可以发出和处理 HTTP 请求，但没有 Agent、它的工具、消息网关和 Sessions 应用。它们用于 Flash 装不下 Agent 的开发板。名字说明了它们与 `lua` 和 `screen-offline` 的区别：设备会联网。

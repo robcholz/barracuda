@@ -16,13 +16,22 @@ pub use entropy::Esp32c6Entropy;
 #[doc(hidden)]
 pub mod application;
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(all(target_arch = "riscv32", feature = "wifi"))]
 mod wifi {
     include!("../../esp32/src/wifi.rs");
 }
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(all(target_arch = "riscv32", feature = "wifi"))]
 pub use wifi::{EspWifiDevice as Esp32c6WifiDevice, EspWifiError as Esp32c6WifiError};
+
+/// The Platform's Wi-Fi: the radio, built when an enabled Plugin takes it.
+#[cfg(all(target_arch = "riscv32", feature = "wifi"))]
+pub type Esp32c6Wifi = Esp32c6WifiDevice;
+
+/// The Platform's Wi-Fi: no enabled Plugin takes the radio, so the firmware
+/// has none.
+#[cfg(all(target_arch = "riscv32", not(feature = "wifi")))]
+pub type Esp32c6Wifi = barracuda_platform::UnavailableWifiDevice;
 
 /// Runtime access discipline declared by ESP-IDF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,7 +185,7 @@ mod internal_flash {
     /// Board/HAL bindings consumed by [`Esp32c6Platform`].
     pub struct Esp32c6PlatformBindings {
         ip_stack: Stack<'static>,
-        wifi: crate::Esp32c6WifiDevice,
+        wifi: crate::Esp32c6Wifi,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32c6Flash<'static>>>,
     }
 
@@ -193,7 +202,7 @@ mod internal_flash {
         pub fn from_initialized_services(
             board: &Board,
             ip_stack: Stack<'static>,
-            wifi: crate::Esp32c6WifiDevice,
+            wifi: crate::Esp32c6Wifi,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32c6Flash<'static>>>,
         ) -> Result<Self, Esp32c6PlatformError> {
             if board.hardware().chip() != "esp32c6" {
@@ -240,7 +249,7 @@ mod internal_flash {
 
     impl Platform for Esp32c6Platform {
         type Bindings = Esp32c6PlatformBindings;
-        type Wifi = crate::Esp32c6WifiDevice;
+        type Wifi = crate::Esp32c6Wifi;
         type Entropy = crate::Esp32c6Entropy;
         type Partitions = Esp32c6Partitions;
         type Error = Esp32c6PlatformError;
@@ -276,6 +285,7 @@ mod internal_flash {
         /// The native table exceeded or violated the generic collection.
         Partitions(PartitionsInsertError),
         /// ESP radio initialization failed.
+        #[cfg(feature = "wifi")]
         Wifi(crate::Esp32c6WifiError),
         /// An Embassy network runner could not be allocated.
         NetworkTask,
@@ -292,6 +302,7 @@ mod internal_flash {
             match self {
                 Self::IncompatibleChip => formatter.write_str("incompatible ESP32 chip"),
                 Self::Partitions(error) => write!(formatter, "invalid ESP32 partitions: {error}"),
+                #[cfg(feature = "wifi")]
                 Self::Wifi(error) => write!(formatter, "failed to initialize ESP32 Wi-Fi: {error}"),
                 Self::NetworkTask => formatter.write_str("failed to allocate ESP32 network task"),
             }
@@ -300,6 +311,7 @@ mod internal_flash {
 
     impl core::error::Error for Esp32c6PlatformError {}
 
+    #[cfg(feature = "wifi")]
     impl From<crate::Esp32c6WifiError> for Esp32c6PlatformError {
         fn from(error: crate::Esp32c6WifiError) -> Self {
             Self::Wifi(error)

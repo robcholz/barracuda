@@ -47,6 +47,10 @@ the dependencies of every listed Plugin come along on their own.
        screen-offline = lua + ui
 ```
 
+A profile without Wi-Fi builds no radio either: the `wifi` Plugin is the one
+that takes the Platform's radio, so without it an ESP firmware links no Wi-Fi
+driver, radio firmware, or network task, and its IP stack has no link.
+
 `ui` is a layer, not a product: it has no Lua packages for the hardware and
 no way online. A Board with a screen names `screen`, `screen-connected`, or
 `screen-offline`.

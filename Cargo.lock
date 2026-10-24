@@ -2825,6 +2825,8 @@ dependencies = [
  "esp-storage",
  "log",
  "nb 1.1.0",
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.5",
  "sdio",
  "static_cell",
 ]
@@ -2860,6 +2862,8 @@ dependencies = [
  "esp-storage",
  "log",
  "nb 1.1.0",
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.5",
  "static_cell",
 ]
 
@@ -2894,6 +2898,8 @@ dependencies = [
  "esp-storage",
  "log",
  "nb 1.1.0",
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.5",
  "static_cell",
 ]
 
@@ -2967,6 +2973,8 @@ dependencies = [
  "esp-storage",
  "log",
  "nb 1.1.0",
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.5",
  "sdio",
  "static_cell",
 ]
@@ -3290,6 +3298,7 @@ dependencies = [
  "barracuda-lora-plugin",
  "barracuda-message-queue-plugin",
  "barracuda-nfc-plugin",
+ "barracuda-platform-selection",
  "barracuda-power-monitor-plugin",
  "barracuda-power-plugin",
  "barracuda-pwm-plugin",
@@ -7455,8 +7464,6 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 [[package]]
 name = "littlefs2"
 version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "162d215700412b0173e3c8cfde130176fb799beccdd3d8db7cee57be3fb72ada"
 dependencies = [
  "bitflags 2.13.0",
  "delog",

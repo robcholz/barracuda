@@ -34,6 +34,21 @@ pub struct PluginManifest {
     /// by the Plugin's own slot name.
     #[serde(default)]
     pub peripherals: BTreeMap<String, BTreeMap<String, PeripheralClaim>>,
+    /// Platform mechanisms the Plugin takes from its context.
+    #[serde(default)]
+    pub platform: PlatformClaims,
+}
+
+/// Platform mechanisms a Plugin takes from `PluginContext`, declared under
+/// `[platform]`. A firmware builds a mechanism only when an enabled Plugin
+/// takes it.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PlatformClaims {
+    /// Whether the Plugin takes the Platform's Wi-Fi radio,
+    /// `PluginContext::wifi`.
+    #[serde(default)]
+    pub wifi: bool,
 }
 
 /// What fills one peripheral slot.
