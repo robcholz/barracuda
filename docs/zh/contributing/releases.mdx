@@ -17,7 +17,7 @@ tag 的格式是 `v<major>.<minor>.<patch>`。带后缀的 tag（例如 `v0.2.0-
 `.github/workflows/release.yml` 在每个 `v*` tag 上运行：
 
 1. 从 tag 读出版本：`v0.1.0` 得到 `0.1.0`。
-2. 以这个版本作为 `BARRACUDA_VERSION` 构建每块设备开发板，再对它运行 `cargo image package`。开发板按 Rust 目标分组，分组方式与 CI 相同，都由 `.github/scripts/board-matrix.sh` 给出。主机开发板不发布。
+2. 以这个版本作为 `BARRACUDA_VERSION` 构建每块设备开发板，再对它运行 `cargo image package`。开发板按 Rust 目标分组，每个 runner 最多 12 块，分组方式与 CI 相同，都由 `.github/scripts/board-matrix.sh` 给出。主机开发板不发布。
 3. 发布每块开发板一个压缩包和 `SHA256SUMS`，附上 GitHub 自动生成的更新说明。
 
 任何一块开发板构建失败都会让整个发布停止，所以一次发布总是包含每块设备开发板。
