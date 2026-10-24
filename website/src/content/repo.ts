@@ -4,6 +4,6 @@
 /** Platforms: the folders under `platforms/` with a `platform.yml`. */
 export const PLATFORMS = 8;
 /** Plugins: the folders under `plugins/` with a `plugin.toml`. */
-export const PLUGINS = 54;
+export const PLUGINS = 67;
 /** Ways to chat: the Plugins that add an iMessage Gateway channel. */
 export const CHANNELS = 6;
