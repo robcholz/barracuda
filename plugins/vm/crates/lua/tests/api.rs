@@ -1494,3 +1494,344 @@ fn table_pairs_reads_every_entry_without_coercing_keys() -> Result<()> {
     assert!(with_function.pairs().is_err());
     Ok(())
 }
+
+/// A package registering a library under `name`, counting its installations,
+/// that then runs `adapter` when given.
+struct LazyPackage {
+    name: &'static str,
+    adapter: Option<&'static str>,
+    installs: Rc<Cell<u32>>,
+}
+
+impl Package for LazyPackage {
+    fn install(&self, lua: &mut Lua) -> Result<()> {
+        self.installs.set(self.installs.get().saturating_add(1));
+        lua.register_lib(self.name, |package| package.set("value", 42_i64))?;
+        match self.adapter {
+            Some(adapter) => lua.load(adapter).exec(),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Finds a [`LazyPackage`] for each of `names`, sharing one install counter.
+fn find_lazy(
+    names: &'static [&'static str],
+    adapter: Option<&'static str>,
+    installs: &Rc<Cell<u32>>,
+) -> impl Fn(&str) -> Option<Box<dyn Package>> + 'static {
+    let installs = Rc::clone(installs);
+    move |name| {
+        let name = names.iter().copied().find(|known| *known == name)?;
+        Some(Box::new(LazyPackage {
+            name,
+            adapter,
+            installs: Rc::clone(&installs),
+        }))
+    }
+}
+
+const UNKNOWN_MODULE: &str = "module 'missing' not found:\n\tno field package.preload['missing']";
+
+#[test]
+fn a_found_package_installs_when_first_required_and_is_cached() -> Result<()> {
+    let installs = Rc::new(Cell::new(0));
+    let mut lua = Lua::new()?;
+    lua.set_package_finder(0, find_lazy(&["lazy"], None, &installs));
+    assert_eq!(installs.get(), 0);
+    let untouched: bool = lua.load("return 1 + 1 == 2").eval()?;
+    assert!(untouched);
+    assert_eq!(installs.get(), 0);
+
+    let result: (i64, String, i64, bool) = lua
+        .load(
+            "local first, loader = require('lazy'); local second = require('lazy'); \
+             return first.value, loader, select('#', require('lazy')), rawequal(first, second)",
+        )
+        .eval()?;
+    assert_eq!(result, (42, ":preload:".into(), 1, true));
+    assert_eq!(installs.get(), 1);
+
+    let again: bool = lua
+        .load("return rawequal(require('lazy'), require('lazy'))")
+        .eval()?;
+    assert!(again);
+    assert_eq!(installs.get(), 1);
+    Ok(())
+}
+
+#[test]
+fn a_package_that_loads_itself_while_installing_is_returned_cached() -> Result<()> {
+    let installs = Rc::new(Cell::new(0));
+    let mut lua = Lua::new()?;
+    lua.set_package_finder(
+        0,
+        find_lazy(
+            &["adapted"],
+            Some("local package = require('adapted'); package.adapted = true"),
+            &installs,
+        ),
+    );
+    let result: (bool, i64) = lua
+        .load("return require('adapted').adapted, select('#', require('adapted'))")
+        .eval()?;
+    assert_eq!(result, (true, 1));
+    assert_eq!(installs.get(), 1);
+    Ok(())
+}
+
+#[test]
+fn unknown_modules_fail_the_same_with_or_without_a_finder() -> Result<()> {
+    let installs = Rc::new(Cell::new(0));
+    let mut plain = Lua::new()?;
+    let mut finding = Lua::new()?;
+    finding.set_package_finder(0, find_lazy(&["lazy"], None, &installs));
+    for lua in [&mut plain, &mut finding] {
+        let (ok, error): (bool, String) = lua.load("return pcall(require, 'missing')").eval()?;
+        assert!(!ok);
+        assert_eq!(error, UNKNOWN_MODULE);
+    }
+
+    // A package that registers nothing under the name is not found either.
+    let mut misnamed = Lua::new()?;
+    misnamed.set_package_finder(0, {
+        let installs = Rc::clone(&installs);
+        move |_name| {
+            Some(Box::new(LazyPackage {
+                name: "other",
+                adapter: None,
+                installs: Rc::clone(&installs),
+            }) as Box<dyn Package>)
+        }
+    });
+    let (ok, error): (bool, String) = misnamed.load("return pcall(require, 'missing')").eval()?;
+    assert!(!ok);
+    assert_eq!(error, UNKNOWN_MODULE);
+    assert_eq!(installs.get(), 1);
+    Ok(())
+}
+
+#[test]
+fn a_package_installs_mid_script_while_the_instruction_hook_yields() -> Result<()> {
+    let hook_calls = Rc::new(Cell::new(0_u32));
+    let installs = Rc::new(Cell::new(0));
+    let mut lua = Lua::new()?;
+    lua.set_instruction_hook(100, {
+        let hook_calls = Rc::clone(&hook_calls);
+        move || hook_calls.set(hook_calls.get().saturating_add(1))
+    })?;
+    // The adapter runs far longer than the hook's interval: a hook yield
+    // inside the installation would fail it.
+    lua.set_package_finder(
+        0,
+        find_lazy(
+            &["busy"],
+            Some(
+                "local n = 0; for i = 1, 10000 do n = n + i end; \
+                 require('busy').sum = n",
+            ),
+            &installs,
+        ),
+    );
+
+    let result: (i64, i64, i64) = futures_lite::future::block_on(
+        lua.load(
+            "local n = 0; for i = 1, 10000 do n = n + i end; \
+             local busy = require('busy'); \
+             for i = 1, 10000 do n = n + i end; \
+             return busy.value, busy.sum, n",
+        )
+        .eval_async(),
+    )?;
+    assert_eq!(result, (42, 50_005_000, 100_010_000));
+    assert_eq!(installs.get(), 1);
+    assert!(
+        hook_calls.get() >= 100,
+        "hook ran {} times",
+        hook_calls.get()
+    );
+    Ok(())
+}
+
+struct Looping;
+
+impl Package for Looping {
+    fn install(&self, lua: &mut Lua) -> Result<()> {
+        lua.load("require('loop')").exec()
+    }
+}
+
+#[test]
+fn packages_install_inside_one_another_up_to_a_bound() -> Result<()> {
+    let installs = Rc::new(Cell::new(0));
+    let mut lua = Lua::new()?;
+    lua.set_package_finder(0, {
+        let installs = Rc::clone(&installs);
+        move |name| {
+            let (name, adapter) = match name {
+                "outer" => ("outer", "require('outer').inner = require('inner')"),
+                "inner" => ("inner", "require('inner').ready = true"),
+                // Requires itself before registering anything.
+                "loop" => return Some(Box::new(Looping) as Box<dyn Package>),
+                _ => return None,
+            };
+            Some(Box::new(LazyPackage {
+                name,
+                adapter: Some(adapter),
+                installs: Rc::clone(&installs),
+            }) as Box<dyn Package>)
+        }
+    });
+    let ready: bool = lua.load("return require('outer').inner.ready").eval()?;
+    assert!(ready);
+    assert_eq!(installs.get(), 2);
+
+    let (ok, error): (bool, String) = lua.load("return pcall(require, 'loop')").eval()?;
+    assert!(!ok);
+    assert!(error.contains("too deeply"), "{error}");
+    Ok(())
+}
+
+struct Broken(Rc<Cell<u32>>);
+
+impl Package for Broken {
+    fn install(&self, _lua: &mut Lua) -> Result<()> {
+        self.0.set(self.0.get().saturating_add(1));
+        Err(Error::runtime("broken package"))
+    }
+}
+
+#[test]
+fn a_failed_installation_is_an_error_of_that_require() -> Result<()> {
+    let attempts = Rc::new(Cell::new(0));
+    let mut lua = Lua::new()?;
+    lua.set_package_finder(0, {
+        let attempts = Rc::clone(&attempts);
+        move |name| {
+            (name == "broken").then(|| Box::new(Broken(Rc::clone(&attempts))) as Box<dyn Package>)
+        }
+    });
+    let result: (bool, String, bool) = lua
+        .load(
+            "local ok, error = pcall(require, 'broken'); \
+             return ok, error, (pcall(require, 'broken'))",
+        )
+        .eval()?;
+    assert_eq!(result, (false, "broken package".into(), false));
+    assert_eq!(attempts.get(), 2);
+
+    let error = lua
+        .load("require('broken')")
+        .exec()
+        .err()
+        .ok_or_else(|| Error::runtime("broken package installed"))?;
+    assert_eq!(error.kind(), ErrorKind::Runtime);
+    Ok(())
+}
+
+/// The system allocator, refusing to hold more than `limit` bytes at once.
+struct LimitedAllocator {
+    used: AtomicUsize,
+    limit: usize,
+}
+
+unsafe impl GlobalAlloc for LimitedAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let used = self.used.fetch_add(layout.size(), Ordering::Relaxed);
+        if used.saturating_add(layout.size()) > self.limit {
+            self.used.fetch_sub(layout.size(), Ordering::Relaxed);
+            return core::ptr::null_mut();
+        }
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+        self.used.fetch_sub(layout.size(), Ordering::Relaxed);
+        unsafe { System.dealloc(pointer, layout) };
+    }
+}
+
+#[test]
+fn a_require_without_headroom_is_a_memory_error_and_installs_nothing() -> Result<()> {
+    let allocator = LimitedAllocator {
+        used: AtomicUsize::new(0),
+        limit: 256 * 1024,
+    };
+    let installs = Rc::new(Cell::new(0));
+    let mut lua = unsafe { Lua::new_with_allocator(&raw const allocator) }?;
+    lua.set_package_finder(64 * 1024, find_lazy(&["lazy"], None, &installs));
+
+    // The script's own data leaves less than the headroom; it still fits.
+    let (ok, error, held): (bool, String, i64) = lua
+        .load(
+            "held = {}; for i = 1, 40 do held[i] = string.rep('x', 5000) .. i end; \
+             local ok, error = pcall(require, 'lazy'); return ok, error, #held",
+        )
+        .eval()?;
+    assert_eq!((ok, error.as_str(), held), (false, "not enough memory", 40));
+    assert_eq!(installs.get(), 0);
+
+    let error = lua
+        .load("require('lazy')")
+        .exec()
+        .err()
+        .ok_or_else(|| Error::runtime("installed without headroom"))?;
+    assert_eq!(error.kind(), ErrorKind::Memory);
+
+    // Freed, the same heap has the headroom.
+    let value: i64 = lua
+        .load("held = nil; return require('lazy').value")
+        .eval()?;
+    assert_eq!(value, 42);
+    assert_eq!(installs.get(), 1);
+    drop(lua);
+    Ok(())
+}
+
+#[test]
+fn an_installation_that_runs_out_of_memory_leaves_the_script_usable() -> Result<()> {
+    let allocator = LimitedAllocator {
+        used: AtomicUsize::new(0),
+        limit: 256 * 1024,
+    };
+    let installs = Rc::new(Cell::new(0));
+    let mut lua = unsafe { Lua::new_with_allocator(&raw const allocator) }?;
+    lua.set_package_finder(0, {
+        let installs = Rc::clone(&installs);
+        move |name| {
+            let (name, adapter) = match name {
+                // Keeps more than the whole heap.
+                "greedy" => (
+                    "greedy",
+                    "require('greedy').held = string.rep('x', 512 * 1024)",
+                ),
+                "small" => ("small", "require('small').ready = true"),
+                _ => return None,
+            };
+            Some(Box::new(LazyPackage {
+                name,
+                adapter: Some(adapter),
+                installs: Rc::clone(&installs),
+            }) as Box<dyn Package>)
+        }
+    });
+
+    let result: (bool, String, bool, bool) = lua
+        .load(
+            "local ok, error = pcall(require, 'greedy'); \
+             local second = pcall(require, 'greedy'); \
+             return ok, error, second, require('small').ready",
+        )
+        .eval()?;
+    assert_eq!(result, (false, "not enough memory".into(), false, true));
+    assert_eq!(installs.get(), 3);
+
+    let error = lua
+        .load("require('greedy')")
+        .exec()
+        .err()
+        .ok_or_else(|| Error::runtime("greedy package installed"))?;
+    assert_eq!(error.kind(), ErrorKind::Memory);
+    drop(lua);
+    Ok(())
+}
