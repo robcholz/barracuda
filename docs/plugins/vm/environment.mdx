@@ -37,7 +37,7 @@ remain local to that one Lua state.
 | `tonumber`, `tostring`, `type` | Basic value conversion and inspection. |
 | `getmetatable`, `setmetatable` | Inspect and assign ordinary Lua metatables. Native userdata metatables are protected. |
 | `rawequal`, `rawget`, `rawlen`, `rawset` | Bypass ordinary Lua metamethod dispatch for table operations. |
-| `require` | Load a native package installed into this Lua state. |
+| `require` | Load a native package available to this Lua state, installing it on first use. |
 | `string` | Lua's standard string manipulation library. |
 | `table` | Lua's standard table manipulation library. |
 | `math` | Lua's standard mathematical library, installed by the VM (see below). |
@@ -73,9 +73,12 @@ During Plugin registration, the VM selects the complete built-in package plan
 from `barracuda-vm-builtin-packages`. Each `vm.run` call applies that immutable
 plan to its own Lua state. The VM Plugin also provides `LuaPackageRegistry`;
 dependent Plugins register their packages into it during the same unified
-Plugin registration phase, and every new Lua state installs those registered
-packages. The built-in plan installs a message-backed implementation of Lua's
-standard stream I/O shape:
+Plugin registration phase. `lua_package_registry.install` installs the few
+registered packages that extend the built-in `io` and `os` tables, such as
+`vm-filesystem` and `vm-time`, and lets the script require every other one,
+which installs into the state when the script first requires it (see
+[Native modules](#native-modules)). The built-in plan installs a
+message-backed implementation of Lua's standard stream I/O shape:
 
 - `io.stdin`, `io.stdout`, and `io.stderr` are virtual stream handles. They do
   not expose host file descriptors.
@@ -121,7 +124,11 @@ completed, failed, and cancelled executions are omitted.
 
 `require` resolves the already-loaded `string`, `table`, `math`, and `utf8`
 standard libraries, then only searches the internal preload table populated
-through Rust `register_lib`. It is Barracuda's own (`crates/lua/c/require.c`):
+through Rust `register_lib`. When the name is not there, it asks the
+`LuaPackageRegistry` for a registered package by that name that the run's
+scope admits, installs it, and looks again; the script gets the same module
+as if the package had been installed before it ran. It is Barracuda's own
+(`crates/lua/c/require.c`):
 Lua's `package` library, with its filesystem searchers and native shared
 libraries, is not built, and no `package` table exists. The bootstrap entry for
 `_G` is removed from the loaded-module cache, so `require("_G")` and
@@ -154,6 +161,15 @@ capability.
 
 Repeated `require` calls for a registered module return the cached module table
 for that Lua state.
+
+A registered package installs into a run only when its script first requires
+it, so the run's heap holds the built-ins, the packages that extend them, the
+packages the script required, and the script. While it installs, the
+instruction hook does not yield, and a failed installation is an error of that
+`require`, which a later `require` retries. A package that is no longer
+registered when the script requires it, because its Plugin dropped the
+registration, cannot be required; one registered after the run started is not
+in that run.
 
 ## Native functions
 
@@ -221,6 +237,15 @@ hold no memory.
 Lua keeps only plain data in that heap. Native userdata, callbacks, and
 futures are boxed in the ordinary allocator, so atomics and other control
 state never reach bulk memory.
+
+Of that heap, 872 KiB is the script's reserve, left beside the built-ins, the
+packages that extend them, and one package installation's peak. The script's
+own data and the packages it requires share the reserve, each package keeping
+at most 12 KiB: a script whose data and packages fit in it never runs out of
+memory, and a script that requires 30 packages still has 512 KiB for its data.
+A `require` installs its package only when 44 KiB, what the package may keep
+and its installation's peak, are free in one block; otherwise it raises Lua's
+`not enough memory` error, which the script can catch with `pcall`.
 
 If bulk memory cannot supply the heap, or a script exceeds it, the execution
 completes with `outcome: "error"` and `error: "lua_memory"`.

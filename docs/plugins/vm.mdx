@@ -42,4 +42,7 @@ execution allocates a 1 MiB Lua heap from Platform bulk memory. Requests and res
 there is no Event Router lane or transport-derived source/input limit.
 
 Dependent VM package Plugins register require-only Lua packages through
-`LuaPackageRegistry` during Plugin registration.
+`LuaPackageRegistry` during Plugin registration. A run installs a package only
+when its script first requires it, so a script pays only for the packages it
+uses, and the registry holds any number of them; see
+[Lua packages](/architecture/plugin-api#lua-packages) for the budget.
