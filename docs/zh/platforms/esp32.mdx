@@ -67,7 +67,7 @@ cargo image deploy
 
 [发布](/zh/contributing/releases)里，每块 ESP 开发板有一个 `firmware.bin`（bootloader、分区表和应用从 `0x0` 合并成的文件）和一个 `resources.img`。浏览器[安装页](/zh/get-started/installation)会写入这两个文件；要自己写入，就按 `manifest.json` 里每个文件的偏移运行 `espflash write-bin`。
 
-固件通过芯片的缓存从 flash 运行，所以它的代码和只读数据除了受开发板 OTA 槽大小的限制，还受缓存能把它们映射进去的地址窗口限制。ESP32 把代码映射到 `0x400D0000` 至 `0x40400000`，即 3 MiB 加 192 KiB，把只读数据映射进 4 MiB；ESP32-P4 把两者映射进同一个 64 MiB 的窗口。esp-hal 的链接脚本在这两处止于 3 MiB 和 4 MiB，所以这两个平台用 `platforms/<chip>/ld` 中自己的内存布局链接，由 `platform.yml` 的 `build.linker-script` 指定：就是 esp-hal 的布局，只是窗口改成 ESP-IDF 链接应用时用的大小。ESP32-C3 保持 esp-hal 的代码和只读数据各 4 MiB（芯片能映射 8 MiB），ESP32-C6 两者共 4 MiB（芯片能映射 16 MiB），ESP32-S3 各 32 MiB，即整个窗口。
+固件通过芯片的缓存从 flash 运行，所以它的代码和只读数据除了受开发板 OTA 槽大小的限制，还受缓存能把它们映射进去的地址窗口限制。ESP32 把代码映射到 `0x400D0000` 至 `0x40400000`，即 3 MiB 加 192 KiB，把只读数据映射进 4 MiB；ESP32-P4 把两者映射进同一个 64 MiB 的窗口，ESP32-C6 映射进同一个 16 MiB 的窗口。esp-hal 的链接脚本在这几处止于 3 MiB 和 4 MiB，所以这三个平台用 `platforms/<chip>/ld` 中自己的内存布局链接，由 `platform.yml` 的 `build.linker-script` 指定：就是 esp-hal 的布局，只是窗口改成 ESP-IDF 链接应用时用的大小。ESP32-C3 保持 esp-hal 的代码和只读数据各 4 MiB（芯片能映射 8 MiB），ESP32-S3 各 32 MiB，即整个窗口。
 
 ## 平台驱动的硬件
 

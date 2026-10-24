@@ -14,6 +14,9 @@ build:
       rustup toolchain install 1.98.1
       cargo install espup
       espup install --stable-version 1.98.1 --targets esp32c6 --esp-riscv-gcc
+  # esp-hal's linkall.x over a memory map whose flash window is the 16 MiB
+  # the chip maps, not esp-hal's 4 MiB (ld/, on the build script's link path).
+  linker-script: barracuda-esp32c6.x
 hal:
   bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, analog-input, pulse-counter, power-hold, rmt-output, rmt-input, pwm-output]
   runtime-i2c-controllers: [I2C0]
