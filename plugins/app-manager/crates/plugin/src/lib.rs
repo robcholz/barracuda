@@ -55,7 +55,7 @@ pub use agent::{AgentState, AgentStatus};
 pub use barracuda_appkit::{
     API_LEVEL, APP_DATA, APP_PACKAGE, AppError, AppExit, AppInfo, AppKind, AppList, AppLocation,
     AppManager, AppState, BUILTIN_APP, BuiltinApp, BuiltinBackend, BuiltinError, BuiltinPackage,
-    Device, InvalidApp, RunningApp, ViewShape, VmRunOutcome,
+    Device, InvalidApp, RunningApp, VmRunOutcome,
 };
 pub use barracuda_uikit::icons;
 pub use fonts::{FontAtlases, SystemFonts};
@@ -151,7 +151,7 @@ where
         let ui = self
             .display
             .take()
-            .map(|display| Ui::new(display, self.touch.take()));
+            .map(|display| Ui::new(display, self.touch.take(), config::DISPLAY_DENSITY));
         let device = Device {
             board: self.board,
             display: ui.as_ref().map(Ui::display),

@@ -1,7 +1,8 @@
 // Builds the system view in resources/view/ into filesystem/resources/view/.
 //
 // The view compiles with the PocketJS compiler, which is not part of this
-// repository: point POCKETJS_ROOT at a PocketJS checkout. It ships no font
+// repository: point POCKETJS_ROOT at a PocketJS checkout; the build stages it
+// with the patches in `../pocketjs/`, as build-app.ts does. It ships no font
 // atlases: it draws with the system fonts, whose build reads this view and
 // the entry point's sources for the characters to hold.
 //
@@ -9,12 +10,14 @@
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { stagePocketJS } from "../pocketjs/stage";
 
-const pocket = process.env.POCKETJS_ROOT;
-if (!pocket) {
+const checkout = process.env.POCKETJS_ROOT;
+if (!checkout) {
   console.error("Set POCKETJS_ROOT to a PocketJS checkout.");
   process.exit(1);
 }
+const pocket = stagePocketJS(checkout);
 const plugin = resolve(import.meta.dir, "../..");
 const source = join(plugin, "resources/view");
 const output = join(plugin, "filesystem/resources/view");

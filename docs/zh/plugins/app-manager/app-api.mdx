@@ -31,7 +31,7 @@ description: "了解可安装应用在每台设备上都能依赖什么：Lua �
 ### `notify`
 
 - `notify.post(title [, body]) -> id` 向通知中心添加一条通知。
-- `notify.ask(title [, body [, allow, deny]]) -> allowed` 用一张排在所有通知之前的卡片询问用户，并等待回答：用户允许时返回 `true`，拒绝或关闭时返回 `false`。从版本 2 开始，`allow` 和 `deny` 用来指定卡片上两个按钮的文字（未指定时默认显示“允许”和“拒绝”的含义，每个最多 6 个字符），例如 `notify.ask("Lights on?", nil, "Now", "Later")`。
+- `notify.ask(title [, body [, allow, deny]]) -> allowed` 用一张排在所有通知之前的卡片询问用户，并等待回答：用户允许时返回 `true`，拒绝或关闭时返回 `false`。从版本 2 开始，`allow` 和 `deny` 用来指定卡片上两个按钮的文字（未指定时为 **Allow** 和 **Deny**，每个最多 6 个字符），例如 `notify.ask("Lights on?", nil, "Now", "Later")`。
 
 失败时返回 `nil` 和一条消息。
 
@@ -41,20 +41,29 @@ System 会按以下顺序根据设备检查每个可安装应用，并在遇到�
 
 | 检查项 | 原因说明 |
 | --- | --- |
-| `api` 高于设备的级别 | 请更新系统：应用需要 API 2，本设备为 1 |
-| `boards` 未列出本开发板 | 仅适用于 espressif-esp-vocat-v1-2（列出的开发板） |
-| 应用带视图，而设备没有显示屏 | 本设备没有屏幕 |
-| 显示屏小于 `view.size` | 屏幕太小：应用需要 480×480 |
-| `view.shape` 为 `rect`，而显示屏是圆形 | 应用需要方形屏幕 |
-| `requires` 中的某个 Lua 包在本设备上不是稳定 Lua 包 | 本设备没有 notify |
-| 它在本设备上的版本低于 `requires` 中写明的版本 | 请更新系统：应用需要 notify 版本 2，本设备为版本 1 |
-| `permissions` 中的某个 Lua 包缺失 | 本设备不支持 serial |
+| `api` 高于设备的级别 | `Needs system update (API 2, device has 1)` |
+| `boards` 未列出本开发板 | `Only for espressif-esp-vocat-v1-2`（列出的开发板） |
+| 应用带视图，而设备没有显示屏 | `This device has no display` |
+| 视图是为 `view.target` 以外的显示屏构建的 | `Built for 320×240 display (device has 360×360)` |
+| 显示屏小于 `view.size` | `Display too small (needs 480×480)` |
+| `requires` 中的某个 Lua 包在本设备上不是稳定 Lua 包 | `This device has no notify` |
+| 它在本设备上的版本低于 `requires` 中写明的版本 | `Needs system update (notify v2, device has v1)` |
+| `permissions` 中的某个 Lua 包缺失 | `This device doesn't support serial` |
 
 不适配的应用永远不会打开，包括在开发板或系统变化后不再适配的应用。
 
 ### 视图与显示屏
 
-视图按显示屏的实际尺寸布局，而不是缩放：它的根节点填满显示屏，布局采用 flexbox，所以填满父元素（`w-full`、`h-full`）、用两侧内边距隔开列（`left-[40px] right-[40px]`）、并用 `justify-center` 居中的视图，可以适配其他尺寸的显示屏。固定尺寸会保持原样。`view.size` 是视图仍能适配的最小显示屏；圆形视图（限制在内切圆内的视图）也能适配矩形显示屏；`rect` 视图则不能适配圆形显示屏，因为它会丢失四个角。文字保持原有大小：字体字号是按固定像素尺寸烘焙的。需要知道显示屏尺寸的视图可以从 `app.device().display` 读取。
+视图按显示屏以视图像素计的尺寸布局，宽度从 135 px 到 360 × 360 甚至更大，所以要像写响应式网页那样写视图：
+
+- 用 `w-full h-full` 填满显示屏，用 flexbox 排布内容，不要用绝对定位或固定偏移。
+- 给内容 `w-full max-w-[256px]`，而不是固定宽度：在显示屏允许的范围内尽量宽，最宽到设计稿的宽度。
+- 文字会像网页上那样按可用宽度在词与词之间换行。行内与其他元素并排的文字用 `flex-1 min-w-0` 占据剩下的空间；用 `basis-[72px] grow min-w-0` 则在空间实在太窄时换到单独一行。和网页一样，文字盒子只有加上 `min-w-0` 才会缩到比最长的词还窄，这时这个词会被拆开。
+- 让行使用 `flex-wrap`，这样在窄屏上元素会移到下一行。
+- 居中一列内容时，在内容上下各放一个 `flex-1 min-h-0` 的占位元素：在矮屏上占位元素先让出空间，被裁掉的是底部，而不是标题。
+- 可能比显示屏更长的列表，放进 `flex-1 min-h-0 overflow-y-auto` 盒子，每行用 `shrink-0`：竖直拖动就能滚动它。加上 `justify-end` 时，它从最后一项开始显示，像聊天记录一样，往上可以滚到第一项。
+
+固定尺寸会保持原样。`view.size` 是视图仍能适配的最小显示屏。设备只按尺寸判断视图：显示屏是圆形还是矩形，由视图的设计来处理，所以面向所有设备的视图要把内容放在圆形显示屏也能显示的区域里。文字保持原有大小：字体字号是按固定的视图像素尺寸烘焙的。开发板可以把每个视图像素画成多个显示屏像素，即它的密度：密度为 2 的 720 × 720 屏幕按 360 × 360 显示视图，画得更清晰，所以视图在它上面看到的尺寸与在 360 × 360 屏幕上相同。需要知道显示屏尺寸的视图可以从 `app.device().display` 读取。为某块显示屏构建的视图（见[应用格式](/zh/plugins/app-manager/app-format)）只在那块显示屏上运行。
 
 ## 运行
 
@@ -66,7 +75,7 @@ System 会按以下顺序根据设备检查每个可安装应用，并在遇到�
 {
   api = 1,
   board = "espressif-esp-vocat-v1-2",
-  display = { width = 360, height = 360, round = true },  -- nil without one
+  display = { width = 360, height = 360, density = 1 },  -- nil without one
   touch = true,
   capabilities = { notify = 2, ... },
 }

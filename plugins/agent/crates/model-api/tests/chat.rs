@@ -48,7 +48,7 @@ fn openai_chat_uses_expected_wire_request() {
         200,
         r#"{"choices":[{"message":{"role":"assistant","content":"pong"}}]}"#,
     )]);
-    let mut api = configured(&stack, BackendKind::OpenAiCompatible);
+    let mut api = configured(&stack, BackendKind::OpenAi);
     let messages = [ChatMessage::new(&json!({"role":"user","content":"ping"}))];
     let response =
         block_on(api.chat(&ChatRequest::new("system", &messages), Cancel::never())).unwrap();
@@ -73,7 +73,7 @@ fn sequential_chats_reuse_one_connection() {
             r#"{"choices":[{"message":{"role":"assistant","content":"two"}}]}"#,
         ),
     ]);
-    let mut api = configured(&stack, BackendKind::OpenAiCompatible);
+    let mut api = configured(&stack, BackendKind::OpenAi);
     let first_messages = [ChatMessage::new(&json!({"role":"user","content":"first"}))];
     let second_messages = [ChatMessage::new(&json!({"role":"user","content":"second"}))];
 
@@ -100,7 +100,7 @@ fn anthropic_chat_uses_provider_headers_and_shape() {
         200,
         r#"{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}"#,
     )]);
-    let mut api = configured(&stack, BackendKind::AnthropicCompatible);
+    let mut api = configured(&stack, BackendKind::Anthropic);
     let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
     let response =
         block_on(api.chat(&ChatRequest::new("system", &messages), Cancel::never())).unwrap();
@@ -117,7 +117,7 @@ fn structured_chat_sends_schema_and_parses_output() {
         200,
         r#"{"choices":[{"message":{"role":"assistant","content":"{\"answer\":42}"}}]}"#,
     )]);
-    let mut api = configured(&stack, BackendKind::OpenAiCompatible);
+    let mut api = configured(&stack, BackendKind::OpenAi);
     let messages = [ChatMessage::new(&json!({"role":"user","content":"answer"}))];
     let request = ChatRequest::new("system", &messages);
     let schema = StaticOutputSchema {
@@ -136,10 +136,7 @@ fn structured_chat_sends_schema_and_parses_output() {
 #[test]
 fn invalid_tools_are_rejected_before_network_io() {
     let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
-    for backend in [
-        BackendKind::OpenAiCompatible,
-        BackendKind::AnthropicCompatible,
-    ] {
+    for backend in [BackendKind::OpenAi, BackendKind::Anthropic] {
         let stack = ScriptedStack::default();
         let mut api = configured(&stack, backend);
         let error = block_on(api.chat(
@@ -161,7 +158,7 @@ fn transient_connect_failure_is_retried_on_same_client() {
             r#"{"choices":[{"message":{"role":"assistant","content":"recovered"}}]}"#,
         ),
     ]);
-    let mut api = configured(&stack, BackendKind::OpenAiCompatible);
+    let mut api = configured(&stack, BackendKind::OpenAi);
     let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
     let request = ChatRequest::new("system", &messages).with_retry(RetryPolicy::fixed(1, 0));
     let response = block_on(api.chat(&request, Cancel::never())).unwrap();
@@ -180,7 +177,7 @@ fn timed_out_request_reconnects_before_retry() {
     ]);
     let mut api = ModelApi::new(ClientFactory::from_network(&stack, &stack));
     let mut config = ModelApiConfig::new(
-        BackendKind::OpenAiCompatible,
+        BackendKind::OpenAi,
         "secret",
         "model-x",
         "http://llm.test/v1",
@@ -199,7 +196,7 @@ fn timed_out_request_reconnects_before_retry() {
 #[test]
 fn cancelled_request_does_not_touch_network() {
     let stack = ScriptedStack::new([ScriptStep::json(200, "{}")]);
-    let mut api = configured(&stack, BackendKind::OpenAiCompatible);
+    let mut api = configured(&stack, BackendKind::OpenAi);
     let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
     let cancelled = CancellationFlag::new();
     cancelled.cancel();
@@ -221,7 +218,7 @@ fn cancelling_a_pending_request_reconnects_before_the_next_call() {
             r#"{"choices":[{"message":{"role":"assistant","content":"recovered"}}]}"#,
         ),
     ]);
-    let mut api = configured(&stack, BackendKind::OpenAiCompatible);
+    let mut api = configured(&stack, BackendKind::OpenAi);
     let messages = [ChatMessage::new(&json!({"role":"user","content":"hello"}))];
     let cancelled = CancellationFlag::new();
 

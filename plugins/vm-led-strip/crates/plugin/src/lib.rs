@@ -167,7 +167,7 @@ where
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         (!self.strips.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 3,
-            purpose: "控制灯光",
+            purpose: "Control lights",
         })
     }
 

@@ -27,7 +27,7 @@ cargo run --profile profiling -p barracuda-agent-profile -- \
   agent-init target/profiles/custom.dhat.json
 ```
 
-在 DHAT 下，让长的 `overall-capabilities` 录制带中的每个录制响应都经过生产环境中兼容 OpenAI 的流式解析器进行回放：
+在 DHAT 下，让长的 `overall-capabilities` 录制带中的每个录制响应都经过生产环境中的 OpenAI 流式解析器进行回放：
 
 ```bash
 cargo run --profile profiling -p barracuda-agent-profile -- tape-replay

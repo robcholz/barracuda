@@ -109,16 +109,14 @@ def test_backends_are_validated(tmp_path):
         )
         return path
 
-    recorded = load_scenario(
-        scenario('mode = "recorded"\nbackend = "anthropic_compatible"')
-    )
-    assert recorded.backend == 'anthropic_compatible'
+    recorded = load_scenario(scenario('mode = "recorded"\nbackend = "anthropic"'))
+    assert recorded.backend == 'anthropic'
     with pytest.raises(ScenarioError):
         load_scenario(scenario('mode = "recorded"\nbackend = "gemini"'))
     with pytest.raises(ScenarioError):
         load_scenario(
             scenario(
-                'mode = "scripted"\nbackend = "anthropic_compatible"\n'
+                'mode = "scripted"\nbackend = "anthropic"\n'
                 '[[model.responses]]\ntext = "y"'
             )
         )

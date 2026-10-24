@@ -51,7 +51,7 @@ IMessage WeChat 插件把微信 iLink 添加为 iMessage Gateway 的消息通道
 
 超过 32 KiB 的应答体不会被完整缓冲：轮询保留它的前 32 KiB 和最后 4 KiB，从中取出 `get_updates_buf`（以及 `longpolling_timeout_ms`），立即保存该游标，并带一条警告把这批消息计为丢失，这样下一次轮询就会越过它。只有游标在这两部分中都找不到的应答才会让轮询失败。
 
-在一次正常的轮询之后被服务器关闭的连接会立即重新打开。其他失败按照脚手架的退避策略处理（从 1 s 开始翻倍，最长 30 s；HTTP 429 之后为 30 s）。`ret` 或 `errcode` 为 -14 表示机器人会话已过期：循环会停止，接收状态为 `error`，消息为 `SESSION_EXPIRED_MESSAGE`（中文部分之后是 "Scan again to relink"），直到新的二维码登录被确认，或者配置或模式发生变化。
+在一次正常的轮询之后被服务器关闭的连接会立即重新打开。其他失败按照脚手架的退避策略处理（从 1 s 开始翻倍，最长 30 s；HTTP 429 之后为 30 s）。`ret` 或 `errcode` 为 -14 表示机器人会话已过期：循环会停止，接收状态为 `error`，消息为 `SESSION_EXPIRED_MESSAGE`（"Scan again to relink"），代码为 `session_expired`（页面和门户状态匹配的是这个代码），直到新的二维码登录被确认，或者配置或模式发生变化。
 
 **文件**。每个 iLink 文件都存放在 CDN 上（`cdn_base`，默认为 `https://novac2c.cdn.weixin.qq.com/c2c`），用它自己的密钥以 AES-128-ECB 加密，并使用 PKCS#7 填充。一个条目通过 `media.full_url` 指明文件，否则通过 `media.encrypt_query_param`（从 `<cdn_base>/download?encrypted_query_param=<param>` 下载），并携带密钥：`image_item.aeskey` 为 32 位十六进制数字，否则 `media.aes_key` 为 16 个原始字节或其十六进制数字的 base64 编码。
 

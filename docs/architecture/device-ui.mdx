@@ -74,7 +74,10 @@ the app's view shows; any system screen covers the app and stops its input
 The UI kit turns touch into taps, which press the view on the display, and
 long presses and swipes, which go only to the system
 (`UiService::next_gesture`). Apps never see system gestures, so no app can
-take the person's way out.
+take the person's way out. The one gesture a view gets is a vertical drag
+that starts over something it can scroll (`overflow-y-auto`): it scrolls the
+view instead of swiping. A drag down from the top edge or up from the bottom
+edge is always the system's, and so is a drag where nothing scrolls.
 
 Notices reach the person through the system's notification center, which
 any Plugin posts to with the `Notifications` capability and Workflows with

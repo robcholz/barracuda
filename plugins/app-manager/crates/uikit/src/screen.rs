@@ -4,6 +4,10 @@
 //! never holds a framebuffer: only the regions the PocketJS damage tracker
 //! reports changed since the last frame are drawn, each strip in RGB565, the
 //! display API's pixel format.
+//!
+//! Views are laid out in view pixels, and each view pixel covers `density` ×
+//! `density` display pixels: the display's size divided by the density is the
+//! size views see.
 
 use crate::DisplayInfo;
 use crate::service::{Shown, UiService};
@@ -13,7 +17,7 @@ use barracuda_board_hal::touch::Touch;
 use barracuda_ui_runtime::pocketjs_core::{
     Ui as CoreUi,
     damage::{DamagePolicy, DamageRect, DamageTarget, DamageTracker},
-    raster::render_scaled_rgb565_window_over,
+    raster::{MAX_RENDER_SCALE, render_scaled_rgb565_window_over},
 };
 use embedded_graphics_core::{
     geometry::{Point, Size},
@@ -31,8 +35,11 @@ const SIGNATURE: u64 = u64::from_le_bytes(*b"bcda565\0");
 /// The display and what was last drawn on it.
 pub(crate) struct Screen<Panel> {
     display: Panel,
+    /// The display's size in display pixels.
     width: u32,
     height: u32,
+    /// Display pixels per view pixel along each axis.
+    density: u32,
     round: bool,
     tracker: DamageTracker<MAX_REGIONS>,
     words: Vec<u32>,
@@ -48,16 +55,32 @@ pub(crate) struct Screen<Panel> {
 }
 
 impl<Panel: Display> Screen<Panel> {
-    pub(crate) fn new(display: Panel) -> Self {
+    /// Draws on `display` at `density` display pixels per view pixel. A
+    /// density the rasterizer cannot draw, or one that does not divide the
+    /// display's size, draws at 1.
+    pub(crate) fn new(display: Panel, density: u8) -> Self {
         let Size { width, height } = display.size();
         let round = display
             .descriptor()
             .features()
             .contains(DisplayFeatures::ROUND);
+        let density = u32::from(density);
+        let density = if (1..=MAX_RENDER_SCALE).contains(&density)
+            && width % density == 0
+            && height % density == 0
+        {
+            density
+        } else {
+            log::warn!(
+                "ui: a {width}×{height} display cannot draw at density {density}; drawing at 1"
+            );
+            1
+        };
         Self {
             display,
             width,
             height,
+            density,
             round,
             tracker: DamageTracker::new(),
             words: Vec::new(),
@@ -73,19 +96,20 @@ impl<Panel: Display> Screen<Panel> {
         &self.display
     }
 
-    /// The display's size and shape.
+    /// The display's size in view pixels, density and shape.
     pub(crate) const fn info(&self) -> DisplayInfo {
         DisplayInfo {
-            width: self.width,
-            height: self.height,
+            width: self.width / self.density,
+            height: self.height / self.density,
+            density: self.density as u8,
             round: self.round,
         }
     }
 
-    /// The size views are laid out in: the display's, one view pixel per
-    /// display pixel.
+    /// The size views are laid out in: the display's, in view pixels.
     pub(crate) fn viewport(&self) -> (f32, f32) {
-        (self.width as f32, self.height as f32)
+        let info = self.info();
+        (info.width as f32, info.height as f32)
     }
 
     /// Sets the panel's brightness.
@@ -97,8 +121,8 @@ impl<Panel: Display> Screen<Panel> {
 
     /// Draws what changed since the last frame and presents it.
     ///
-    /// Returns whether anything changed, so the caller keeps stepping frames
-    /// while a view animates.
+    /// Returns whether anything changed or the view moves on its own, so the
+    /// caller keeps stepping frames while a view animates or scrolls.
     pub(crate) async fn refresh(&mut self, service: &UiService) -> bool {
         let shown = service.shown();
         self.refused = false;
@@ -108,10 +132,14 @@ impl<Panel: Display> Screen<Panel> {
         {
             self.tracker.invalidate();
         }
+        // Scrolled content that carries on needs frames though nothing else
+        // changed.
+        let mut moving = false;
         let painted = match shown.view {
             Some(view) => service
                 .with_document(view, |document| {
                     document.frame();
+                    moving = document.is_moving();
                     let core = document.draw(&mut self.words);
                     self.paint(core)
                 })
@@ -121,15 +149,9 @@ impl<Panel: Display> Screen<Panel> {
         // A refused frame is redrawn whole at the next change.
         self.drawn = (!self.refused).then_some(shown);
         let Some(bounds) = painted else {
-            return false;
+            return moving;
         };
-        let region = Rectangle::new(
-            Point::new(bounds.x0, bounds.y0),
-            Size::new(
-                (bounds.x1 - bounds.x0) as u32,
-                (bounds.y1 - bounds.y0) as u32,
-            ),
-        );
+        let region = self.area(bounds);
         if let Err(error) = self
             .display
             .flush(RefreshRequest::new(Some(region), RefreshMode::Automatic))
@@ -144,7 +166,7 @@ impl<Panel: Display> Screen<Panel> {
     /// Rasterizes the damaged regions of `core`'s DrawList; returns their
     /// bounds, or `None` when nothing changed.
     fn paint(&mut self, core: &CoreUi) -> Option<DamageRect> {
-        let target = DamageTarget::new(self.width, self.height, 1, SIGNATURE);
+        let target = DamageTarget::new(self.width, self.height, self.density, SIGNATURE);
         let plan = match self
             .tracker
             .prepare(core, &self.words, target)
@@ -165,8 +187,17 @@ impl<Panel: Display> Screen<Panel> {
                 let strip =
                     DamageRect::new(region.x0, y0, region.x1, (y0 + STRIP_ROWS).min(region.y1));
                 self.strip.clear();
-                self.strip.resize(rect_pixels(strip), 0);
-                render_scaled_rgb565_window_over(core, &self.words, &mut self.strip, 1, strip);
+                self.strip.resize(
+                    rect_pixels(strip) * (self.density * self.density) as usize,
+                    0,
+                );
+                render_scaled_rgb565_window_over(
+                    core,
+                    &self.words,
+                    &mut self.strip,
+                    self.density,
+                    strip,
+                );
                 self.pixels.clear();
                 self.pixels.extend(
                     self.strip
@@ -192,12 +223,16 @@ impl<Panel: Display> Screen<Panel> {
         {
             return None;
         }
-        let screen = DamageRect::new(0, 0, self.width as i32, self.height as i32);
+        let DisplayInfo { width, height, .. } = self.info();
+        let screen = DamageRect::new(0, 0, width as i32, height as i32);
         let mut y0 = 0;
         while y0 < screen.y1 {
             let strip = DamageRect::new(0, y0, screen.x1, (y0 + STRIP_ROWS).min(screen.y1));
             self.pixels.clear();
-            self.pixels.resize(rect_pixels(strip), Rgb565::new(0, 0, 0));
+            self.pixels.resize(
+                rect_pixels(strip) * (self.density * self.density) as usize,
+                Rgb565::new(0, 0, 0),
+            );
             if !self.send(strip) {
                 return None;
             }
@@ -206,12 +241,21 @@ impl<Panel: Display> Screen<Panel> {
         Some(screen)
     }
 
-    /// Sends the staged pixels for `strip` to the display.
+    /// The display pixels view-pixel rect `rect` covers.
+    fn area(&self, rect: DamageRect) -> Rectangle {
+        let density = self.density as i32;
+        Rectangle::new(
+            Point::new(rect.x0 * density, rect.y0 * density),
+            Size::new(
+                ((rect.x1 - rect.x0) * density) as u32,
+                ((rect.y1 - rect.y0) * density) as u32,
+            ),
+        )
+    }
+
+    /// Sends the staged pixels for view-pixel `strip` to the display.
     fn send(&mut self, strip: DamageRect) -> bool {
-        let area = Rectangle::new(
-            Point::new(strip.x0, strip.y0),
-            Size::new((strip.x1 - strip.x0) as u32, (strip.y1 - strip.y0) as u32),
-        );
+        let area = self.area(strip);
         match self.display.draw_rgb565(area, &self.pixels) {
             Ok(()) => true,
             Err(error) => {
@@ -235,21 +279,21 @@ pub(crate) struct Pointer<Input> {
 }
 
 impl<Input: Touch> Pointer<Input> {
-    /// Maps the controller's coordinate span onto `viewport`; a controller
-    /// that reports no span is taken to match it.
-    pub(crate) fn new(touch: Input, viewport: (f32, f32)) -> Self {
+    /// Maps the controller's coordinate span onto `display`'s viewport; a
+    /// controller that reports no span is taken to match the display.
+    pub(crate) fn new(touch: Input, display: DisplayInfo) -> Self {
         let descriptor = touch.descriptor();
-        let axis = |span: u16, view: f32| {
+        let axis = |span: u16, view: u32| {
             if span == 0 {
-                1.0
+                1.0 / f32::from(display.density)
             } else {
-                view / f32::from(span)
+                view as f32 / f32::from(span)
             }
         };
         Self {
             scale: (
-                axis(descriptor.width, viewport.0),
-                axis(descriptor.height, viewport.1),
+                axis(descriptor.width, display.width),
+                axis(descriptor.height, display.height),
             ),
             touch,
         }

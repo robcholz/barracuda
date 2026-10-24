@@ -17,7 +17,7 @@ pub const NOTIFY: &str = "notify";
 /// What the package promises: `ask`'s button labels arrived at version 2.
 pub const NOTIFY_INTERFACE: PackageInterface = PackageInterface::Stable {
     version: 2,
-    purpose: "发通知、向你确认",
+    purpose: "Notify and ask you",
 };
 
 /// Answers the `notify` package with the notification center.

@@ -20,8 +20,9 @@ pub(crate) use mode::{load_mode, store_mode};
 pub use on_demand::OnDemand;
 pub(crate) use receive::receive_runtime;
 pub use receive::{
-    NoSlot, ReceiveChannel, ReceiveControl, ReceiveError, ReceiveFuture, ReceiveRuntime,
-    ReceiveSession, ReceiveSlotSource, ReceiveState, ReceiveTiming, SlotWait, UnlimitedSlots,
+    NoSlot, ReceiveChannel, ReceiveControl, ReceiveError, ReceiveFailure, ReceiveFuture,
+    ReceiveRuntime, ReceiveSession, ReceiveSlotSource, ReceiveState, ReceiveTiming, SlotWait,
+    UnlimitedSlots,
 };
 pub(crate) use status::channel_status;
 pub use status::{ChannelLevel, ChannelStatus};

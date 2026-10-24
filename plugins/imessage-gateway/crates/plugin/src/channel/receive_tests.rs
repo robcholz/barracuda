@@ -248,6 +248,11 @@ fn backs_off_only_on_errors_and_resets_after_success() {
         control.set_enabled(true).expect("slot");
         wait_until("first error", || control.state().name() == "error").await;
         assert_eq!(control.state(), ReceiveState::Error("one".into()));
+        assert_eq!(
+            control.state().code(),
+            None,
+            "a failure without a code reports none"
+        );
         wait_until("eight sessions", || script.started().len() == 8).await;
         wait_until("receiving", || control.state() == ReceiveState::Receiving).await;
         let gaps = script.gaps();
@@ -366,13 +371,14 @@ fn a_freed_slot_wakes_the_waiting_channel_before_the_retry_timer() {
 fn a_halted_loop_waits_for_restart() {
     let pool = Pool::new(1);
     let script = Script::new([
-        Step::Fail(ReceiveError::halt("需要重新扫码")),
+        Step::Fail(ReceiveError::halt("Scan again to relink").code("session_expired")),
         Step::Forever,
     ]);
     scenario(pool.clone(), Rc::clone(&script), |control| async move {
         control.set_enabled(true).expect("slot");
         wait_until("halted", || control.state().name() == "error").await;
-        assert_eq!(control.state().message(), Some("需要重新扫码"));
+        assert_eq!(control.state().message(), Some("Scan again to relink"));
+        assert_eq!(control.state().code(), Some("session_expired"));
         Timer::after_millis(100).await;
         assert_eq!(script.started().len(), 1, "a halted loop does not retry");
         assert_eq!(pool.in_use(), 1);

@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "camera",
-  "name": "相机",
+  "name": "Camera",
   "version": "0.1.0",
   "api": 1,
   "requires": [
@@ -15,9 +15,8 @@
       "font-2.bin"
     ],
     "size": [
-      360,
-      360
-    ],
-    "shape": "round"
+      135,
+      135
+    ]
   }
 }

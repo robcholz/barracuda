@@ -161,7 +161,7 @@ impl ContentEvents {
 }
 
 // ---------------------------------------------------------------------------
-// OpenAI-compatible
+// OpenAI
 // ---------------------------------------------------------------------------
 
 /// The OpenAI stream terminator payload.
@@ -211,7 +211,7 @@ struct OpenAiFunctionDelta {
     arguments: Option<String>,
 }
 
-/// Incremental parser for an OpenAI-compatible `chat/completions` SSE stream.
+/// Incremental parser for an OpenAI `chat/completions` SSE stream.
 #[derive(Default)]
 pub(crate) struct OpenAiSse {
     done: bool,

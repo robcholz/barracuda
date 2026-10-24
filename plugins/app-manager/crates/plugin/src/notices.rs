@@ -14,7 +14,7 @@ pub const MAX_NOTICE_CHARS: usize = 64;
 /// The longest answer label kept, in characters; longer labels are cut.
 pub const MAX_LABEL_CHARS: usize = 6;
 /// What a question's buttons say unless its asker names them.
-pub const DEFAULT_LABELS: (&str, &str) = ("允许", "拒绝");
+pub const DEFAULT_LABELS: (&str, &str) = ("Allow", "Deny");
 /// How often an unanswered question is checked for an answer.
 const ANSWER_POLL: Duration = Duration::from_millis(100);
 

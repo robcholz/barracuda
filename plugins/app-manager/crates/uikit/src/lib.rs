@@ -6,7 +6,8 @@
 //! receives handler calls. [`UiSession::show`] puts the view on its
 //! [`Layer`]; the display shows the system layer over the app layer. [`Ui`]
 //! drives a display and its touch input: taps press the view on the display,
-//! and long presses and swipes go to the system UI through
+//! vertical drags scroll it where it has something to scroll, and long
+//! presses and swipes go to the system UI through
 //! [`UiService::next_gesture`]. This crate knows nothing about apps.
 
 #![no_std]
@@ -43,10 +44,12 @@ const FRAME: Duration = Duration::from_micros(16_667);
 /// The display views are drawn on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DisplayInfo {
-    /// Width in pixels.
+    /// Width in view pixels.
     pub width: u32,
-    /// Height in pixels.
+    /// Height in view pixels.
     pub height: u32,
+    /// Display pixels per view pixel along each axis.
+    pub density: u8,
     /// Whether only the circle inscribed in the frame is visible.
     pub round: bool,
 }
@@ -60,21 +63,22 @@ pub struct Ui<Panel, Input> {
 }
 
 impl<Panel: Display, Input: Touch> Ui<Panel, Input> {
-    /// Lays views out at `display`'s size, read by `touch` when it has one.
-    /// Views opened before [`Ui::run`] reads the system fonts wait in
-    /// [`UiService::ready`].
-    pub fn new(display: Panel, touch: Option<Input>) -> Self {
-        let screen = Screen::new(display);
+    /// Lays views out at `display`'s size divided by `density`, the display
+    /// pixels each view pixel covers along each axis, read by `touch` when it
+    /// has one. Views opened before [`Ui::run`] reads the system fonts wait
+    /// in [`UiService::ready`].
+    pub fn new(display: Panel, touch: Option<Input>, density: u8) -> Self {
+        let screen = Screen::new(display, density);
         let viewport = screen.viewport();
         Self {
             service: Rc::new(UiService::loading(viewport)),
-            pointer: touch.map(|touch| Pointer::new(touch, viewport)),
+            pointer: touch.map(|touch| Pointer::new(touch, screen.info())),
             recognizer: Recognizer::new(viewport),
             screen,
         }
     }
 
-    /// The display's size and shape.
+    /// The display's size in view pixels, density and shape.
     #[must_use]
     pub const fn display(&self) -> DisplayInfo {
         self.screen.info()
@@ -139,6 +143,13 @@ impl<Panel: Display, Input: Touch> Ui<Panel, Input> {
                             let _handler = service.press_shown(x, y);
                         }
                         Some(Touched::Gesture(gesture)) => service.post_gesture(gesture),
+                        Some(Touched::DragStart { x, y, dy }) => {
+                            if !service.drag_start(x, y, dy) {
+                                runtime.recognizer.decline_drag();
+                            }
+                        }
+                        Some(Touched::Drag(dy)) => service.drag_by(dy),
+                        Some(Touched::DragEnd) => service.drag_end(),
                         None => {}
                     }
                 }

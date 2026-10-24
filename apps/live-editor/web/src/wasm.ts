@@ -19,6 +19,9 @@ interface Exports {
   tick_rate(): number;
   draw(scale: number): number;
   press(x: number, y: number): number;
+  drag_start(x: number, y: number): number;
+  drag_by(dy: number): void;
+  drag_end(): void;
   texts(): void;
 }
 
@@ -59,6 +62,11 @@ export interface Preview {
   /** New RGBA pixels at `scale` pixels per view pixel, or `null` when the picture did not change. */
   draw(scale: number): Uint8Array | null;
   press(x: number, y: number): ViewCall | null;
+  /** A vertical drag from (`x`, `y`): whether the view scrolls there and takes it. */
+  dragStart(x: number, y: number): boolean;
+  /** Moves the drag `dy` view pixels down. */
+  dragBy(dy: number): void;
+  dragEnd(): void;
   texts(): string[];
 }
 
@@ -148,6 +156,18 @@ export function module(exports: WebAssembly.Exports): Module {
           return wasm.press(x, y) === 1
             ? (JSON.parse(text()) as ViewCall)
             : null;
+        },
+        dragStart(x, y) {
+          live();
+          return wasm.drag_start(x, y) === 1;
+        },
+        dragBy(dy) {
+          live();
+          wasm.drag_by(dy);
+        },
+        dragEnd() {
+          live();
+          wasm.drag_end();
         },
         texts() {
           live();

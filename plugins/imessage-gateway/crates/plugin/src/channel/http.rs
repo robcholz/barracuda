@@ -110,6 +110,8 @@ struct ReceiveBody<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     capacity: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     slots: Option<SlotsBody>,
@@ -126,6 +128,7 @@ impl<'a> ReceiveBody<'a> {
         Self {
             state: state.name(),
             message: state.message(),
+            code: state.code(),
             capacity: (*state == ReceiveState::NoSlot).then_some(capacity),
             // a channel that holds no outbound connection has no slot count to show
             slots: (capacity != usize::MAX).then_some(SlotsBody { in_use, capacity }),
@@ -139,10 +142,11 @@ struct OwnerCount {
 }
 
 /// `GET /api/gateway/<channel>/status`:
-/// `{"configured":bool,"mode":"…","receive":{"state":"…","message"?,"capacity"?,"slots"?:{"in_use":n,"capacity":n}},"owners":{"count":n}}`,
+/// `{"configured":bool,"mode":"…","receive":{"state":"…","message"?,"code"?,"capacity"?,"slots"?:{"in_use":n,"capacity":n}},"owners":{"count":n}}`,
 /// then the channel's [`ChannelControl::status_details`].
 ///
-/// `receive` is present only in `send_receive`; `message` only with `error`;
+/// `receive` is present only in `send_receive`; `message` only with `error`,
+/// and `code` with an `error` whose channel set [`ReceiveError::code`];
 /// `capacity` only with `no_slot`; `slots` whenever the channel draws from a
 /// bounded slot pool.
 pub fn status_response<C: ChannelControl + ?Sized>(channel: &C) -> HttpResponse {

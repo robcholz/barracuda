@@ -28,8 +28,8 @@ end
 local function publish()
   assert(view:set("on", on))
   assert(view:set("warm", tone == "warm"))
-  local name = tone == "warm" and "暖光" or "冷光"
-  assert(view:set("status", on and (name .. " · " .. LEVEL .. "%") or "已关闭"))
+  local name = tone == "warm" and "Warm" or "Cool"
+  assert(view:set("status", on and (name .. " · " .. LEVEL .. "%") or "Off"))
   shine()
 end
 

@@ -18,7 +18,7 @@ description: "QQ 消息通道的 HTTP 路由：状态、模式、所有者、扫
 `configured` 表示是否存储了配置。`receive` 只在
 `send_receive` 下出现；它的 `state` 是 `idle`、`starting`、`receiving`、`no_slot`
 （带 `capacity`）或 `error`（带 `message`，例如在关闭代码 4914 之后为
-“The QQ bot is delisted and may only use the sandbox”，前面是它的中文部分）。它从不返回设置、App Secret
+“The QQ bot is delisted and may only use the sandbox”）。它从不返回设置、App Secret
 或 token，也不会向 QQ 发起请求。其他方法回答 `405`。
 
 ## `POST /api/gateway/qq/mode`

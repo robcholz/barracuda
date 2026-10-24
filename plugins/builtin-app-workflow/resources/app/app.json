@@ -1,9 +1,8 @@
 {
   "format": 1,
   "id": "workflow",
-  "name": "工作流",
+  "name": "Workflows",
   "version": "0.1.0",
   "api": 1,
-  "icon": "workflow",
-  "view": { "shape": "round" }
+  "icon": "workflow"
 }

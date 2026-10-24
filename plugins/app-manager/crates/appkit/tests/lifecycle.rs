@@ -413,6 +413,7 @@ async fn scenario(spawner: Spawner) {
             display: Some(DisplayInfo {
                 width: 360,
                 height: 360,
+                density: 1,
                 round: true,
             }),
             touch: true,

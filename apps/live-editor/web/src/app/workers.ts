@@ -111,6 +111,10 @@ export class Runner {
     this.send({ type: "tap", x, y });
   }
 
+  pointer(phase: "down" | "move" | "up" | "cancel", x: number, y: number) {
+    this.send({ type: "pointer", phase, x, y });
+  }
+
   lifecycle(type: "back" | "background" | "foreground" | "terminate" | "stop") {
     this.send({ type });
   }

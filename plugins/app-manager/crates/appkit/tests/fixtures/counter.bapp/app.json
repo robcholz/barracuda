@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "counter",
-  "name": "计数器",
+  "name": "Counter",
   "version": "0.1.0",
   "api": 1,
   "view": {
@@ -13,9 +13,8 @@
       "font-12.bin"
     ],
     "size": [
-      360,
-      360
-    ],
-    "shape": "round"
+      135,
+      135
+    ]
   }
 }

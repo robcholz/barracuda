@@ -11,8 +11,8 @@ send it to a device on your network.
 Open Live Editor from the website's top bar, or at
 [barracuda-os.vercel.app/editor](https://barracuda-os.vercel.app/editor/). It
 opens in the website's language, or else the browser's. The language menu and
-the theme toggle in the top bar switch between English and 简体中文 and between
-light, dark, and the system's theme; Live Editor remembers both. To run it from
+the theme toggle in the top bar switch between English and Simplified Chinese
+and between light, dark, and the system's theme; Live Editor remembers both. To run it from
 a checkout instead:
 
 ```sh
@@ -33,7 +33,7 @@ Open **Settings** and pick the model service the agent runs on:
 | Service | You give |
 | --- | --- |
 | Anthropic | your API key, and a model (default `claude-opus-5-5`) |
-| OpenAI compatible | the service's base URL (such as `https://api.example.com/v1`), a key if it needs one, and a model |
+| OpenAI | the service's base URL (such as `https://api.example.com/v1`), a key if it needs one, and a model |
 
 The key is kept in this browser and sent only to that service. An OpenAI
 compatible service must accept requests from Live Editor's page (CORS).
@@ -88,8 +88,8 @@ as one first.
 
 An app's files are the ones [App format](/plugins/app-manager/app-format)
 describes: `app.json`, `main.lua`, and for a screen `app.tsx`, `app.d.ts` and
-`pocket.json`. **Settings** also changes the open app's name, version and
-display shape. The app ID is fixed: devices know the app by it.
+`pocket.json`. **Settings** also changes the open app's name and version.
+The app ID is fixed: devices know the app by it.
 
 ## The preview
 
@@ -112,8 +112,8 @@ A program that runs for 5 s without returning to `app.events()` is stopped.
 
 ## Install on a device
 
-The device must be on your computer's network, with the portal's **文件**
-(**Files**) page (the `files` Plugin).
+The device must be on your computer's network, with the portal's **Files**
+page (the `files` Plugin).
 
 <Steps>
   <Step title="Open the device portal">
@@ -123,7 +123,7 @@ The device must be on your computer's network, with the portal's **文件**
   </Step>
   <Step title="Install it from the portal window">
     The portal shows what it received, from which page, and the version it
-    replaces. Choose **安装到设备** (**Install on device**) there.
+    replaces. Choose **Install on device** there.
   </Step>
   <Step title="Open it on the device">
     The portal writes the app to `media/apps/<id>.bapp/`, where the device runs
@@ -133,7 +133,7 @@ The device must be on your computer's network, with the portal's **文件**
 </Steps>
 
 When the portal cannot be reached, **Download** saves the app's folder as a
-zip: unzip it, and in the portal under **文件** (**Files**) make the folder
+zip: unzip it, and in the portal under **Files** make the folder
 `media/apps/<id>.bapp` and upload its files there.
 
 ## Where your work is kept

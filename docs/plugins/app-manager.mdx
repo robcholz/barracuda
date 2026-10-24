@@ -12,7 +12,7 @@ centers, and the screens around an app's lifecycle.
 
 - Plugin ID: `app-manager`
 - Dependencies: `vm`, `workflow`, `time`, `power`, `sound`
-- Settings: none
+- Settings: `display-density` (`u8`, default `1`)
 - Context resources: peripheral slots `display.main` (`primary`, optional)
   and `touch.main` (`primary`, optional)
 - Provided capabilities: `AppManager`, `Notifications`, `AgentStatus`,
@@ -101,9 +101,10 @@ and calls that wait on the person, such as a question, hold up no others.
 
 [App API](/plugins/app-manager/app-api) is the contract between installable apps and the
 device. This Plugin hands `AppManager::register` the `Device` apps are
-checked against: the Board's stable name, the display's size and shape from
-the UI kit (`DisplayFeatures::ROUND` marks a round panel), and whether it
-reads touch. Every listing reads the packages' tiers from
+checked against: the Board's stable name, the display's size in view pixels
+and its density from the UI kit, and whether it reads touch. Apps are judged
+by size alone; the display's shape (`DisplayFeatures::ROUND` marks a round
+panel) is for the system UI's own layout and for views' design. Every listing reads the packages' tiers from
 `LuaPackageRegistry::packages`, so a package Plugin registered after this
 one counts, and fills each installable app's `incompatible`; `open` refuses
 an app that has one with `Incompatible`.
@@ -193,7 +194,19 @@ The UI kit runs compiled MicroTS views. A view is a BVIR program
 (`view.bvir`), its compiled stylesheet (`styles.bin`) and baked font atlases
 (`font-<slot>.bin`), produced from MicroTS sources by the MicroTS compiler. The
 crate `barracuda-ui-runtime` reads BVIR, mounts it into a vendored PocketJS
-core tree, and re-evaluates the tree when values change.
+core tree, and re-evaluates the tree when values change. Text wraps as it
+does on a web page: the core's layout breaks text between words at the width
+its box is given, in the same solve, and paint draws those rows
+([soft wrap](/plugins/app-manager/pocketjs)). `UiSession::texts` reports text
+as written. An `overflow-y-auto` box scrolls when its content runs past it:
+the UI kit hands it the drags that start over it, and the runtime moves the
+content with the finger, lets it carry on and slow down after the finger
+lifts, springs it back from past either end, and shows a scroll indicator
+while it moves ([scroll containers](/plugins/app-manager/pocketjs)). A view built for
+one display carries the rects its build solved: an element marked static
+takes its rect when it mounts and never enters the layout solver, and one
+marked formula follows its own inset and size, as PocketJS's generated views
+do.
 
 `UiService::open` mounts an app's view on the app layer and
 `UiService::open_on` a view on a chosen `Layer`; both return a `UiSession`,
@@ -225,8 +238,19 @@ through the channel is visible through `UiSession::is_closed`.
 ## The display
 
 The Plugin takes the Board's primary display through its optional
-`display.main` slot and lays every view out at the display's size, one view
-pixel per display pixel.
+`display.main` slot and lays every view out at the display's size in view
+pixels. The `display-density` setting is how many display pixels each view
+pixel covers along each axis, 1 through 4: a Board with a 720 × 720 panel and
+`display-density: 2` lays views out at 360 × 360 and draws each view pixel as
+2 × 2 display pixels, so it shows the views a 360 × 360 panel shows, twice as
+sharp. A density that does not divide the display's width and height draws at
+1, with a warning.
+
+```yaml
+plugins:
+  app-manager:
+    display-density: 2
+```
 
 Views sit on one of two layers. `Layer::App` holds apps' views and
 `Layer::System` the system UI's; each layer shows at most one view, and the
@@ -246,19 +270,22 @@ and makes no gesture. `UiService::wake` turns it on from code.
 Only what changed is drawn. After each change the task asks the PocketJS damage
 tracker which regions of the view's DrawList differ from the last frame,
 rasterizes them as RGB565, the display API's pixel format, in strips of 16
-rows, draws each strip, and flushes the changed bounds. No
+rows of view pixels at the density, draws each strip, and flushes the changed
+bounds. No
 framebuffer is kept. While a frame still changes, as during an animation, the
 task steps frames at 60 per second; a settled view costs nothing.
 
 The optional `touch.main` slot takes the Board's touch controller. While a
 view is on the display, and until a contact that began ends, the task polls
-it every frame, scaling the controller's span to the display, and classifies
-each contact:
+it every frame, scaling the controller's span to the display in view pixels
+(a controller that reports no span is taken to span the display's pixels),
+and classifies each contact:
 
 | Contact | Becomes |
 | --- | --- |
 | lifts within 12 px of where it began | a tap: presses the view on the display at the start, if it takes input (`UiSession::show(true)`) |
 | rests within 12 px for 0.5 s | `Gesture::LongPress`, reported while the finger is still down; the contact taps nothing |
+| sets off vertically past 12 px over a scroll container of the shown view, not away from the top or bottom edge it began at | a drag: the content follows the finger, carries on when it lifts, and springs back from past either end; it taps nothing and swipes nothing |
 | travels 40 px or more along one axis, then lifts | `Gesture::Swipe` with its `Direction` and, when it started within 12% of the side it travelled away from, that `Edge` |
 
 Gestures reach no view: the system UI waits for them with
@@ -357,6 +384,7 @@ edge, over 280 ms.
 | Swipe up / down             | apps               | the launcher's next / previous page    |
 | Swipe right                 | inside an app      | back (`AppManager::back`): the app's previous page, or the launcher from its first page |
 | Swipe right                 | menu, info, exited | cancel                                |
+| Drag up / down              | a list that scrolls | scrolls it; a panel closes from outside its list or from its edge |
 
 ### Apps and their lifecycle
 
@@ -419,13 +447,18 @@ baker, and the examples Noto Sans SC (`CJK_FONT_DIR`):
 | `icons` | the icon font and tables from `resources/icons/svg` |
 | `view` | the system view from `resources/view/app.tsx` and its `app.d.ts` contract; it ships no atlases |
 | `examples` | the example installable apps in `resources/examples/` into `crates/appkit/tests/fixtures/<id>.bapp/` |
+| `wrap` | the view in `crates/runtime/tests/fixtures/wrap/` into `crates/runtime/tests/fixtures/wrap.bapp/`, for the UI runtime's text wrapping tests |
+| `scroll` | the view in `crates/runtime/tests/fixtures/scroll/` into `crates/runtime/tests/fixtures/scroll.bapp/`, for the UI runtime's scrolling tests |
+| `baked-360`, `baked-320` | the view in `crates/runtime/tests/fixtures/baked/`, built for 360 × 360 and for 320 × 240 displays, into `crates/runtime/tests/fixtures/baked-<size>.bapp/`; the UI runtime's tests check that the rects they carry are the ones the device solves |
 
 `resources/build-app.ts` builds an app container from its sources; builtin
 app Plugins run it on their own `resources/app`. Builtin apps ship no fonts
 and draw with the system fonts. Examples bake their own, as an app from
 elsewhere would: Noto Sans SC for characters beyond ASCII, system icons named
 by `\uE0xx` escapes from the icon font, and only digits and icons at sizes of
-24 px and up. Icons in a view are escapes such as `"\uE008"`, whose code
+24 px and up. With `--target <width>x<height>[@<density>]` it builds the app
+for one display, as [App format](/plugins/app-manager/app-format#building-for-a-display)
+describes. Icons in a view are escapes such as `"\uE008"`, whose code
 points are fixed in `resources/icons/codepoints.json`.
 
 ```sh

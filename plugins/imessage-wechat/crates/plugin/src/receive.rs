@@ -35,7 +35,11 @@ use wechat::{
 use crate::{ChannelConfiguration, CHANNEL};
 
 /// Receive-state message after iLink reports the bot session expired (-14).
-pub(crate) const SESSION_EXPIRED_MESSAGE: &str = "需要重新扫码 / Scan again to relink";
+pub(crate) const SESSION_EXPIRED_MESSAGE: &str = "Scan again to relink";
+
+/// Receive-state code beside [`SESSION_EXPIRED_MESSAGE`]: what the page and the
+/// portal status match, so the message can change freely.
+pub(crate) const SESSION_EXPIRED_CODE: &str = "session_expired";
 
 /// Plugin storage key of the last `get_updates_buf`.
 pub(crate) const CURSOR_STORAGE_KEY: &str = "get_updates_buf";
@@ -336,7 +340,7 @@ impl<Storage: PluginStorage> Poller for WechatPoller<'_, Storage> {
             Ok(updates) => updates,
             Err(UpdatesError::SessionExpired) => {
                 log::warn!("the WeChat bot session expired; a new QR login is needed");
-                return Err(ReceiveError::halt(SESSION_EXPIRED_MESSAGE));
+                return Err(ReceiveError::halt(SESSION_EXPIRED_MESSAGE).code(SESSION_EXPIRED_CODE));
             }
             Err(UpdatesError::Status(TOO_MANY_REQUESTS)) => {
                 return Err(

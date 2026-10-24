@@ -1,0 +1,302 @@
+Scroll containers: overflow Scroll and a host-driven scroll offset.
+
+Upstream clips with `overflow-hidden` and leaves scrolling to JS, which moves
+a child canvas with `translateY`. A host without a JS runtime has no way to
+scroll a view. This adds the scroll container to the core and leaves the
+input and the motion to the host:
+
+- `Overflow::Scroll` (2): clipped like Hidden. Taffy lays it out as a scroll
+  container, so its content keeps its size and runs past the box.
+- Each node keeps a vertical scroll offset. Paint and hit testing place a
+  scroll container's children moved up by it, so taps land on what is drawn.
+  Readback records how far the content runs past the box, below it and, for
+  `justify-end` content, above it (`Ui::scroll_bounds`), and clamps the
+  offset to that.
+- `Ui::scroll_target_at` finds the scroll container a drag at a point moves;
+  `Ui::set_scroll` moves it, past either end while the host rubber-bands, and
+  `Ui::set_scroll_bar` shows a scroll indicator along its right edge.
+
+Applies after 0001-soft-wrap.patch. Nothing changes until a style uses
+Overflow::Scroll, so upstream layouts and goldens do not change.
+
+diff --git a/draw.rs b/draw.rs
+index 05ef928..6cf43d5 100644
+--- a/draw.rs
++++ b/draw.rs
+@@ -857,6 +857,24 @@ fn pow2_at_least(n: u32) -> u32 {
+ /// A node's local frame: layout position + translate, then rotate/scale
+ /// about its transform origin. Shared by paint and hit_test so pointer
+ /// geometry can never drift from painted geometry.
++/// The world a scroll container's children are placed in: its own, moved up
++/// by how far it is scrolled.
++fn scrolled(world: &Affine, node: &crate::tree::Node, r: &style::Resolved) -> Affine {
++    if r.overflow == spec::Overflow::Scroll as u8 && node.scroll_y != 0.0 {
++        world.then(&Affine::translate(0.0, -node.scroll_y))
++    } else {
++        *world
++    }
++}
++
++/// Scroll indicator: a bar this wide, this far inside the container's right
++/// edge, never shorter than `SCROLL_BAR_MIN`, in white at this opacity times
++/// the node's `scroll_bar`.
++const SCROLL_BAR_W: f32 = 4.0;
++const SCROLL_BAR_INSET: f32 = 3.0;
++const SCROLL_BAR_MIN: f32 = 16.0;
++const SCROLL_BAR_ALPHA: f32 = 0.45;
++
+ fn local_affine(l: &crate::tree::LayoutRect, r: &style::Resolved) -> Affine {
+     let mut local = Affine::translate(l.x + r.translate_x, l.y + r.translate_y);
+     if r.rotate != 0.0 || r.skew_x != 0.0 || r.scale != 1.0 || r.scale_x != 1.0 || r.scale_y != 1.0
+@@ -1167,12 +1185,13 @@ fn hit_walk(
+         return;
+     }
+     let mut child_clip = clip;
+-    if r.overflow == spec::Overflow::Hidden as u8 {
++    if r.overflow != spec::Overflow::Visible as u8 {
+         child_clip = clip.intersect(&world_aabb_of(screen, &world, l.w, l.h));
+         if !child_clip.contains(px, py) {
+             return;
+         }
+     }
++    let world = scrolled(&world, node, &r);
+     if r.perspective > 0.0 {
+         // 3D context: projected geometry is not point-testable from the 2D
+         // walk — the context root claims its own box so clicks never fall
+@@ -1699,7 +1718,7 @@ impl<'a> Walker<'a> {
+         //    sort within siblings) ---------------------------------------------
+         let mut child_clip = clip;
+         let mut scissored = false;
+-        if r.overflow == spec::Overflow::Hidden as u8 {
++        if r.overflow != spec::Overflow::Visible as u8 {
+             // Scissor rects are axis-aligned: rotated clip boxes use the AABB
+             // of the transformed rect (conservative).
+             let rect = self.world_aabb(&world, l.w, l.h);
+@@ -1729,9 +1748,11 @@ impl<'a> Walker<'a> {
+         // Children in paint order — shared with hit_walk so pointer hits can
+         // never disagree with painted stacking.
+         let (tree, styles) = (self.tree, self.styles);
++        let content = scrolled(&world, node, &r);
+         for_children_in_paint_order(tree, styles, slot, |cs| {
+-            self.paint(cs, world, op, child_clip, in_transform, dl);
++            self.paint(cs, content, op, child_clip, in_transform, dl);
+         });
++        self.emit_scroll_bar(dl, node, &world, op, &child_clip);
+ 
+         if scissored {
+             dl.words.push(spec::draw_op::SCISSOR_POP);
+@@ -3355,6 +3376,45 @@ impl<'a> Walker<'a> {
+         dl.words.push(u32::from(focused));
+     }
+ 
++    /// The scroll indicator of a scroll container, in its own (unscrolled)
++    /// world: a rounded bar along its right edge whose length and place show
++    /// the visible share of the content and where it sits.
++    fn emit_scroll_bar(
++        &mut self,
++        dl: &mut DrawList,
++        node: &crate::tree::Node,
++        world: &Affine,
++        op: f32,
++        clip: &Clip,
++    ) {
++        let range = node.scroll_range - node.scroll_top;
++        let shown = clampf(node.scroll_bar, 0.0, 1.0);
++        let l = node.layout;
++        if range <= 0.0 || shown <= 0.0 || l.h <= SCROLL_BAR_INSET * 2.0 {
++            return;
++        }
++        let track = l.h - SCROLL_BAR_INSET * 2.0;
++        let length = (track * l.h / (l.h + range)).max(SCROLL_BAR_MIN).min(track);
++        let at = clampf((node.scroll_y - node.scroll_top) / range, 0.0, 1.0);
++        let top = SCROLL_BAR_INSET + (track - length) * at;
++        let x1 = l.w - SCROLL_BAR_INSET;
++        let color = with_alpha_abgr(
++            0x00ff_ffff,
++            (255.0 * SCROLL_BAR_ALPHA * shown * op + 0.5) as u32,
++        );
++        self.emit_rounded_box(
++            dl,
++            world,
++            x1 - SCROLL_BAR_W,
++            top,
++            x1,
++            top + length,
++            SCROLL_BAR_W * 0.5,
++            Fill::Flat(color),
++            clip,
++        );
++    }
++
+     /// Emit the inline text run of a text element as one GLYPH_RUN.
+     #[allow(clippy::too_many_arguments)]
+     fn emit_text(
+diff --git a/layout.rs b/layout.rs
+index 7de5ba5..88d768d 100644
+--- a/layout.rs
++++ b/layout.rs
+@@ -490,12 +490,14 @@ pub fn to_taffy(r: &Resolved) -> taffy::Style {
+         taffy::Position::Relative
+     };
+     s.overflow = taffy::Point {
+-        x: if r.overflow == spec::Overflow::Hidden as u8 {
+-            taffy::Overflow::Hidden
+-        } else {
++        x: if r.overflow == spec::Overflow::Visible as u8 {
+             taffy::Overflow::Visible
++        } else {
++            taffy::Overflow::Hidden
+         },
+-        y: if r.overflow == spec::Overflow::Hidden as u8 {
++        y: if r.overflow == spec::Overflow::Scroll as u8 {
++            taffy::Overflow::Scroll
++        } else if r.overflow == spec::Overflow::Hidden as u8 {
+             taffy::Overflow::Hidden
+         } else {
+             taffy::Overflow::Visible
+@@ -918,9 +920,30 @@ fn assign_rect(
+         }
+         None => (LayoutRect::default(), cum, (0.0, 0.0)),
+     };
++    // A scroll container scrolls as far as its content runs past its box,
++    // above it as well as below.
++    let (scroll_top, scroll_range) = handle
++        .filter(|&handle| {
++            eng.taffy
++                .style(handle)
++                .is_ok_and(|style| style.overflow.y == taffy::Overflow::Scroll)
++        })
++        .map_or((0.0, 0.0), |handle| {
++            let layout = eng.taffy.unrounded_layout(handle);
++            let top = eng.taffy.children(handle).map_or(0.0, |children| {
++                children.iter().fold(0.0f32, |top, &child| {
++                    top.min(eng.taffy.unrounded_layout(child).location.y)
++                })
++            });
++            let bottom = top + layout.content_size.height - layout.size.height;
++            (top, bottom.max(0.0))
++        });
+     let node = &mut tree.slots[slot as usize];
+     node.taffy = handle;
+     node.layout = rect;
++    node.scroll_top = scroll_top;
++    node.scroll_range = scroll_range;
++    node.scroll_y = node.scroll_y.clamp(scroll_top, scroll_range);
+     if node.node_type == spec::NodeType::Text as u8 {
+         let context = handle.and_then(|handle| eng.taffy.get_node_context(handle));
+         node.text_native = context.is_some_and(|context| context.native);
+diff --git a/lib.rs b/lib.rs
+index 4f72a43..865fa7f 100644
+--- a/lib.rs
++++ b/lib.rs
+@@ -888,6 +888,60 @@ impl Ui {
+         )
+     }
+ 
++    /// The scroll container (overflow Scroll) a drag at (x, y) moves: the
++    /// nearest one at or above the node there whose content runs past its
++    /// box. None when nothing there scrolls.
++    pub fn scroll_target_at(&mut self, x: f32, y: f32) -> Option<i32> {
++        let mut id = self.hit_test_bounds(x, y);
++        while let Some(slot) = self.tree.resolve(id) {
++            let node = &self.tree.slots[slot as usize];
++            if node.scroll_range > node.scroll_top
++                && style::resolve(node, &self.styles, true).overflow == spec::Overflow::Scroll as u8
++            {
++                return Some(id);
++            }
++            if id == spec::ROOT_ID {
++                break;
++            }
++            id = node.parent;
++        }
++        None
++    }
++
++    /// How far a scroll container's content is scrolled up, in px.
++    pub fn scroll_offset(&self, id: i32) -> f32 {
++        self.tree.get(id).map_or(0.0, |node| node.scroll_y)
++    }
++
++    /// The least and most a scroll container's offset can be, from the last
++    /// layout: 0 and how far its content runs past its bottom, with the
++    /// least below 0 when content also runs past its top.
++    pub fn scroll_bounds(&self, id: i32) -> (f32, f32) {
++        self.tree
++            .get(id)
++            .map_or((0.0, 0.0), |node| (node.scroll_top, node.scroll_range))
++    }
++
++    /// Scroll a scroll container's content up by `y` px. Paint only: no
++    /// relayout. A host may go past either end while it rubber-bands; the
++    /// next layout clamps the offset to the bounds.
++    pub fn set_scroll(&mut self, id: i32, y: f32) {
++        if let Some(slot) = self.tree.resolve(id) {
++            self.tree.slots[slot as usize].scroll_y = if y.is_finite() { y } else { 0.0 };
++        }
++    }
++
++    /// Opacity of a scroll container's scroll indicator (0 hides it).
++    pub fn set_scroll_bar(&mut self, id: i32, opacity: f32) {
++        if let Some(slot) = self.tree.resolve(id) {
++            self.tree.slots[slot as usize].scroll_bar = if opacity.is_nan() {
++                0.0
++            } else {
++                opacity.clamp(0.0, 1.0)
++            };
++        }
++    }
++
+     /// Style-table record id of a node (spec::STYLE_ID_NONE when unstyled).
+     /// Native presenters match mounted conditional branches by it.
+     pub fn node_style(&self, id: i32) -> Option<i32> {
+diff --git a/spec.rs b/spec.rs
+index 75c3c4b..80c4a27 100644
+--- a/spec.rs
++++ b/spec.rs
+@@ -301,12 +301,14 @@ pub enum Display {
+     None = 1,
+ }
+ 
+-/// overflow (Hidden => scissor in draw).
++/// overflow (Hidden => scissor in draw; Scroll => Hidden plus a vertical
++/// scroll offset, `Ui::set_scroll`).
+ #[repr(u8)]
+ #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+ pub enum Overflow {
+     Visible = 0,
+     Hidden = 1,
++    Scroll = 2,
+ }
+ 
+ /// layout containment (Strict: own layout root; Baked: Strict plus build-time rects).
+diff --git a/tree.rs b/tree.rs
+index 65d0cd0..4e27ab6 100644
+--- a/tree.rs
++++ b/tree.rs
+@@ -114,6 +114,14 @@ pub struct Node {
+     /// Text nodes under soft wrap: the byte offset in the run where each row
+     /// after the first starts, as layout broke it (`text::soft_wrap`).
+     pub soft_breaks: Vec<u32>,
++    /// Scroll containers (overflow Scroll): how far the content is scrolled
++    /// up; the least and most it can be, from the last layout (the least is
++    /// below 0 when content runs past the top, as `justify-end` content
++    /// does); and the opacity of the scroll indicator.
++    pub scroll_y: f32,
++    pub scroll_top: f32,
++    pub scroll_range: f32,
++    pub scroll_bar: f32,
+ }
+ 
+ impl Node {
+@@ -145,6 +153,10 @@ impl Node {
+             region_root: false,
+             text_native: false,
+             soft_breaks: Vec::new(),
++            scroll_y: 0.0,
++            scroll_top: 0.0,
++            scroll_range: 0.0,
++            scroll_bar: 0.0,
+         }
+     }
+ 

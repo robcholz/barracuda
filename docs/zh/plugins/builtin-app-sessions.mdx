@@ -35,7 +35,7 @@ sessions.agent()         -- { state = "standby" | "listening" | "thinking" | "an
 
 `transcript` 返回某个对话的最后 6 条消息，每条截断到 160 个字符；`mine` 标记用户的消息，`open` 标记 Agent 仍在回答的那一轮中的消息。未知的 `id` 返回 `nil` 和一条消息。
 
-时间是 UTC，与状态栏的时钟一致。没有标题的对话会显示一个表示“新对话”的占位标题。
+时间是 UTC，与状态栏的时钟一致。没有标题的对话会显示占位标题“New chat”。
 
 ## 构建
 

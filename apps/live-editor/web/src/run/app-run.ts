@@ -86,6 +86,8 @@ const MAX_KEY_BYTES = 64;
 const MAX_STORE_BYTES = 16 * 1024;
 const MAX_FILE_BYTES = 64 * 1024;
 const MAX_DEPTH = 8;
+/** How far, in view pixels, a pointer may drift and still tap, as on the device. */
+const SLOP = 12;
 
 const bytes = (text: string) => new TextEncoder().encode(text).length;
 const reply = (value: unknown) => JSON.stringify({ v: value ?? null });
@@ -113,6 +115,16 @@ export class AppRun {
   private stepping = false;
   private terminating = false;
   private timers: ReturnType<typeof setInterval>[] = [];
+  /** The pointer that is down: where it went down, whether it moved too far to
+   * tap, whether it drags the view, and how far down it moved since the last frame. */
+  private touch: {
+    x: number;
+    y: number;
+    last: number;
+    spent: boolean;
+    dragging: boolean;
+    moved: number;
+  } | null = null;
   private grace?: ReturnType<typeof setTimeout>;
   private depth = 0;
   private notices = 0;
@@ -232,6 +244,11 @@ export class AppRun {
     const rate = preview.tickRate() || 60;
     const paint = () => {
       if (this.state !== "active" || !this.preview) return;
+      // A drag moves the view once per frame, as the device samples touch.
+      if (this.touch?.dragging) {
+        preview.dragBy(this.touch.moved);
+        this.touch.moved = 0;
+      }
       preview.frame();
       const pixels = preview.draw(this.scale);
       if (pixels)
@@ -316,6 +333,45 @@ export class AppRun {
     this.deliver(call.handler, ...call.args);
   }
 
+  /** The pointer on the screen, in view pixels, as the device reads a finger:
+   * it taps where it went down if it lifts there, and a pointer that sets off
+   * vertically drags the view where it has something to scroll. A cancelled
+   * pointer taps nothing. */
+  pointer(phase: "down" | "move" | "up" | "cancel", x: number, y: number) {
+    if (phase === "down") {
+      this.touch = { x, y, last: y, spent: false, dragging: false, moved: 0 };
+      return;
+    }
+    const touch = this.touch;
+    if (!touch) return;
+    if (phase === "move") {
+      if (touch.dragging) {
+        touch.moved += y - touch.last;
+        touch.last = y;
+        return;
+      }
+      const [dx, dy] = [x - touch.x, y - touch.y];
+      if (touch.spent || dx * dx + dy * dy <= SLOP * SLOP) return;
+      touch.spent = true;
+      if (
+        Math.abs(dy) > Math.abs(dx) &&
+        this.state === "active" &&
+        !this.asking &&
+        this.preview?.dragStart(touch.x, touch.y)
+      ) {
+        touch.dragging = true;
+        touch.moved = dy;
+        touch.last = y;
+      }
+      return;
+    }
+    this.touch = null;
+    if (touch.dragging) {
+      this.preview?.dragBy(touch.moved);
+      this.preview?.dragEnd();
+    } else if (phase === "up" && !touch.spent) this.tap(touch.x, touch.y);
+  }
+
   /** The back swipe: `app:back` while the app reports a page deeper than its first. */
   back(): boolean {
     if (this.state !== "active" || this.depth === 0) return false;
@@ -397,7 +453,9 @@ export class AppRun {
         return reply({
           api: 1,
           board: "live-editor-preview",
-          display: display ? { ...display } : null,
+          display: display
+            ? { width: display.width, height: display.height, density: 1 }
+            : null,
           touch: !!display,
           capabilities: { notify: 2 },
         });

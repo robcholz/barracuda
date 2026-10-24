@@ -127,7 +127,6 @@ export function manifestOf(files: Files): {
   name?: string;
   version?: string;
   entry?: string;
-  view?: { shape?: string };
 } {
   try {
     const manifest = JSON.parse(files["app.json"] ?? "{}") as unknown;

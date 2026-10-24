@@ -203,7 +203,7 @@ const en = {
   settingsLead:
     "The model Barracuda writes apps with, how its changes reach your code, and the open app's manifest.",
   anthropicHint: "Your Anthropic API key",
-  openaiTitle: "OpenAI compatible",
+  openaiTitle: "OpenAI",
   openaiHint: "Any service with the same API",
   urlError: "Enter the service's base URL, like https://api.example.com/v1",
   chars: (n: number) => `Use 1–${n} characters`,
@@ -233,11 +233,6 @@ const en = {
   fixed: "Fixed",
   fixedText: "Devices know the app by its ID",
   version: "Version",
-  shape: "Display shape",
-  round: "Round",
-  rectangle: "Rectangle",
-  roundText: "Keeps to the inscribed circle, so it fits every display",
-  rectText: "Uses the corners, so it needs a rectangular display",
 
   // Install
   blocked: {
@@ -279,7 +274,7 @@ const en = {
   folder: "Folder",
   installText: "You choose Install in the portal window",
   chooseInstall:
-    "The portal window shows what it received. Choose 安装到设备 (Install on device) there.",
+    'The portal window shows what it received. Choose "Install on device" there.',
   writing: "Writing ",
   onDevice: (name: string) => `${name} is on the device`,
   openFromLauncher: "Open it from the device's launcher.",
@@ -531,7 +526,7 @@ const zh: Strings = {
   settingsLead:
     "Barracuda 编写应用所用的模型、它的修改如何进入你的代码，以及打开的应用的清单。",
   anthropicHint: "你的 Anthropic API 密钥",
-  openaiTitle: "OpenAI 兼容",
+  openaiTitle: "OpenAI",
   openaiHint: "任何提供相同 API 的服务",
   urlError: "输入服务的基础 URL，例如 https://api.example.com/v1",
   chars: (n) => `使用 1–${n} 个字符`,
@@ -561,11 +556,6 @@ const zh: Strings = {
   fixed: "固定",
   fixedText: "设备靠 ID 识别应用",
   version: "版本",
-  shape: "屏幕形状",
-  round: "圆形",
-  rectangle: "矩形",
-  roundText: "只用内切圆，所以适合每一种屏幕",
-  rectText: "用到四角，所以需要矩形屏幕",
 
   blocked: {
     title: "门户窗口没有打开",

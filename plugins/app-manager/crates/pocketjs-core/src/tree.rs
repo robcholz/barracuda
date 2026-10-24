@@ -30,6 +30,15 @@ pub fn make_id(generation: u32, slot: u32) -> i32 {
     (((generation & GEN_MASK) << spec::ID_SLOT_BITS) | (slot & spec::ID_SLOT_MASK)) as i32
 }
 
+/// `Node::layout_mode`: the solver owns the rect.
+pub const LAYOUT_LIVE: u8 = 0;
+/// `Node::layout_mode`: the rect was assigned by `Ui::set_layout_static`; the
+/// node and its subtree are excluded from every solver projection.
+pub const LAYOUT_STATIC: u8 = 1;
+/// `Node::layout_mode`: an absolutely positioned leaf whose rect follows its
+/// own resolved inset and size (`Ui::formula_layout`); no solver node.
+pub const LAYOUT_FORMULA: u8 = 2;
+
 /// Rounded layout output of the last relayout, relative to the parent node.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct LayoutRect {
@@ -90,12 +99,29 @@ pub struct Node {
     pub taffy: Option<taffy::NodeId>,
     /// Rounded layout output (position relative to parent).
     pub layout: LayoutRect,
+    /// LAYOUT_LIVE, LAYOUT_STATIC or LAYOUT_FORMULA (see the constants).
+    pub layout_mode: u8,
+    /// Resolved `contain` is Strict or Baked: the subtree is solved as its
+    /// own layout root (`layout::Region`); this node is a leaf in its parent's
+    /// projection. Kept in sync by `Ui::refresh_region`.
+    pub region_root: bool,
     /// Text nodes: the measurement provider RECORDED at the last layout
     /// build — true = the host's native measurer sized this box, so paint
     /// MUST emit TEXT_RUN; false = baked atlas metrics, GLYPH_RUN. One
     /// provider per node per layout, never re-decided at paint time
     /// (docs/BACKENDS.md).
     pub text_native: bool,
+    /// Text nodes under soft wrap: the byte offset in the run where each row
+    /// after the first starts, as layout broke it (`text::soft_wrap`).
+    pub soft_breaks: Vec<u32>,
+    /// Scroll containers (overflow Scroll): how far the content is scrolled
+    /// up; the least and most it can be, from the last layout (the least is
+    /// below 0 when content runs past the top, as `justify-end` content
+    /// does); and the opacity of the scroll indicator.
+    pub scroll_y: f32,
+    pub scroll_top: f32,
+    pub scroll_range: f32,
+    pub scroll_bar: f32,
 }
 
 impl Node {
@@ -123,7 +149,14 @@ impl Node {
             active: false,
             taffy: None,
             layout: LayoutRect::default(),
+            layout_mode: LAYOUT_LIVE,
+            region_root: false,
             text_native: false,
+            soft_breaks: Vec::new(),
+            scroll_y: 0.0,
+            scroll_top: 0.0,
+            scroll_range: 0.0,
+            scroll_bar: 0.0,
         }
     }
 

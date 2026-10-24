@@ -4,7 +4,7 @@
 //! so each knows its insertion anchor, element bindings are memoised so an
 //! unchanged value never touches the tree, and keyed lists reuse rows.
 
-use crate::program::{BinaryOp, Cast, Element, Expr, Node, Program, TextPart};
+use crate::program::{BinaryOp, Cast, Element, Expr, Layout, Node, Program, TextPart};
 use crate::value::{Key, Value};
 use alloc::{string::String, vec::Vec};
 use microts::{Block, Input, KeyedList, NodeId, StyleId, Ui};
@@ -201,6 +201,13 @@ fn mount_node(ui: &mut Ui, node: &Node, parent: NodeId, anchor: NodeId) -> Insta
     match node {
         Node::Element(element) => {
             let id = ui.create_node(element.kind);
+            // The layout mode comes before the insert, as in PocketJS's
+            // generated views: a static node then joins no solver projection.
+            match element.layout {
+                Layout::Live => {}
+                Layout::Static { x, y, w, h } => ui.set_layout_static(id, x, y, w, h),
+                Layout::Formula => ui.set_layout_formula(id),
+            }
             ui.insert_before(parent, id, anchor);
             ui.set_style(id, StyleId(element.style));
             if element.focusable {

@@ -39,3 +39,7 @@ required-features = ["compiler"]
 [[test]]
 name = "link"
 required-features = ["compiler"]
+
+[[test]]
+name = "layout"
+required-features = ["compiler"]

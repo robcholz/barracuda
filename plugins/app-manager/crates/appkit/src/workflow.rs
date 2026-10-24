@@ -219,7 +219,6 @@ mod tests {
 
     use super::*;
     use crate::bundle::{AppInfo, AppKind, AppLocation, InvalidApp};
-    use crate::device::ViewShape;
     use crate::port::AppState;
     use alloc::vec;
     use barracuda_vm_plugin::{VmExecutionError, VmRunOutcome};
@@ -230,7 +229,7 @@ mod tests {
         RunningApp {
             app: AppInfo {
                 id: "counter".into(),
-                name: "计数器".into(),
+                name: "Counter".into(),
                 version: "0.1.0".into(),
                 location: AppLocation::Workspace,
                 kind: AppKind::Installable,
@@ -241,9 +240,9 @@ mod tests {
                 permissions: vec!["gpio".into()],
                 boards: vec!["espressif-esp-vocat-v1-2".into()],
                 view_size: Some([360, 360]),
-                view_shape: Some(ViewShape::Round),
+                view_target: None,
                 icon: Some("lamp".into()),
-                incompatible: Some("此设备没有灯光".into()),
+                incompatible: Some("This device has no light".into()),
             },
             run_id: 3,
             state,
@@ -279,7 +278,7 @@ mod tests {
         }
         check::<OpenAction>(Response::<RunningApp>::Error {
             error: AppError::Incompatible,
-            reason: Some("只适用于 espressif-esp-vocat-v1-2".into()),
+            reason: Some("Only for espressif-esp-vocat-v1-2".into()),
         });
         check::<HomeAction>(AppResponse { app: None });
         check::<HomeAction>(AppResponse {

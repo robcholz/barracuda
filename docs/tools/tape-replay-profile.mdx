@@ -8,7 +8,7 @@ description: "Read the DHAT heap profile of replaying a recorded tape through th
 
 `overall-capabilities.jsonl` contains 11 recorded responses and 1,212 raw
 response chunks. The `tape-replay` scenario reconstructed all responses and
-fed them through the production OpenAI-compatible streaming stack using
+fed them through the production OpenAI streaming stack using
 seven-byte reads. This intentionally represents a fragmentation/churn stress
 case rather than typical socket coalescing.
 

@@ -107,9 +107,35 @@ pub enum ReceiveState {
     Receiving,
     /// Enabled, but every receive slot is in use; retried as slots free.
     NoSlot,
-    /// The last session failed with this message; retrying after backoff, or
-    /// waiting for a restart when the error halted the loop.
-    Error(String),
+    /// The last session failed; retrying after backoff, or waiting for a
+    /// restart when the error halted the loop.
+    Error(ReceiveFailure),
+}
+
+/// What [`ReceiveState::Error`] reports: the message shown in the portal and,
+/// when the channel set one with [`ReceiveError::code`], a stable code a
+/// page matches instead of the message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReceiveFailure {
+    /// Shown in the portal.
+    pub message: String,
+    /// A stable `snake_case` code, such as `session_expired`.
+    pub code: Option<&'static str>,
+}
+
+impl From<String> for ReceiveFailure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            code: None,
+        }
+    }
+}
+
+impl From<&str> for ReceiveFailure {
+    fn from(message: &str) -> Self {
+        Self::from(String::from(message))
+    }
 }
 
 impl ReceiveState {
@@ -129,7 +155,16 @@ impl ReceiveState {
     #[must_use]
     pub fn message(&self) -> Option<&str> {
         match self {
-            Self::Error(message) => Some(message),
+            Self::Error(failure) => Some(&failure.message),
+            _ => None,
+        }
+    }
+
+    /// The error code, for a [`Self::Error`] whose channel set one.
+    #[must_use]
+    pub fn code(&self) -> Option<&'static str> {
+        match self {
+            Self::Error(failure) => failure.code,
             _ => None,
         }
     }
@@ -165,6 +200,7 @@ impl ReceiveTiming {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceiveError {
     message: String,
+    code: Option<&'static str>,
     retry_after: Option<Duration>,
     halt: bool,
 }
@@ -176,6 +212,7 @@ impl ReceiveError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            code: None,
             retry_after: None,
             halt: false,
         }
@@ -200,10 +237,25 @@ impl ReceiveError {
         self
     }
 
+    /// Reports `code` beside the message in the channel's status, for a
+    /// failure a page must recognise; the message stays free to change.
+    #[must_use]
+    pub const fn code(mut self, code: &'static str) -> Self {
+        self.code = Some(code);
+        self
+    }
+
     /// The message shown in the portal.
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    fn failure(self) -> ReceiveFailure {
+        ReceiveFailure {
+            message: self.message,
+            code: self.code,
+        }
     }
 }
 
@@ -491,17 +543,18 @@ where
                 Ok(()) => backoff,
                 Err(error) if error.halt => {
                     log::warn!("receive halted: {}", error.message);
-                    shared.set(ReceiveState::Error(error.message));
+                    shared.set(ReceiveState::Error(error.failure()));
                     self.wait_for_change(generation).await;
                     backoff = self.timing.initial_backoff;
                     continue;
                 }
                 Err(error) => {
                     log::warn!("receive failed: {}", error.message);
-                    shared.set(ReceiveState::Error(error.message));
-                    error
+                    let delay = error
                         .retry_after
-                        .map_or(backoff, |after| after.max(backoff))
+                        .map_or(backoff, |after| after.max(backoff));
+                    shared.set(ReceiveState::Error(error.failure()));
+                    delay
                 }
             };
             if self.pause(delay, generation).await {

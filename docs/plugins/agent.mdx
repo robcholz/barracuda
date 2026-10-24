@@ -121,7 +121,7 @@ session, such as answering in the conversation it is bound to. A
 the result shows the model (`ToolOutput::with_attachments`), never their
 bytes. The transcript stores them as `media` parts of the tool message, and
 each request inlines the newest ones like a user's attachments; an
-OpenAI-compatible request keeps tool messages text and adds the images in one
+OpenAI request keeps tool messages text and adds the images in one
 user message after the tool results. A background call's progress and result
 bring their attachments into the update message that delivers them.
 

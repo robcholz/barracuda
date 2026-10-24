@@ -44,7 +44,7 @@ Barracuda 的设备 UI 由三层构成：**System<strong>、</strong>系统应�
 
 `app-manager` 插件的 System UI 就是 System。它是唯一能替用户切换和卸载应用的调用方，也是系统手势的唯一所有者。它的视图位于系统层，在应用层之上：当某个应用在前台且没有系统界面遮挡时，显示该应用的视图；任何系统界面都会遮住应用并停止它的输入（`AppManager::set_interactive`），直到该界面关闭。
 
-UI 套件把触摸转换为点按（作用于显示屏上的视图），以及长按和滑动（只交给 System，`UiService::next_gesture`）。应用永远看不到系统手势，所以任何应用都无法挡住用户的退出路径。
+UI 套件把触摸转换为点按（作用于显示屏上的视图），以及长按和滑动（只交给 System，`UiService::next_gesture`）。应用永远看不到系统手势，所以任何应用都无法挡住用户的退出路径。视图唯一能得到的手势，是从它可滚动的内容（`overflow-y-auto`）上开始的竖直拖动：它滚动视图，而不算滑动。从顶边往下、从底边往上的拖动始终属于 System，在没有可滚动内容的地方拖动也是。
 
 通知通过 System 的通知中心送达用户。任何插件都可以用 `Notifications` capability 发布通知，Workflow 则用 `app.notify`。需要用户回答的问题（`Notifications::ask`、`app.confirm`）会排在最前面，并在得到回答前一直显示在主屏幕上。主屏幕还会根据 `AgentStatus` 或 `app.agent` 显示 Agent 的状态（待机、聆听、思考、回答）。应用永远不会绘制在其他应用或 System 之上。
 

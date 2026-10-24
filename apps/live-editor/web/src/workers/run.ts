@@ -24,6 +24,12 @@ export type RunRequest =
       scale: number;
     }
   | { type: "tap"; x: number; y: number }
+  | {
+      type: "pointer";
+      phase: "down" | "move" | "up" | "cancel";
+      x: number;
+      y: number;
+    }
   | { type: "back" | "background" | "foreground" | "terminate" | "stop" }
   | { type: "answer"; allowed: boolean }
   | { type: "inspect"; id: number };
@@ -112,6 +118,8 @@ self.onmessage = async (event: MessageEvent<RunRequest>) => {
     }
     case "tap":
       return run?.tap(request.x, request.y);
+    case "pointer":
+      return run?.pointer(request.phase, request.x, request.y);
     case "back":
       return run?.back();
     case "background":

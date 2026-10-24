@@ -48,7 +48,7 @@ This Plugin's own packages:
 - `notify.ask(title [, body [, allow, deny]]) -> allowed` asks the person on
   a card listed before every notice and waits for the answer: `true` when
   they allow it, `false` when they deny or dismiss it. From version 2,
-  `allow` and `deny` name the card's two buttons (default labels meaning Allow and Deny
+  `allow` and `deny` name the card's two buttons (**Allow** and **Deny**
   unless given, at most 6 characters each), as in
   `notify.ask("Lights on?", nil, "Now", "Later")`.
 
@@ -63,30 +63,53 @@ shows the reason; `app.open` answers `{"error": "incompatible", "reason": …}`.
 
 | Check | What the reason says |
 | --- | --- |
-| `api` is above the device's level | update the system: the app needs API 2, this device has 1 |
-| `boards` does not list this Board | only for espressif-esp-vocat-v1-2 (the listed Boards) |
-| the app has a view and the device no display | this device has no screen |
-| the display is smaller than `view.size` | the screen is too small: the app needs 480×480 |
-| `view.shape` is `rect` and the display is round | the app needs a square screen |
-| a package in `requires` is not a stable package here | this device has no notify |
-| its version here is below the one `requires` names | update the system: the app needs notify version 2, this device has version 1 |
-| a package in `permissions` is missing | this device does not support serial |
+| `api` is above the device's level | `Needs system update (API 2, device has 1)` |
+| `boards` does not list this Board | `Only for espressif-esp-vocat-v1-2` (the listed Boards) |
+| the app has a view and the device no display | `This device has no display` |
+| the view was built for another display than `view.target` | `Built for 320×240 display (device has 360×360)` |
+| the display is smaller than `view.size` | `Display too small (needs 480×480)` |
+| a package in `requires` is not a stable package here | `This device has no notify` |
+| its version here is below the one `requires` names | `Needs system update (notify v2, device has v1)` |
+| a package in `permissions` is missing | `This device doesn't support serial` |
 
 An app that does not fit never opens, including one that stops fitting
 after a Board or system change.
 
 ### Views and the display
 
-A view is laid out at the display's size, not scaled: its root fills the
-display, and the layout is flexbox, so a view that fills its parent
-(`w-full`, `h-full`), spaces columns with insets on both sides (`left-[40px]
-right-[40px]`), and centers with `justify-center` fits displays of other
-sizes. Fixed sizes stay as written. `view.size` is the smallest display the
-view still fits, and a round view, one that keeps to the inscribed circle,
-fits a rectangular display too; a `rect` view does not fit a round one,
-whose corners it would lose. Text keeps its size: font slots are baked at
-fixed pixel sizes. A view that needs the display's size reads it from
-`app.device().display`.
+A view is laid out at the display's size in view pixels, from 135 px wide to
+360 × 360 and more, so write it like a responsive web page:
+
+- Fill the display with `w-full h-full` and lay content out with flexbox,
+  not absolute positions or fixed offsets.
+- Give content `w-full max-w-[256px]` rather than a fixed width: as wide as
+  the display allows, up to the width the design draws it at.
+- Text wraps between words to the room it has, as on a web page. Text beside
+  other items in a row takes the room they leave with `flex-1 min-w-0`, or
+  `basis-[72px] grow min-w-0` to move to its own line when even that is too
+  narrow. As on the web, a text box shrinks below its longest word only with
+  `min-w-0`, and then breaks that word.
+- Let rows `flex-wrap`, so their items move to the next line on a narrow
+  display.
+- Center a column with a `flex-1 min-h-0` spacer above and below its content:
+  on a short display the spacers give way first and the bottom is cut, not
+  the title.
+- Put a list that can run longer than the display in a
+  `flex-1 min-h-0 overflow-y-auto` box with `shrink-0` rows: a vertical drag
+  scrolls it. With `justify-end` it starts at its last item, as a chat does,
+  and scrolls up to the first.
+
+Fixed sizes stay as written. `view.size` is the smallest display the view
+still fits. The device judges a view by its size alone: whether the
+display is round or rectangular is for the view's design to handle, so a view
+meant for every device keeps its content where a round display shows it.
+Text keeps its size: font slots are baked at fixed sizes in view pixels. A
+Board may draw each view pixel as several display pixels, its density: a
+720 × 720 panel at density 2 shows views at 360 × 360, drawn sharper, so a
+view sees the same size on it as on a 360 × 360 panel. A view that needs the
+display's size reads it from `app.device().display`. A view built for one
+display ([App format](/plugins/app-manager/app-format#building-for-a-display))
+runs only on that display.
 
 ## Runs
 
@@ -104,7 +127,7 @@ to its version:
 {
   api = 1,
   board = "espressif-esp-vocat-v1-2",
-  display = { width = 360, height = 360, round = true },  -- nil without one
+  display = { width = 360, height = 360, density = 1 },  -- nil without one
   touch = true,
   capabilities = { notify = 2, ... },
 }

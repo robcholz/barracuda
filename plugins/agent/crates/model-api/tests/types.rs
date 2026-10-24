@@ -5,8 +5,8 @@ use barracuda_model_api::{BackendKind, ParseBackendKindError, RetryPolicy};
 #[test]
 fn backend_kind_string_contract_is_stable() {
     for (kind, id) in [
-        (BackendKind::OpenAiCompatible, "openai_compatible"),
-        (BackendKind::AnthropicCompatible, "anthropic_compatible"),
+        (BackendKind::OpenAi, "openai"),
+        (BackendKind::Anthropic, "anthropic"),
     ] {
         assert_eq!(kind.as_str(), id);
         assert_eq!(kind.to_string(), id);

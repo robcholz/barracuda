@@ -136,7 +136,7 @@ where
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
-            purpose: "读取模拟输入",
+            purpose: "Read analog inputs",
         })
     }
 

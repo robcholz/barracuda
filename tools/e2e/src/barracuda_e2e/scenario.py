@@ -10,7 +10,7 @@ from typing import Any
 from .virtual_io import VirtualIoSpec, VirtualIoSpecError, parse_spec
 
 DEFAULT_FORBIDDEN_LOGS = (r'\bERROR\b', r'panicked at')
-BACKENDS = ('openai_compatible', 'anthropic_compatible')
+BACKENDS = ('openai', 'anthropic')
 
 
 class ScenarioError(ValueError):
@@ -95,7 +95,7 @@ class Scenario:
     # Maximum ordinary-heap high-water mark the System may report.
     heap_high_water_max: int | None = None
     # Model API wire format the Agent is configured with.
-    backend: str = 'openai_compatible'
+    backend: str = 'openai'
     # Virtual GPIO/I2C set up before the chat and checked after it.
     virtual_io: VirtualIoSpec | None = None
 
@@ -124,12 +124,12 @@ def load_scenario(path: Path) -> Scenario:
             f'{path}: model.mode must be "scripted", "recorded", or "none"'
         )
 
-    backend = model.get('backend', 'openai_compatible')
+    backend = model.get('backend', 'openai')
     if backend not in BACKENDS:
         raise ScenarioError(
             f'{path}: model.backend must be one of {", ".join(BACKENDS)}'
         )
-    if backend != 'openai_compatible' and mode != 'recorded':
+    if backend != 'openai' and mode != 'recorded':
         raise ScenarioError(f'{path}: model.backend {backend} needs a recorded tape')
     responses: tuple[ModelResponse, ...] = ()
     tape: Path | None = None

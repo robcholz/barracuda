@@ -37,11 +37,31 @@ use crate::tree::Tree;
 /// so snapshots, hashes and damage diffs never need side data.
 pub struct DrawList {
     pub words: Vec<u32>,
+    /// Armed by `Ui::capture_texts` with a node id: the next build of this
+    /// list records every text run painted inside that node's subtree, with
+    /// its visible world box, into `texts`, then disarms (0). The agent reads
+    /// a screen this way (contracts/spec/agent.ts).
+    pub capture_texts: i32,
+    pub texts: Vec<TextBox>,
+}
+
+/// One painted text run: its visible box (clipped, world px) and its text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextBox {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub text: alloc::string::String,
 }
 
 impl DrawList {
     pub fn new() -> Self {
-        DrawList { words: Vec::new() }
+        DrawList {
+            words: Vec::new(),
+            capture_texts: 0,
+            texts: Vec::new(),
+        }
     }
 }
 
@@ -837,6 +857,24 @@ fn pow2_at_least(n: u32) -> u32 {
 /// A node's local frame: layout position + translate, then rotate/scale
 /// about its transform origin. Shared by paint and hit_test so pointer
 /// geometry can never drift from painted geometry.
+/// The world a scroll container's children are placed in: its own, moved up
+/// by how far it is scrolled.
+fn scrolled(world: &Affine, node: &crate::tree::Node, r: &style::Resolved) -> Affine {
+    if r.overflow == spec::Overflow::Scroll as u8 && node.scroll_y != 0.0 {
+        world.then(&Affine::translate(0.0, -node.scroll_y))
+    } else {
+        *world
+    }
+}
+
+/// Scroll indicator: a bar this wide, this far inside the container's right
+/// edge, never shorter than `SCROLL_BAR_MIN`, in white at this opacity times
+/// the node's `scroll_bar`.
+const SCROLL_BAR_W: f32 = 4.0;
+const SCROLL_BAR_INSET: f32 = 3.0;
+const SCROLL_BAR_MIN: f32 = 16.0;
+const SCROLL_BAR_ALPHA: f32 = 0.45;
+
 fn local_affine(l: &crate::tree::LayoutRect, r: &style::Resolved) -> Affine {
     let mut local = Affine::translate(l.x + r.translate_x, l.y + r.translate_y);
     if r.rotate != 0.0 || r.skew_x != 0.0 || r.scale != 1.0 || r.scale_x != 1.0 || r.scale_y != 1.0
@@ -1147,12 +1185,13 @@ fn hit_walk(
         return;
     }
     let mut child_clip = clip;
-    if r.overflow == spec::Overflow::Hidden as u8 {
+    if r.overflow != spec::Overflow::Visible as u8 {
         child_clip = clip.intersect(&world_aabb_of(screen, &world, l.w, l.h));
         if !child_clip.contains(px, py) {
             return;
         }
     }
+    let world = scrolled(&world, node, &r);
     if r.perspective > 0.0 {
         // 3D context: projected geometry is not point-testable from the 2D
         // walk — the context root claims its own box so clicks never fall
@@ -1199,6 +1238,11 @@ struct Walker<'a> {
     inspect_slot: u32,
     /// World AABB of `inspect_slot`, set when the walk reaches it.
     inspect_hit: Option<Clip>,
+    /// Painted text runs, while a capture is armed (DrawList::capture_texts).
+    texts: Option<Vec<TextBox>>,
+    /// The capture's subtree root, and whether the walk is inside it.
+    capture_slot: u32,
+    capturing: bool,
 }
 
 /// Build the full DrawList for the current (laid-out) tree. `frame` is the
@@ -1293,6 +1337,17 @@ pub fn build_root(
         raster_density,
         inspect_slot,
         inspect_hit: None,
+        texts: if dl.capture_texts != 0 {
+            Some(Vec::new())
+        } else {
+            None
+        },
+        capture_slot: if dl.capture_texts != 0 {
+            tree.resolve(dl.capture_texts).unwrap_or(u32::MAX)
+        } else {
+            u32::MAX
+        },
+        capturing: false,
         in_3d: false,
         provider_stale: false,
     };
@@ -1308,6 +1363,13 @@ pub fn build_root(
         dl,
     );
     let provider_stale = w.provider_stale;
+    // A stale provider repaints this list; the capture waits for that pass.
+    if let Some(texts) = w.texts.take() {
+        if !provider_stale {
+            dl.texts = texts;
+            dl.capture_texts = 0;
+        }
+    }
     let target = w
         .inspect_hit
         .map(|c| (c.x0, c.y0, c.x1 - c.x0, c.y1 - c.y0));
@@ -1367,6 +1429,26 @@ pub fn build_root(
 
 impl<'a> Walker<'a> {
     fn paint(
+        &mut self,
+        slot: u32,
+        parent_world: Affine,
+        opacity: f32,
+        clip: Clip,
+        in_transform: bool,
+        dl: &mut DrawList,
+    ) {
+        // A text capture reads one subtree: the walk is inside it from its
+        // root down.
+        if slot == self.capture_slot && !self.capturing {
+            self.capturing = true;
+            self.paint_node(slot, parent_world, opacity, clip, in_transform, dl);
+            self.capturing = false;
+            return;
+        }
+        self.paint_node(slot, parent_world, opacity, clip, in_transform, dl);
+    }
+
+    fn paint_node(
         &mut self,
         slot: u32,
         parent_world: Affine,
@@ -1636,7 +1718,7 @@ impl<'a> Walker<'a> {
         //    sort within siblings) ---------------------------------------------
         let mut child_clip = clip;
         let mut scissored = false;
-        if r.overflow == spec::Overflow::Hidden as u8 {
+        if r.overflow != spec::Overflow::Visible as u8 {
             // Scissor rects are axis-aligned: rotated clip boxes use the AABB
             // of the transformed rect (conservative).
             let rect = self.world_aabb(&world, l.w, l.h);
@@ -1666,9 +1748,11 @@ impl<'a> Walker<'a> {
         // Children in paint order — shared with hit_walk so pointer hits can
         // never disagree with painted stacking.
         let (tree, styles) = (self.tree, self.styles);
+        let content = scrolled(&world, node, &r);
         for_children_in_paint_order(tree, styles, slot, |cs| {
-            self.paint(cs, world, op, child_clip, in_transform, dl);
+            self.paint(cs, content, op, child_clip, in_transform, dl);
         });
+        self.emit_scroll_bar(dl, node, &world, op, &child_clip);
 
         if scissored {
             dl.words.push(spec::draw_op::SCISSOR_POP);
@@ -3292,6 +3376,45 @@ impl<'a> Walker<'a> {
         dl.words.push(u32::from(focused));
     }
 
+    /// The scroll indicator of a scroll container, in its own (unscrolled)
+    /// world: a rounded bar along its right edge whose length and place show
+    /// the visible share of the content and where it sits.
+    fn emit_scroll_bar(
+        &mut self,
+        dl: &mut DrawList,
+        node: &crate::tree::Node,
+        world: &Affine,
+        op: f32,
+        clip: &Clip,
+    ) {
+        let range = node.scroll_range - node.scroll_top;
+        let shown = clampf(node.scroll_bar, 0.0, 1.0);
+        let l = node.layout;
+        if range <= 0.0 || shown <= 0.0 || l.h <= SCROLL_BAR_INSET * 2.0 {
+            return;
+        }
+        let track = l.h - SCROLL_BAR_INSET * 2.0;
+        let length = (track * l.h / (l.h + range)).max(SCROLL_BAR_MIN).min(track);
+        let at = clampf((node.scroll_y - node.scroll_top) / range, 0.0, 1.0);
+        let top = SCROLL_BAR_INSET + (track - length) * at;
+        let x1 = l.w - SCROLL_BAR_INSET;
+        let color = with_alpha_abgr(
+            0x00ff_ffff,
+            (255.0 * SCROLL_BAR_ALPHA * shown * op + 0.5) as u32,
+        );
+        self.emit_rounded_box(
+            dl,
+            world,
+            x1 - SCROLL_BAR_W,
+            top,
+            x1,
+            top + length,
+            SCROLL_BAR_W * 0.5,
+            Fill::Flat(color),
+            clip,
+        );
+    }
+
     /// Emit the inline text run of a text element as one GLYPH_RUN.
     #[allow(clippy::too_many_arguments)]
     fn emit_text(
@@ -3317,6 +3440,41 @@ impl<'a> Walker<'a> {
         collect_run_of(self.tree, node, &mut run);
         if run.is_empty() {
             return;
+        }
+        if let (true, Some(texts)) = (self.capturing, self.texts.as_mut()) {
+            let mut b = world_aabb_of(self.screen, world, box_w, node.layout.h);
+            b.x0 = b.x0.max(clip.x0);
+            b.y0 = b.y0.max(clip.y0);
+            b.x1 = b.x1.min(clip.x1);
+            b.y1 = b.y1.min(clip.y1);
+            if b.x1 > b.x0 && b.y1 > b.y0 {
+                texts.push(TextBox {
+                    x: b.x0,
+                    y: b.y0,
+                    w: b.x1 - b.x0,
+                    h: b.y1 - b.y0,
+                    text: run.clone(),
+                });
+            }
+        }
+        // Live text paints the rows its layout chose; text in a static rect
+        // breaks at the rect it was given.
+        let static_breaks;
+        let breaks = if node.layout_mode == crate::tree::LAYOUT_LIVE {
+            &node.soft_breaks
+        } else {
+            static_breaks = crate::text::static_soft_breaks(
+                self.fonts,
+                &run,
+                node.text_native,
+                slot,
+                r.tracking,
+                crate::text::content_width(box_w, &r.padding),
+            );
+            &static_breaks
+        };
+        if !breaks.is_empty() {
+            run = crate::text::with_soft_breaks(&run, breaks);
         }
         // The node's measurement provider was RECORDED at layout time
         // (layout.rs build(): native iff a measurer is installed, tracking

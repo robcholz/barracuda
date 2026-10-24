@@ -36,17 +36,12 @@ pub const WIFI_SETTINGS: &str = "wifi";
 const CONTROL_TILES: i32 = 0;
 const CONTROL_BRIGHTNESS: i32 = 1;
 const CONTROL_PORTAL: i32 = 2;
-/// Brightness when the system starts, in percent.
-/// The battery gauge's inner width in pixels.
-const BATTERY_GAUGE: i32 = 19;
-/// The brightness bar's inner height in pixels.
-const BRIGHTNESS_BAR: i32 = 158;
 /// How long an answered or allowed result stays on screen.
 const ANSWER_SHOWN: Duration = Duration::from_secs(9);
 const RESULT_SHOWN: Duration = Duration::from_secs(30);
 const DONE_SHOWN: Duration = Duration::from_millis(1600);
-/// The launcher's grid: tile column width and gap, row height and gap, in
-/// pixels.
+/// The launcher's tiles, as the view draws them: column width and gap, row
+/// height and gap, in pixels, for how many fit a page.
 const COLUMN: i32 = 78;
 const COLUMN_GAP: i32 = 6;
 const ROW: i32 = 86;
@@ -424,8 +419,8 @@ impl SystemUi {
                 {
                     let label = if allowed { &notice.allow } else { &notice.deny };
                     let verdict = match (allowed, label.as_str()) {
-                        (true, label) if label == DEFAULT_LABELS.0 => "已允许",
-                        (false, label) if label == DEFAULT_LABELS.1 => "已拒绝",
+                        (true, label) if label == DEFAULT_LABELS.0 => "Allowed",
+                        (false, label) if label == DEFAULT_LABELS.1 => "Denied",
                         (_, label) => label,
                     };
                     self.done = Some((format!("{verdict} · {}", notice.title), Instant::now()));
@@ -557,7 +552,7 @@ impl SystemUi {
             Err(error) => {
                 log::warn!("system ui: cannot open {}: {error}", info.id);
                 self.services.notices.post(
-                    &format!("无法打开“{}”", info.name),
+                    &format!("Can't open \"{}\"", info.name),
                     words::open_error(error),
                     info.icon.as_deref(),
                 );
@@ -585,7 +580,7 @@ impl SystemUi {
                 } else {
                     let icon = self.info(&exit.id).and_then(|info| info.icon);
                     self.services.notices.post(
-                        &format!("“{name}”已退出"),
+                        &format!("\"{name}\" quit"),
                         words::exit(&exit),
                         icon.as_deref(),
                     );
@@ -683,21 +678,27 @@ impl SystemUi {
     }
 
     /// What an app asks to be allowed, in the words of the Plugins that
-    /// provide it, with its icons; what it uses only when the device has it
-    /// is marked optional.
-    fn permissions(&self, subject: Option<&AppInfo>) -> Vec<(String, String)> {
+    /// provide it, each with its note and icon; what it uses only when the
+    /// device has it is noted optional.
+    fn permissions(&self, subject: Option<&AppInfo>) -> Vec<InfoLine> {
         let Some(info) = subject else {
             return Vec::new();
         };
-        let permissions: Vec<(String, String)> = self
+        let permissions: Vec<InfoLine> = self
             .services
             .apps
             .asks(info)
             .into_iter()
-            .map(|(package, line)| (line, glyph(words::permission_icon(&package))))
+            .map(|(package, purpose, optional)| {
+                (
+                    purpose,
+                    if optional { words::OPTIONAL } else { "" },
+                    glyph(words::permission_icon(&package)),
+                )
+            })
             .collect();
         if permissions.is_empty() {
-            vec![(String::from("不需要额外权限"), glyph("check"))]
+            vec![(String::from("No permissions needed"), "", glyph("check"))]
         } else {
             permissions
         }
@@ -722,16 +723,21 @@ impl SystemUi {
         // One thing on the home screen: offline, then a pending question,
         // then what was just done.
         let (card, card_label, card_glyph, card_tone) = if offline {
-            ("未连接 Wi-Fi", "Agent 需要网络", glyph("wifi-off"), 2)
+            (
+                "Wi-Fi not connected",
+                "Agent needs a network",
+                glyph("wifi-off"),
+                2,
+            )
         } else if let Some(question) = question {
             (
                 question.title.as_str(),
-                "Agent 请求确认",
+                "Agent needs approval",
                 glyph("shield-alert"),
                 1,
             )
         } else if let Some((text, _)) = recent {
-            (text.as_str(), "刚刚", glyph("check"), 0)
+            (text.as_str(), "Just now", glyph("check"), 0)
         } else {
             ("", "", String::new(), 0)
         };
@@ -753,7 +759,7 @@ impl SystemUi {
         let (title, detail, lines, primary, secondary): (
             String,
             String,
-            Vec<(String, String)>,
+            Vec<InfoLine>,
             &str,
             &str,
         ) = match screen {
@@ -765,20 +771,20 @@ impl SystemUi {
                 "",
             ),
             Screen::Exited => (
-                format!("“{subject_name}”已退出"),
+                format!("\"{subject_name}\" quit"),
                 String::from(self.exit_reason),
                 Vec::new(),
-                "重新打开",
-                "回到主页",
+                "Reopen",
+                "Go home",
             ),
             Screen::Info => (
                 String::from(subject_name),
                 match subject.and_then(|info| info.incompatible.as_ref()) {
-                    Some(reason) => format!("无法在此设备运行：{reason}"),
+                    Some(reason) => format!("Can't run\n{reason}"),
                     None => format!(
-                        "版本 {} · {}",
+                        "Version {} · {}",
                         subject.map_or("", |info| info.version.as_str()),
-                        if system { "系统应用" } else { "已安装" }
+                        if system { "System app" } else { "Installed" }
                     ),
                 },
                 if system {
@@ -786,18 +792,18 @@ impl SystemUi {
                 } else {
                     self.permissions(subject)
                 },
-                if system { "" } else { "卸载" },
-                "返回",
+                if system { "" } else { "Uninstall" },
+                "Back",
             ),
             _ => (String::new(), String::new(), Vec::new(), "", ""),
         };
         let network = self.services.network.source();
         let link = network.as_ref().map(|network| match network.state() {
-            NetworkState::Connected { name } => name.unwrap_or_else(|| String::from("已连接")),
-            NetworkState::Connecting => String::from("连接中"),
-            NetworkState::Offline => String::from("未连接"),
+            NetworkState::Connected { name } => name.unwrap_or_else(|| String::from("Online")),
+            NetworkState::Connecting => String::from("Joining"),
+            NetworkState::Offline => String::from("Offline"),
         });
-        let switch = |on: bool| String::from(if on { "开" } else { "关" });
+        let switch = |on: bool| String::from(if on { "On" } else { "Off" });
         let tiles = [
             (
                 TILE_WIFI,
@@ -808,29 +814,29 @@ impl SystemUi {
             ),
             (
                 TILE_MIC,
-                "麦克风",
+                "Mic",
                 switch(preferences.microphone),
                 "mic",
                 preferences.microphone,
             ),
             (
                 TILE_MUTE,
-                "静音",
+                "Mute",
                 switch(preferences.muted),
                 "volume-x",
                 preferences.muted,
             ),
-            (TILE_QUIET, "勿扰", switch(quiet), "moon", quiet),
+            (TILE_QUIET, "Quiet", switch(quiet), "moon", quiet),
             (
                 TILE_BRIGHTNESS,
-                "亮度",
+                "Screen",
                 format!("{}%", preferences.brightness),
                 "sun",
                 false,
             ),
             (
                 TILE_PORTAL,
-                "门户",
+                "Portal",
                 switch(self.portal_open()),
                 "globe",
                 self.portal_open(),
@@ -846,7 +852,7 @@ impl SystemUi {
         let first = self.page * page;
         let shown = &self.entries[first.min(self.entries.len())..];
         let shown = &shown[..shown.len().min(page)];
-        let positions = grid(shown.len(), &rows, width, height);
+        let filled = fill_rows(shown.len(), &rows);
         let values = [
             ("screen", ViewValue::I32(screen.code())),
             ("clock", ViewValue::Str(clock)),
@@ -856,12 +862,6 @@ impl SystemUi {
             (
                 "battery",
                 ViewValue::I32(battery.map_or(-1, |battery| i32::from(battery.percent))),
-            ),
-            (
-                "batteryFill",
-                ViewValue::I32(battery.map_or(0, |battery| {
-                    i32::from(battery.percent) * BATTERY_GAUGE / 100
-                })),
             ),
             (
                 "agent",
@@ -879,30 +879,33 @@ impl SystemUi {
             ("cardGlyph", ViewValue::Str(card_glyph)),
             ("cardTone", ViewValue::I32(card_tone)),
             (
-                "apps",
-                ViewValue::List(
-                    shown
+                "rows",
+                ViewValue::List({
+                    let mut apps = shown.iter().enumerate().map(|(index, info)| {
+                        let (icon, letter) = app_icon(info);
+                        item([
+                            // The index into the whole launcher, which
+                            // `openApp` answers with.
+                            ViewValue::I32((first + index) as i32),
+                            ViewValue::Str(info.name.clone()),
+                            icon,
+                            ViewValue::Str(letter),
+                            ViewValue::Bool(running_ids.contains(&info.id.as_str())),
+                            // Dimmed: an app that cannot run here.
+                            ViewValue::Bool(info.incompatible.is_some()),
+                        ])
+                    });
+                    filled
                         .iter()
-                        .zip(positions)
                         .enumerate()
-                        .map(|(index, (info, (x, y)))| {
-                            let (icon, letter) = app_icon(info);
+                        .map(|(row, &tiles)| {
                             item([
-                                // The index into the whole launcher, which
-                                // `openApp` answers with.
-                                ViewValue::I32((first + index) as i32),
-                                ViewValue::Str(info.name.clone()),
-                                icon,
-                                ViewValue::Str(letter),
-                                ViewValue::Bool(running_ids.contains(&info.id.as_str())),
-                                // Dimmed: an app that cannot run here.
-                                ViewValue::Bool(info.incompatible.is_some()),
-                                ViewValue::I32(x),
-                                ViewValue::I32(y),
+                                ViewValue::I32(row as i32),
+                                ViewValue::List(apps.by_ref().take(tiles).collect()),
                             ])
                         })
-                        .collect(),
-                ),
+                        .collect()
+                }),
             ),
             (
                 "running",
@@ -996,10 +999,6 @@ impl SystemUi {
                 ViewValue::I32(i32::from(preferences.brightness)),
             ),
             (
-                "brightnessFill",
-                ViewValue::I32(i32::from(preferences.brightness) * BRIGHTNESS_BAR / 100),
-            ),
-            (
                 "portal",
                 ViewValue::Str(
                     network
@@ -1024,10 +1023,11 @@ impl SystemUi {
                     lines
                         .into_iter()
                         .enumerate()
-                        .map(|(index, (text, glyph))| {
+                        .map(|(index, (text, note, glyph))| {
                             item([
                                 ViewValue::I32(index as i32),
                                 ViewValue::Str(text),
+                                ViewValue::Str(String::from(note)),
                                 ViewValue::Str(glyph),
                             ])
                         })
@@ -1070,39 +1070,26 @@ fn page_rows(width: i32, height: i32, round: bool) -> Vec<usize> {
         .collect()
 }
 
-/// Positions of `count` launcher tiles filling `page`'s rows in order,
-/// centered on a `width` by `height` display.
-fn grid(count: usize, page: &[usize], width: i32, height: i32) -> Vec<(i32, i32)> {
-    let mut rows = Vec::new();
+/// How many of `count` launcher tiles each of `page`'s rows holds, filling
+/// the rows in order; rows left empty are left out.
+fn fill_rows(count: usize, page: &[usize]) -> Vec<usize> {
     let mut left = count;
-    for &tiles in page {
-        if left == 0 {
-            break;
-        }
-        let tiles = tiles.min(left);
-        rows.push(tiles);
-        left -= tiles;
-    }
-    let tall = rows.len() as i32 * ROW + (rows.len() as i32 - 1).max(0) * ROW_GAP;
-    let top = (height - tall) / 2 + 4;
-    let mut positions = Vec::with_capacity(count);
-    for (row, tiles) in rows.into_iter().enumerate() {
-        let span = tiles as i32 * COLUMN + (tiles as i32 - 1) * COLUMN_GAP;
-        let start = (width - span) / 2;
-        for column in 0..tiles as i32 {
-            positions.push((
-                start + column * (COLUMN + COLUMN_GAP),
-                top + row as i32 * (ROW + ROW_GAP),
-            ));
-        }
-    }
-    positions
+    page.iter()
+        .map_while(|&tiles| {
+            let tiles = tiles.min(left);
+            left -= tiles;
+            (tiles > 0).then_some(tiles)
+        })
+        .collect()
 }
 
 /// The brightness level for a percentage.
 fn percent_to_level(percent: i32) -> u8 {
     u8::try_from(percent.clamp(0, 100) * 255 / 100).unwrap_or(u8::MAX)
 }
+
+/// A line of the app info screen: its text, the note under it, and its icon.
+type InfoLine = (String, &'static str, String);
 
 /// A struct value: its fields in declaration order.
 fn item<const N: usize>(fields: [ViewValue; N]) -> ViewValue {
@@ -1149,7 +1136,7 @@ fn index(call: &ViewCall) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{grid, page_rows};
+    use super::{fill_rows, page_rows};
 
     #[test]
     fn launcher_pages_fit_the_display() {
@@ -1159,20 +1146,23 @@ mod tests {
         assert_eq!(page_rows(240, 240, true), [1, 2]);
         assert_eq!(page_rows(320, 240, false), [2, 3]);
         assert_eq!(page_rows(135, 240, false), [1, 1]);
-        // Every tile of a full page lies on the display.
+        // Every row of a full page fits the display's width, and the rows
+        // its height.
         for (width, height, round) in [(360, 360, true), (320, 240, false), (720, 1280, false)] {
             let rows = page_rows(width, height, round);
-            let count = rows.iter().sum();
-            for (x, y) in grid(count, &rows, width, height) {
-                assert!(
-                    x >= 0 && x + super::COLUMN <= width,
-                    "{width}x{height}: x {x}"
-                );
-                assert!(
-                    y >= 0 && y + super::ROW <= height,
-                    "{width}x{height}: y {y}"
-                );
+            for &tiles in &rows {
+                let span = tiles as i32 * super::COLUMN + (tiles as i32 - 1) * super::COLUMN_GAP;
+                assert!(span <= width, "{width}x{height}: {span}");
             }
+            let tall = rows.len() as i32 * (super::ROW + super::ROW_GAP) - super::ROW_GAP;
+            assert!(tall <= height, "{width}x{height}: {tall}");
         }
+    }
+
+    #[test]
+    fn tiles_fill_rows_in_order() {
+        assert_eq!(fill_rows(7, &[2, 3, 2]), [2, 3, 2]);
+        assert_eq!(fill_rows(4, &[2, 3, 2]), [2, 2]);
+        assert!(fill_rows(0, &[2, 3, 2]).is_empty());
     }
 }

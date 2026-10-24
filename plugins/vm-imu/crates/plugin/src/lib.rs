@@ -131,7 +131,7 @@ where
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         (!self.imus.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 3,
-            purpose: "读取动作传感器",
+            purpose: "Read motion sensors",
         })
     }
 

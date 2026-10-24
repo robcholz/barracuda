@@ -185,7 +185,7 @@ impl<Storage: PluginStorage> Owners<Storage> {
     pub async fn add(&self, id: &str, label: Option<&str>) -> Result<bool, OwnersError>;
     pub async fn remove(&self, id: &str) -> Result<bool, OwnersError>;
 }
-pub const PAIRED_REPLY: &str; // a Chinese line, then "Paired. You can start chatting."
+pub const PAIRED_REPLY: &str; // "Paired. You can start chatting."
 ```
 
 - 配对码是从熵源中均匀抽取的六位数字，在 `PAIRING_CODE_LIFETIME`（10 分钟）内有效，并以恒定时间进行比较。
@@ -245,8 +245,10 @@ impl ReceiveError {
     pub fn new(message: impl Into<String>) -> Self;   // retried after backoff
     pub fn halt(message: impl Into<String>) -> Self;  // waits for restart()
     pub fn retry_after(self, delay: Duration) -> Self; // ≥ delay, ≤ 10 min
+    pub const fn code(self, code: &'static str) -> Self; // status `code`
 }
-pub enum ReceiveState { Idle, Starting, Receiving, NoSlot, Error(String) }
+pub enum ReceiveState { Idle, Starting, Receiving, NoSlot, Error(ReceiveFailure) }
+pub struct ReceiveFailure { pub message: String, pub code: Option<&'static str> }
 pub struct ReceiveControl<Slots: ReceiveSlotSource>;
 impl<Slots: ReceiveSlotSource> ReceiveControl<Slots> {
     pub fn new(slots: Slots) -> Self;
@@ -399,7 +401,7 @@ Gateway 本身不提供门户入口，也不依赖 captive portal。它的测试
       - `Ignored`：什么也不做。
    5. 持久化游标。
 
-   对重试可以解决的失败返回 `ReceiveError::new`，对重试无法解决的失败返回 `halt`（微信 `-14`：“需要重新扫码”），对 429 使用 `.retry_after(..)`。
+   对重试可以解决的失败返回 `ReceiveError::new`，对重试无法解决的失败返回 `halt`（微信 `-14`：“需要重新扫码”），对 429 使用 `.retry_after(..)`。页面需要识别的失败再加上 `.code("…")`：状态会把它报告为 `receive.code`，页面匹配这个代码，而不匹配消息文字。
 6. **运行时**。构建
    `gateway.receive_runtime(control, Rc::new(receiver), ReceiveTiming::DEVICE)`，
    然后调用 `gateway.sync_receive(&*state)`；那里的 `NoSlot` 已经作为状态报告出来了。把运行时保留到 `start`。

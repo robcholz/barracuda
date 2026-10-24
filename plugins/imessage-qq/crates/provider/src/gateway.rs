@@ -459,10 +459,9 @@ pub enum CloseAction {
 }
 
 /// Message shown when QQ delisted the bot (close code 4914).
-pub const DELISTED: &str =
-    "QQ 机器人已下架，只能连接沙箱环境 / The QQ bot is delisted and may only use the sandbox";
+pub const DELISTED: &str = "The QQ bot is delisted and may only use the sandbox";
 /// Message shown when QQ banned the bot (close code 4915).
-pub const BANNED: &str = "QQ 机器人已被封禁 / The QQ bot is banned";
+pub const BANNED: &str = "The QQ bot is banned";
 
 /// Maps a gateway close code to the next step.
 #[must_use]

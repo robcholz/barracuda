@@ -178,7 +178,7 @@ where
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         (!self.cameras.is_empty()).then_some(barracuda_vm_plugin::PackageInterface::Stable {
             version: 3,
-            purpose: "使用相机拍照",
+            purpose: "Take photos",
         })
     }
 

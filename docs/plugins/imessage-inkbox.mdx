@@ -123,7 +123,7 @@ after awaiting `IMessageGateway::ready()`. The list is newest first and
   more than a full page of new messages within one interval skips the oldest,
   with a warning.
 - **Errors.** 401 or 403 halts receiving with
-  "Inkbox rejected the API key" (after its Chinese half) until the
+  "Inkbox rejected the API key" until the
   configuration changes; 429 waits `Retry-After` seconds (60 when absent);
   other statuses and failed connections retry with the runtime's backoff; a
   connection that ends after a healthy poll is reopened at once.

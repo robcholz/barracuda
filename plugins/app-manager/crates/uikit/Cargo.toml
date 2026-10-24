@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Runs compiled MicroTS views on a display and turns touch into gestures"
 license = "AGPL-3.0-only"
+publish = false
 
 [dependencies]
 barracuda-board-hal.workspace = true

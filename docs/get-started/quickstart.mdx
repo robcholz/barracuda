@@ -9,7 +9,7 @@ in place of hardware. Then connect a model and talk to the on-board Agent.
 <Info>
   Prerequisites: Rust installed and the repository cloned. See
   [Installation](/get-started/installation). You also need an API key for an
-  OpenAI- or Anthropic-compatible model service.
+  OpenAI or Anthropic model service.
 </Info>
 
 <Steps>
@@ -40,15 +40,15 @@ in place of hardware. Then connect a model and talk to the on-board Agent.
     [http://127.0.0.1:7878/](http://127.0.0.1:7878/) to see the display.
   </Step>
   <Step title="Connect a model">
-    In a second terminal, start the configurator, choose **Local**, then the
-    model configuration (`agent`):
+    In a second terminal, start the configurator, choose **Local**, then
+    **Models** (`agent`):
 
     ```bash terminal
     cargo cli configure
     ```
 
-    Answer the prompts: the API format (`openai_compatible` or
-    `anthropic_compatible`), the purpose `root_agent`, the base URL, the model,
+    Answer the prompts: the API format (`openai` or
+    `anthropic`), the purpose `root_agent`, the base URL, the model,
     and your API key. The key is stored on the device. You can do the same on
     the **Models** page of the [Device Portal](/use/device-portal).
   </Step>

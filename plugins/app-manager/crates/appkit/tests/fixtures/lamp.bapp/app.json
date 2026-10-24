@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "lamp",
-  "name": "灯带",
+  "name": "Lamp",
   "version": "0.1.0",
   "api": 1,
   "requires": [
@@ -17,9 +17,8 @@
       "font-6.bin"
     ],
     "size": [
-      360,
-      360
-    ],
-    "shape": "round"
+      135,
+      180
+    ]
   }
 }

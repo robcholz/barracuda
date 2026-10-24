@@ -12,7 +12,7 @@ fn main() -> anyhow::Result<()> {
     )]);
     let mut api = ModelApi::new(ClientFactory::from_network(&stack, &stack));
     api.set_config(ModelApiConfig::new(
-        BackendKind::OpenAiCompatible,
+        BackendKind::OpenAi,
         "key",
         "model",
         "http://llm.test/v1",

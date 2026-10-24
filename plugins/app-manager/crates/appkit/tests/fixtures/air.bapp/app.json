@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "air",
-  "name": "空气质量",
+  "name": "Air",
   "version": "0.1.0",
   "api": 1,
   "icon": "air",
@@ -15,9 +15,8 @@
       "font-15.bin"
     ],
     "size": [
-      360,
-      360
-    ],
-    "shape": "round"
+      135,
+      135
+    ]
   }
 }

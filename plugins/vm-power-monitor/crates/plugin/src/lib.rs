@@ -146,7 +146,7 @@ impl LuaPackage for PowerMonitorPackage {
         self.power
             .is_present()
             .then_some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
-                purpose: "读取电源数据",
+                purpose: "Read power data",
             })
     }
 

@@ -36,12 +36,7 @@ fn sessions_read_back_what_was_said() {
     .expect("runtime builds");
     runtime
         .set_api(
-            ModelApiConfig::new(
-                BackendKind::OpenAiCompatible,
-                "key",
-                "model",
-                "http://llm.test/v1",
-            ),
+            ModelApiConfig::new(BackendKind::OpenAi, "key", "model", "http://llm.test/v1"),
             ApiPurpose::RootAgent,
             true,
         )

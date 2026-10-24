@@ -135,7 +135,7 @@ where
 
     fn interface(&self) -> Option<barracuda_vm_plugin::PackageInterface> {
         Some(barracuda_vm_plugin::PackageInterface::BoardSpecific {
-            purpose: "访问 I2S 音频总线",
+            purpose: "Access the I2S bus",
         })
     }
     fn revoke(&self) {

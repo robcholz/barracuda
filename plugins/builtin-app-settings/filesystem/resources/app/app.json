@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "settings",
-  "name": "设置",
+  "name": "Settings",
   "version": "0.1.0",
   "api": 1,
   "icon": "settings",
@@ -11,7 +11,6 @@
     "size": [
       360,
       360
-    ],
-    "shape": "round"
+    ]
   }
 }

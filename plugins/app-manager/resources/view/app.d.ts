@@ -6,11 +6,14 @@ import type { i32 } from "@pocketjs/framework/solid/std";
 /** An icon's glyph layers in the system icon font; "" where it has none. */
 export interface Icon { base: string; accent: string; dim: string }
 /** `dimmed`: an app this device cannot run. */
-export interface AppItem { id: i32; name: string; icon: Icon; letter: string; running: boolean; dimmed: boolean; x: i32; y: i32 }
+export interface AppItem { id: i32; name: string; icon: Icon; letter: string; running: boolean; dimmed: boolean }
+/** One row of the launcher's honeycomb, centered on the display. */
+export interface AppRow { id: i32; apps: AppItem[] }
 export interface RunItem { id: i32; name: string; icon: Icon; letter: string; detail: string; active: boolean }
 export interface Notice { id: i32; title: string; body: string; icon: Icon; letter: string; confirm: boolean; allow: string; deny: string }
 export interface Tile { id: i32; label: string; detail: string; glyph: string; on: boolean }
-export interface Line { id: i32; text: string; glyph: string }
+/** `note`: a muted second line, such as "Optional"; "" for none. */
+export interface Line { id: i32; text: string; note: string; glyph: string }
 /** One launcher page; `on` is the page on the display. */
 export interface Dot { id: i32; on: boolean }
 
@@ -25,9 +28,8 @@ export declare const clock: Accessor<string>;
 export declare const unread: Accessor<boolean>;
 export declare const quiet: Accessor<boolean>;
 export declare const offline: Accessor<boolean>;
+/** The battery's charge in percent; -1 without a battery. */
 export declare const battery: Accessor<i32>;
-/** The battery gauge's filled width in pixels. */
-export declare const batteryFill: Accessor<i32>;
 
 // Home: 0 standby, 1 listening, 2 thinking, 3 answering.
 export declare const agent: Accessor<i32>;
@@ -39,7 +41,8 @@ export declare const cardGlyph: Accessor<string>;
 /** 0 neutral, 1 warning, 2 danger. */
 export declare const cardTone: Accessor<i32>;
 
-export declare const apps: Accessor<AppItem[]>;
+/** The launcher page's rows of apps. */
+export declare const rows: Accessor<AppRow[]>;
 /** The launcher's pages when it has more than one; swipe up and down to turn. */
 export declare const dots: Accessor<Dot[]>;
 export declare const running: Accessor<RunItem[]>;
@@ -50,9 +53,8 @@ export declare const done: Accessor<string>;
 export declare const tiles: Accessor<Tile[]>;
 /** 0 tiles, 1 brightness, 2 portal. */
 export declare const control: Accessor<i32>;
+/** The display's brightness in percent. */
 export declare const brightness: Accessor<i32>;
-/** The brightness bar's filled height in pixels. */
-export declare const brightnessFill: Accessor<i32>;
 export declare const portal: Accessor<string>;
 
 // The app a launching, exited, info, or menu screen is about.

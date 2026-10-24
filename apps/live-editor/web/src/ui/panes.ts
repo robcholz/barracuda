@@ -55,15 +55,26 @@ export class PreviewPane implements Pane {
       this.canvas,
       this.overlay,
     );
-    this.canvas.addEventListener("pointerdown", (event) => {
-      const rect = this.canvas.getBoundingClientRect();
-      const frame = this.app.frame;
-      if (!frame) return;
-      app.tap(
-        ((event.clientX - rect.left) / rect.width) * frame.width,
-        ((event.clientY - rect.top) / rect.height) * frame.height,
-      );
-    });
+    // The pointer acts as a finger does on the device: it taps, or drags
+    // what scrolls.
+    const pointer =
+      (phase: "down" | "move" | "up" | "cancel") => (event: PointerEvent) => {
+        const rect = this.canvas.getBoundingClientRect();
+        const frame = this.app.frame;
+        if (!frame) return;
+        if (phase === "move" && !this.canvas.hasPointerCapture(event.pointerId))
+          return;
+        if (phase === "down") this.canvas.setPointerCapture(event.pointerId);
+        app.pointer(
+          phase,
+          ((event.clientX - rect.left) / rect.width) * frame.width,
+          ((event.clientY - rect.top) / rect.height) * frame.height,
+        );
+      };
+    this.canvas.addEventListener("pointerdown", pointer("down"));
+    this.canvas.addEventListener("pointermove", pointer("move"));
+    this.canvas.addEventListener("pointerup", pointer("up"));
+    this.canvas.addEventListener("pointercancel", pointer("cancel"));
     this.bezel = h("div", { class: "le-bezel" }, this.screen);
     this.stage = h("div", { class: "le-stage" });
     this.footer = h("div", { class: "bc-pane__section le-row le-pad" });

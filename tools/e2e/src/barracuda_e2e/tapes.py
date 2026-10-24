@@ -42,7 +42,7 @@ def _rfc3339(moment: datetime) -> str:
 
 
 def write_scripted_tape(responses: Iterable[ModelResponse], path: Path) -> int:
-    """Write one OpenAI-compatible streaming interaction per response.
+    """Write one OpenAI streaming interaction per response.
 
     Returns the number of interactions written.
     """

@@ -50,7 +50,7 @@ local capabilities = {}
 for name in pairs(device.capabilities) do capabilities[#capabilities + 1] = name end
 table.sort(capabilities)
 print(device.api, device.board, device.display.width, device.display.height,
-  device.display.round, device.touch, table.concat(capabilities, ","))
+  device.display.density, device.touch, table.concat(capabilities, ","))
 "#;
 
 async fn put(fs: &ScopedVfs, path: &str, bytes: &[u8]) {
@@ -91,15 +91,24 @@ async fn filesystem() -> ScopedVfs {
     offer(&fs, "plain", "").await;
     offer(
         &fs,
-        "round",
-        &format!(r#","view":{{{VIEW},"size":[360,360],"shape":"round"}}"#),
+        "full",
+        &format!(r#","view":{{{VIEW},"size":[360,360]}}"#),
+    )
+    .await;
+    // Built for this display.
+    offer(
+        &fs,
+        "fitted",
+        &format!(
+            r#","view":{{{VIEW},"size":[240,240],"target":{{"size":[360,360],"density":1}}}}"#
+        ),
     )
     .await;
     // A smaller view lays out at the display's size.
     offer(
         &fs,
         "small",
-        &format!(r#","view":{{{VIEW},"size":[240,240],"shape":"round"}}"#),
+        &format!(r#","view":{{{VIEW},"size":[240,240]}}"#),
     )
     .await;
     // Does not fit, and says why.
@@ -113,17 +122,24 @@ async fn filesystem() -> ScopedVfs {
     .await;
     offer(
         &fs,
-        "square",
-        &format!(r#","view":{{{VIEW},"size":[240,240],"shape":"rect"}}"#),
+        "large",
+        &format!(r#","view":{{{VIEW},"size":[480,480]}}"#),
+    )
+    .await;
+    offer(&fs, "photo", r#","requires":["camera"]"#).await;
+    // Built for another display, or for this size at another density.
+    offer(
+        &fs,
+        "tailored",
+        &format!(r#","view":{{{VIEW},"target":{{"size":[320,240],"density":1}}}}"#),
     )
     .await;
     offer(
         &fs,
-        "large",
-        &format!(r#","view":{{{VIEW},"size":[480,480],"shape":"round"}}"#),
+        "sharp",
+        &format!(r#","view":{{{VIEW},"target":{{"size":[360,360],"density":2}}}}"#),
     )
     .await;
-    offer(&fs, "photo", r#","requires":["camera"]"#).await;
     offer(&fs, "serial", r#","permissions":["serial"]"#).await;
     // Breaks the app format.
     offer(&fs, "loose", r#","permissions":["pins"]"#).await;
@@ -140,6 +156,13 @@ async fn filesystem() -> ScopedVfs {
     offer(&fs, "unknown", r#","requires":["teleport"]"#).await;
     offer(&fs, "core", r#","uses":["time"]"#).await;
     offer(&fs, "twice", r#","requires":["light"],"uses":["light"]"#).await;
+    // A display's shape is the view's design, not the manifest's.
+    offer(
+        &fs,
+        "shaped",
+        &format!(r#","view":{{{VIEW},"size":[240,240],"shape":"rect"}}"#),
+    )
+    .await;
     fs
 }
 
@@ -151,13 +174,13 @@ async fn scenario(spawner: Spawner) {
             "light",
             Some(PackageInterface::Stable {
                 version: 1,
-                purpose: "控制灯光",
+                purpose: "Control lights",
             }),
         ),
         Fake(
             "pins",
             Some(PackageInterface::BoardSpecific {
-                purpose: "控制引脚",
+                purpose: "Control pins",
             }),
         ),
         Fake("secret", None),
@@ -171,6 +194,7 @@ async fn scenario(spawner: Spawner) {
         display: Some(DisplayInfo {
             width: 360,
             height: 360,
+            density: 1,
             round: true,
         }),
         touch: true,
@@ -179,8 +203,8 @@ async fn scenario(spawner: Spawner) {
         AppManager::register(filesystem().await, vm, Some(ui), device, &packages).unwrap();
     spawner.spawn(supervise(manager.clone()).unwrap());
 
-    assert_eq!(manager.purpose("light"), Some("控制灯光"));
-    assert_eq!(manager.purpose("pins"), Some("控制引脚"));
+    assert_eq!(manager.purpose("light"), Some("Control lights"));
+    assert_eq!(manager.purpose("pins"), Some("Control pins"));
     assert_eq!(manager.purpose("secret"), None);
     assert_eq!(manager.purpose("camera"), None);
 
@@ -193,21 +217,26 @@ async fn scenario(spawner: Spawner) {
     assert_eq!(
         offered,
         [
-            (
-                "dim",
-                Some("需要更新系统（应用需要 light 第 2 版，本机是第 1 版）")
-            ),
-            ("elsewhere", Some("只适用于 other-board、third-board")),
+            ("dim", Some("Needs system update (light v2, device has v1)")),
+            ("elsewhere", Some("Only for other-board, third-board")),
+            ("fitted", None),
+            ("full", None),
             ("lamp", None),
-            ("large", Some("屏幕太小（应用需要 480×480）")),
-            ("later", Some("需要更新系统（应用需要 API 2，本机是 1）")),
-            ("photo", Some("此设备没有 camera")),
+            ("large", Some("Display too small (needs 480×480)")),
+            ("later", Some("Needs system update (API 2, device has 1)")),
+            ("photo", Some("This device has no camera")),
             ("plain", None),
-            ("round", None),
-            ("serial", Some("此设备不支持 serial")),
+            ("serial", Some("This device doesn't support serial")),
+            (
+                "sharp",
+                Some("Built for 360×360 @2x display (device has 360×360)")
+            ),
             ("small", None),
-            ("square", Some("应用需要方屏")),
-            ("unknown", Some("此设备没有 teleport")),
+            (
+                "tailored",
+                Some("Built for 320×240 display (device has 360×360)")
+            ),
+            ("unknown", Some("This device has no teleport")),
         ]
     );
     let invalid: Vec<_> = list
@@ -215,12 +244,13 @@ async fn scenario(spawner: Spawner) {
         .iter()
         .map(|app| (app.dir.as_str(), app.problem.as_str()))
         .collect();
-    assert_eq!(invalid.len(), 6, "{invalid:#?}");
+    assert_eq!(invalid.len(), 7, "{invalid:#?}");
     for ((dir, problem), (expected_dir, expected)) in invalid.iter().zip([
         ("core.bapp", "\"time\" is a package every app has"),
         ("loose.bapp", "\"pins\" talks to a Board's hardware"),
         ("mislabeled.bapp", "\"light\" is a stable package"),
         ("pinned.bapp", "\"pins\" is not a stable package"),
+        ("shaped.bapp", "shape"),
         ("twice.bapp", "\"light\" is listed twice"),
         ("versioned.bapp", "\"light@soon\" is not a package name"),
     ]) {
@@ -229,7 +259,7 @@ async fn scenario(spawner: Spawner) {
     }
 
     // Incompatible apps do not open.
-    for id in ["later", "dim", "elsewhere", "square", "photo", "serial"] {
+    for id in ["later", "dim", "elsewhere", "photo", "serial", "tailored"] {
         assert_eq!(
             manager.open(id).await.err(),
             Some(AppError::Incompatible),
@@ -250,7 +280,7 @@ async fn scenario(spawner: Spawner) {
         exit.output,
         [
             "true\ttrue\tfalse\ttrue\tfalse",
-            "1\ttest-board\t360\t360\ttrue\ttrue\tlight",
+            "1\ttest-board\t360\t360\t1\ttrue\tlight",
         ],
         "{exit:?}"
     );

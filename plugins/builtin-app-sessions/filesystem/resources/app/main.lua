@@ -21,7 +21,7 @@ end
 
 -- What an Agent message that only called Tools shows.
 local function tools(names)
-  return "调用了 " .. table.concat(names, "、")
+  return "Called " .. table.concat(names, ", ")
 end
 
 local function publish()

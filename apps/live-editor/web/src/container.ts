@@ -48,7 +48,6 @@ interface Manifest {
     styles?: string;
     fonts?: string[];
     size?: unknown;
-    shape?: string;
   };
   [key: string]: unknown;
 }
@@ -70,9 +69,8 @@ export async function buildContainer(
   sources: AppSources,
   toolchain: Toolchain,
 ): Promise<{ manifest: Manifest; files: Map<string, Uint8Array> }> {
-  // The source manifest's `view` has only its shape; the build fills in the rest once the view exists.
+  // The build fills in the manifest's `view` once the view exists.
   const manifest = json<Manifest>(sources, "app.json");
-  const shape = manifest.view?.shape;
   delete manifest.view;
   const entry = manifest.entry ?? "main.lua";
   const program = sources.get(entry);
@@ -101,7 +99,6 @@ export async function buildContainer(
       : {};
     const size = pocket.app?.viewport?.fixed?.logical;
     if (size) manifest.view.size = size;
-    if (shape) manifest.view.shape = shape;
   }
   const problem = manifestProblem(manifest);
   if (problem) throw new BuildError(`app.json: ${problem}`, "app.json");

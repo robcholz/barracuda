@@ -1,5 +1,5 @@
 # Vendored from PocketJS (https://github.com/pocket-nexus/pocketjs),
-# engine/crates/microts, commit e9e417308f094ead706754164acf91436e4d05a8.
+# engine/crates/microts, commit 96e5f4084c2da45d72997c443fd478bcffb92dc7.
 # MIT licensed; see LICENSE. The MicroTS runtime that compiled views drive.
 
 [package]
@@ -22,6 +22,8 @@ heapless = { version = "0.8", features = ["portable-atomic"] }
 
 [features]
 default = []
+# Layout work counters and the full-tree layout oracle (`Ui::layout_mismatches`).
+counters = ["pocketjs-core/counters"]
 model-trace = []
 critical-section = ["portable-atomic/critical-section"]
 

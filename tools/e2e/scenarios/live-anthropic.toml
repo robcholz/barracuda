@@ -1,9 +1,9 @@
 name = "Live Anthropic Messages backend"
-description = "The Agent talks to a real model through the Anthropic-compatible Messages wire format across several turns and a tool call. This provider streams reasoning without a signature, so the backend leaves it out of later requests instead of replaying an unsigned thinking block the provider would reject."
+description = "The Agent talks to a real model through the Anthropic Messages wire format across several turns and a tool call. This provider streams reasoning without a signature, so the backend leaves it out of later requests instead of replaying an unsigned thinking block the provider would reject."
 
 [model]
 mode = "recorded"
-backend = "anthropic_compatible"
+backend = "anthropic"
 
 [[steps]]
 send = "What is two plus two? Reply with one word."

@@ -80,7 +80,7 @@ const OPTIONS: SettingsFormOptions = {
           label: { zh: "接口协议", en: "API format" },
           options: [
             { value: "remote", label: "Provider", icon: ICON_BOT },
-            { value: "anthropic_compatible", label: "Anthropic" },
+            { value: "anthropic", label: "Anthropic" },
           ],
         },
       ],
