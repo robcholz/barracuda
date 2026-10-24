@@ -14,7 +14,7 @@ description: "在 Lua 中通过标准的 `os` 时间函数读取 UTC 时间。"
 - 所需能力：来自 `time` 的 `UtcClock`，来自 `vm` 的 `LuaPackageRegistry`
 - Workflow：无
 - Agent 工具：无
-- Lua 包：`time`，它扩展标准的 `os` 表
+- Lua 包：`time`，它扩展标准的 `os` 表，所以在每次运行中都随内置包一起安装
 - Web：无
 - 任务：一个可取消的 UTC 请求桥接任务（`vm_time_task`，池大小 1），由一个深度为 4 的请求队列供给
 - 存储：无

@@ -27,7 +27,7 @@ description: "了解 Lua 代码运行时可以使用什么：全局变量、模�
 | `tonumber`、`tostring`、`type` | 基本的值转换和检查。 |
 | `getmetatable`、`setmetatable` | 检查和设置普通的 Lua 元表。原生 userdata 的元表受到保护。 |
 | `rawequal`、`rawget`、`rawlen`、`rawset` | 在表操作中绕过普通的 Lua 元方法分派。 |
-| `require` | 加载安装到这个 Lua 状态中的原生包。 |
+| `require` | 加载这个 Lua 状态可用的原生包，在第一次使用时安装它。 |
 | `string` | Lua 的标准字符串操作库。 |
 | `table` | Lua 的标准表操作库。 |
 | `math` | Lua 的标准数学库，由 VM 安装（见下文）。 |
@@ -49,7 +49,7 @@ lua_package_registry.install(&mut lua)?;
 let completion = lua.run(source);
 ```
 
-在插件注册期间，VM 从 `barracuda-vm-builtin-packages` 选择完整的内置包方案。每次 `vm.run` 调用都把这个不可变的方案应用到它自己的 Lua 状态上。VM 插件还提供 `LuaPackageRegistry`；依赖它的插件在同一个统一的插件注册阶段把它们的包注册进去，每个新的 Lua 状态都会安装这些已注册的包。内置方案安装了一个基于消息的实现，它具有 Lua 标准流 I/O 的形式：
+在插件注册期间，VM 从 `barracuda-vm-builtin-packages` 选择完整的内置包方案。每次 `vm.run` 调用都把这个不可变的方案应用到它自己的 Lua 状态上。VM 插件还提供 `LuaPackageRegistry`；依赖它的插件在同一个统一的插件注册阶段把它们的包注册进去。`lua_package_registry.install` 会安装少数几个扩展内置 `io` 和 `os` 表的已注册包，例如 `vm-filesystem` 和 `vm-time`，并让脚本可以 require 其他每一个包；这些包在脚本第一次 require 它们时才安装进这个状态（参见[原生模块](/zh/plugins/vm/environment)）。内置方案安装了一个基于消息的实现，它具有 Lua 标准流 I/O 的形式：
 
 - `io.stdin`、`io.stdout` 和 `io.stderr` 是虚拟的流句柄。它们不暴露主机文件描述符。
 - `io.read(...)` 和 `io.stdin:read(...)` 支持标准的行（`l`/`*l`）、带换行的行（`L`/`*L`）、全部（`a`/`*a`）、数字（`n`/`*n`）、字节数以及多格式形式。需要更多输入时，读取会异步等待；EOF 之后返回 `nil`。
@@ -70,7 +70,7 @@ let completion = lua.run(source);
 
 ## 原生模块
 
-`require` 先解析已经加载的 `string`、`table`、`math` 和 `utf8` 标准库，然后只搜索通过 Rust `register_lib` 填充的内部预加载表。它是 Barracuda 自己的实现（`crates/lua/c/require.c`）：Lua 的 `package` 库及其文件系统搜索器和原生共享库都不会被构建，也不存在 `package` 表。`_G` 的引导条目会从已加载模块缓存中移除，所以 `require("_G")` 和 `require("package")` 会失败。
+`require` 先解析已经加载的 `string`、`table`、`math` 和 `utf8` 标准库，然后只搜索通过 Rust `register_lib` 填充的内部预加载表。名字不在表中时，它向 `LuaPackageRegistry` 查找这次运行的范围所允许的、同名的已注册包，安装它，然后再查一次；脚本得到的模块与这个包在脚本运行之前就已安装时完全相同。它是 Barracuda 自己的实现（`crates/lua/c/require.c`）：Lua 的 `package` 库及其文件系统搜索器和原生共享库都不会被构建，也不存在 `package` 表。`_G` 的引导条目会从已加载模块缓存中移除，所以 `require("_G")` 和 `require("package")` 会失败。
 
 VM 组合了三个内置原生包：`io`、`math` 和一个最初为空的 `os` 表。`io` 基于 VM 消息实现虚拟标准流，并安装标准的全局名称 `io` 和 `print`。空的 `os` 表给能力插件提供了一个可以扩展的统一标准表。这些内置包都不拥有文件系统、时钟或进程权限。
 
@@ -79,6 +79,8 @@ VM 组合了三个内置原生包：`io`、`math` 和一个最初为空的 `os` 
 `gpio`、`i2c`、`spi`、`vm-http` 和 `vm-webserver` 插件通过 `LuaPackageRegistry` 注册只能 require 的模块。`vm-http` 提供有界的高层操作 `require("http").request`，不暴露套接字或平台网络栈。`vm-webserver` 提供 `/vm` 下有界的入站 HTTP 处理函数，并且可以把一个已存在的、可读的 `io.open` 文件转移到流式响应中，而无需重新打开它的路径。硬件模块只暴露所选开发板显式的可用 I/O 配置中的逻辑资源名称。其他模块名称仍然会失败，除非另一个已启用的插件注册了它们。由 VM 拥有的内置包放在 `plugins/vm/crates/builtin-packages` 中；可选的、由插件拥有的包放在所属插件中，并通过 VM 能力注册。
 
 对已注册模块重复调用 `require` 会返回该 Lua 状态中缓存的模块表。
+
+已注册的包只在一次运行的脚本第一次 require 它时才安装进这次运行，所以这次运行的堆容纳内置包、扩展内置包的包、脚本 require 过的包，以及脚本本身。包安装期间，指令钩子不会让出；安装失败是这次 `require` 的错误，之后的 `require` 会重新尝试安装。如果脚本 require 一个包时，它的插件已经丢弃了注册，这个包就不能被 require；在运行开始之后才注册的包不属于这次运行。
 
 ## 原生函数
 
@@ -118,6 +120,8 @@ Rust 的返回契约是：
 `VmRuntime` 有四个执行槽，对应四个 Embassy VM 任务槽。启动一次执行会占用一个槽，并从平台大块内存（ESP32-S3 上为 PSRAM）分配一个 1 MiB 的 Lua 堆，这个堆由 `embedded_alloc::TlsfHeap` 管理，并通过 `Lua::new_with_allocator` 传给 Lua。Lua 的分配、重新分配、垃圾回收和状态销毁都使用这个分配器；执行结束时堆会被释放。空闲的槽不占用内存。
 
 Lua 在这个堆中只保存普通数据。原生 userdata、回调和 future 都在常规分配器中装箱，所以原子量和其他控制状态永远不会进入大块内存。
+
+这个堆中有 872 KiB 是脚本的预留空间，它在内置包、扩展内置包的包和一次包安装的峰值之外留出。脚本自己的数据和它 require 的包共用这份预留空间，每个包最多保留 12 KiB：数据和包都放得下的脚本永远不会耗尽内存，require 了 30 个包的脚本仍有 512 KiB 留给自己的数据。只有当堆中有一整块 44 KiB 空闲时（即包最多保留的大小加上它安装时的峰值），`require` 才会安装它的包；否则它会引发 Lua 的 `not enough memory` 错误，脚本可以用 `pcall` 捕获。
 
 如果大块内存无法提供这个堆，或者脚本超出了它，执行会以 `outcome: "error"` 和 `error: "lua_memory"` 结束。Lua 堆的限制不包括拥有所有权的源代码和输入字符串、原生回调对象或 Embassy 任务存储。
 

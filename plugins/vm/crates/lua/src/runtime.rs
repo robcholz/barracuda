@@ -10,19 +10,21 @@ use core::{
 };
 
 use crate::ffi::{
-    DEFAULT_EXTRA_SPACE, LOADED_TABLE, MASK_COUNT, MAX_ALIGN, MainThread, PRELOAD_TABLE,
-    REGISTRY_GLOBALS, REGISTRY_INDEX, STATUS_MEMORY_ERROR, Thread, Type,
-    barracuda_lua_open_require, lua_CFunction, lua_Debug, lua_KContext, lua_State, lua_createtable,
-    lua_getextraspace, lua_getfield, lua_getglobal, lua_gettop, lua_newthread, lua_pop,
+    DEFAULT_EXTRA_SPACE, GC_COLLECT, LOADED_TABLE, MASK_COUNT, MAX_ALIGN, MIN_STACK, MainThread,
+    PRELOAD_TABLE, REGISTRY_GLOBALS, REGISTRY_INDEX, STATUS_MEMORY_ERROR, Thread, Type,
+    barracuda_lua_memory_error, barracuda_lua_open_require, lua_CFunction, lua_Debug, lua_KContext,
+    lua_State, lua_checkstack, lua_createtable, lua_error, lua_gc, lua_getallocf,
+    lua_getextraspace, lua_getfield, lua_getglobal, lua_gettop, lua_newthread, lua_pcallk, lua_pop,
     lua_pushcclosure, lua_pushlightuserdata, lua_pushlstring, lua_pushnil, lua_pushvalue,
-    lua_rawgeti, lua_rawseti, lua_remove, lua_resetthread, lua_resume, lua_setfield, lua_sethook,
-    lua_settop, lua_setupvalue, lua_tolstring, lua_touserdata, lua_xmove, luaL_loadbufferx,
-    luaL_ref, luaL_requiref, luaopen_base, luaopen_string, luaopen_table, luaopen_utf8,
+    lua_rawgeti, lua_rawset, lua_rawseti, lua_remove, lua_resetthread, lua_resume, lua_setfield,
+    lua_sethook, lua_settop, lua_setupvalue, lua_tolstring, lua_touserdata, lua_xmove,
+    luaL_loadbufferx, luaL_ref, luaL_requiref, luaopen_base, luaopen_string, luaopen_table,
+    luaopen_utf8,
 };
 
 use crate::{
     Context as LuaContext, Error, ErrorKind, FromLuaMulti, IntoLua, IntoLuaMulti, LuaReturn,
-    RegistryKey, Result,
+    Package, RegistryKey, Result,
 };
 
 pub(crate) type ReturnPusher = Box<dyn FnOnce(&mut Thread) -> Result<c_int> + 'static>;
@@ -36,6 +38,17 @@ pub(crate) enum Callback {
 }
 
 type InstructionHook = Box<dyn FnMut() + 'static>;
+
+type FindPackage = Box<dyn Fn(&str) -> Option<Box<dyn Package>> + 'static>;
+
+/// Finds the package a script requires by a name nothing is registered under.
+struct PackageFinder {
+    headroom: usize,
+    find: FindPackage,
+}
+
+/// Most packages installing inside one another's installation at once.
+const MAX_NESTED_INSTALLS: u32 = 8;
 
 pub(crate) struct Task {
     pub(crate) future: NativeFuture,
@@ -70,9 +83,37 @@ const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 22] = [
 ];
 
 pub struct Lua {
-    raw: MainThread,
+    raw: Root,
     state: Rc<State>,
-    environment: c_int,
+}
+
+/// The thread a [`Lua`] works on.
+enum Root {
+    /// The state's main thread, which the `Lua` owns and closes.
+    Main(MainThread),
+    /// The thread whose `require` is installing a package; it belongs to the
+    /// running script.
+    Requiring(&'static mut Thread),
+}
+
+impl core::ops::Deref for Root {
+    type Target = Thread;
+
+    fn deref(&self) -> &Thread {
+        match self {
+            Root::Main(main) => main,
+            Root::Requiring(thread) => thread,
+        }
+    }
+}
+
+impl core::ops::DerefMut for Root {
+    fn deref_mut(&mut self) -> &mut Thread {
+        match self {
+            Root::Main(main) => main,
+            Root::Requiring(thread) => thread,
+        }
+    }
 }
 
 unsafe fn create_environment(state: *mut lua_State) -> c_int {
@@ -102,10 +143,14 @@ unsafe fn discard_bootstrap_environment(state: *mut lua_State, environment: c_in
 
 pub(crate) struct State {
     main: Cell<*mut lua_State>,
+    environment: c_int,
     callbacks: RefCell<Vec<Rc<Callback>>>,
     instruction_hook: RefCell<Option<InstructionHook>>,
     instruction_hook_interval: Cell<c_int>,
     hook_yielded: Cell<bool>,
+    package_finder: RefCell<Option<Rc<PackageFinder>>>,
+    /// Packages installing on first require right now, one inside another.
+    installing: Cell<u32>,
 }
 
 impl State {
@@ -134,25 +179,32 @@ impl State {
     }
 
     pub(crate) fn push_callback(&self, lua: &mut Thread, index: usize) -> Result<()> {
-        let callbacks = self.callbacks.borrow();
-        let callback = callbacks
-            .get(index)
-            .ok_or_else(|| Error::new(ErrorKind::Runtime, "native callback index is invalid"))?;
-        let callback_ptr = Rc::as_ptr(callback).cast_mut().cast::<c_void>();
-        let dispatcher = match callback.as_ref() {
-            Callback::Sync(_) => sync_dispatch,
-            Callback::Async(_) => async_dispatch,
+        // The borrow ends before Lua allocates, which can raise an error that
+        // skips its release.
+        let (callback_ptr, dispatcher) = {
+            let callbacks = self.callbacks.borrow();
+            let callback = callbacks.get(index).ok_or_else(|| {
+                Error::new(ErrorKind::Runtime, "native callback index is invalid")
+            })?;
+            let dispatcher: lua_CFunction = match callback.as_ref() {
+                Callback::Sync(_) => sync_dispatch,
+                Callback::Async(_) => async_dispatch,
+            };
+            (Rc::as_ptr(callback).cast_mut().cast::<c_void>(), dispatcher)
         };
         unsafe {
             lua_pushlightuserdata(lua.as_ptr(), callback_ptr);
-            lua_pushcclosure(lua.as_ptr(), dispatcher as lua_CFunction, 1);
+            lua_pushcclosure(lua.as_ptr(), dispatcher, 1);
         }
         Ok(())
     }
 
+    /// Sets the hook of a new coroutine. Chunks a package runs while it
+    /// installs on first require get none: their `require` cannot yield.
     fn install_instruction_hook(&self, coroutine: *mut lua_State) {
         let interval = self.instruction_hook_interval.get();
-        let enabled = self.instruction_hook.borrow().is_some() && interval > 0;
+        let enabled =
+            self.instruction_hook.borrow().is_some() && interval > 0 && self.installing.get() == 0;
         let hook = enabled.then_some(instruction_hook_dispatch as _);
         let mask = if enabled { MASK_COUNT } else { 0 };
         unsafe { lua_sethook(coroutine, hook, mask, interval) };
@@ -261,32 +313,62 @@ impl Lua {
             lua_pop(state, 1);
             luaL_requiref(state, c"utf8".as_ptr(), luaopen_utf8, 1);
             lua_pop(state, 1);
-            barracuda_lua_open_require(state);
+            barracuda_lua_open_require(state, Some(require_package));
         }
         let environment = unsafe { create_environment(state) };
         unsafe { discard_bootstrap_environment(state, environment) };
         let shared = Rc::new(State {
             main: Cell::new(state),
+            environment,
             callbacks: RefCell::new(Vec::new()),
             instruction_hook: RefCell::new(None),
             instruction_hook_interval: Cell::new(0),
             hook_yielded: Cell::new(false),
+            package_finder: RefCell::new(None),
+            installing: Cell::new(0),
         });
         unsafe {
             let slot = lua_getextraspace(state, DEFAULT_EXTRA_SPACE).cast::<*const State>();
             slot.write(Rc::as_ptr(&shared));
         }
         Ok(Self {
-            raw,
+            raw: Root::Main(raw),
             state: shared,
-            environment,
         })
     }
 
     /// Runs a full garbage collection cycle.
     pub fn collect_garbage(&mut self) {
-        const LUA_GCCOLLECT: c_int = 2;
-        unsafe { crate::ffi::lua_gc(self.raw.as_ptr(), LUA_GCCOLLECT) };
+        unsafe { lua_gc(self.raw.as_ptr(), GC_COLLECT) };
+    }
+
+    /// Lets scripts require packages that install only when first required.
+    ///
+    /// When a script requires a name that is neither loaded nor registered
+    /// with [`Lua::register_lib`], `find` is asked for a package by that
+    /// name. The package it returns installs into this state during that
+    /// `require`, which then looks the name up again: the package registers
+    /// its library under the name, and the script gets what it would have
+    /// had if the package had installed before the script ran. When `find`
+    /// returns `None`, or the package registers nothing under the name, the
+    /// `require` fails as for any unknown module.
+    ///
+    /// Before a package installs, `headroom` bytes must be free in one block
+    /// of the state's allocator, after a full garbage collection if needed;
+    /// otherwise the `require` raises Lua's out-of-memory error without
+    /// installing anything. An installation's own failure, including running
+    /// out of memory, is an error raised by that `require`. Chunks the
+    /// package runs while it installs run without the instruction hook.
+    pub fn set_package_finder<F>(&mut self, headroom: usize, find: F)
+    where
+        F: Fn(&str) -> Option<Box<dyn Package>> + 'static,
+    {
+        self.state
+            .package_finder
+            .replace(Some(Rc::new(PackageFinder {
+                headroom,
+                find: Box::new(find),
+            })));
     }
 
     /// Returns the bytes this state currently has allocated.
@@ -549,7 +631,11 @@ impl Lua {
 
     fn push_environment(&mut self) {
         unsafe {
-            lua_rawgeti(self.raw.as_ptr(), REGISTRY_INDEX, self.environment.into());
+            lua_rawgeti(
+                self.raw.as_ptr(),
+                REGISTRY_INDEX,
+                self.state.environment.into(),
+            );
         }
     }
 
@@ -583,7 +669,9 @@ impl Lua {
 
 impl Drop for Lua {
     fn drop(&mut self) {
-        self.state.main.set(null_mut());
+        if matches!(self.raw, Root::Main(_)) {
+            self.state.main.set(null_mut());
+        }
     }
 }
 
@@ -936,6 +1024,143 @@ pub(crate) fn push_lua_return<R: IntoLuaMulti>(
 unsafe extern "C-unwind" fn preload_loader(state: *mut lua_State) -> c_int {
     unsafe { lua_pushvalue(state, crate::ffi::lua_upvalueindex(1)) };
     1
+}
+
+/// What [`install_required`] did with a name nothing was registered under.
+enum Required {
+    /// No package by the name; `require` reports an unknown module.
+    Nothing,
+    /// The package installed.
+    Installed,
+    /// The package did not install; the error is on the stack.
+    Failed,
+    /// The heap lacked the headroom, or the installation ran out of memory.
+    OutOfMemory,
+    /// Packages were already installing inside one another too deeply.
+    TooDeep,
+}
+
+/// Called by `require` (`c/require.c`) with the name at index 1: installs
+/// the package the state's [`PackageFinder`] finds by that name.
+///
+/// Lua errors raised here skip Rust destructors, so each is raised only after
+/// [`install_required`] has returned and dropped its values.
+unsafe extern "C-unwind" fn require_package(state: *mut lua_State) -> c_int {
+    match unsafe { install_required(state) } {
+        Required::Nothing | Required::Installed => 0,
+        Required::Failed => unsafe { lua_error(state) },
+        Required::OutOfMemory => unsafe { barracuda_lua_memory_error(state) },
+        Required::TooDeep => unsafe {
+            push_error_bytes(state, b"Lua packages install inside one another too deeply");
+            lua_error(state)
+        },
+    }
+}
+
+/// One package installing on first require, owned by [`install_required`]'s
+/// frame so that an error inside the installation skips none of it.
+struct RequiredInstall<'a> {
+    package: &'a dyn Package,
+    lua: Lua,
+}
+
+unsafe fn install_required(state: *mut lua_State) -> Required {
+    let thread = unsafe { Thread::from_ptr_mut(state) };
+    let Ok(shared) = state_from_thread(thread) else {
+        return Required::Nothing;
+    };
+    let Some(finder) = shared.package_finder.borrow().clone() else {
+        return Required::Nothing;
+    };
+    let Some(package) = thread
+        .to_string(1)
+        .and_then(|name| core::str::from_utf8(name).ok())
+        .and_then(|name| (finder.find)(name))
+    else {
+        return Required::Nothing;
+    };
+    let installing = shared.installing.get();
+    if installing >= MAX_NESTED_INSTALLS {
+        return Required::TooDeep;
+    }
+    if !unsafe { has_headroom(state, finder.headroom) } {
+        unsafe { lua_gc(state, GC_COLLECT) };
+        if !unsafe { has_headroom(state, finder.headroom) } {
+            return Required::OutOfMemory;
+        }
+    }
+
+    let mut install = RequiredInstall {
+        package: &*package,
+        lua: Lua {
+            raw: Root::Requiring(unsafe { Thread::from_ptr_mut(state) }),
+            state: Rc::clone(&shared),
+        },
+    };
+    shared.installing.set(installing.saturating_add(1));
+    let status = unsafe {
+        lua_pushcclosure(state, install_package, 0);
+        lua_pushlightuserdata(state, (&raw mut install).cast());
+        lua_pcallk(state, 1, 0, 0, 0, None)
+    };
+    shared.installing.set(installing);
+    if status != 0 {
+        unsafe { forget_required(state) };
+    }
+    match status {
+        0 => Required::Installed,
+        STATUS_MEMORY_ERROR => Required::OutOfMemory,
+        _ => Required::Failed,
+    }
+}
+
+/// Forgets what a failed installation registered or loaded under the name at
+/// index 1, so that the name is not found half installed and a later
+/// `require` installs the package afresh. Clearing a field allocates nothing.
+unsafe fn forget_required(state: *mut lua_State) {
+    for table in [PRELOAD_TABLE, LOADED_TABLE] {
+        unsafe {
+            lua_getfield(state, REGISTRY_INDEX, table.as_ptr());
+            lua_pushvalue(state, 1);
+            lua_pushnil(state);
+            lua_rawset(state, -3);
+            lua_pop(state, 1);
+        }
+    }
+}
+
+/// Runs one [`RequiredInstall`], passed as light userdata at index 1, inside
+/// [`install_required`]'s protected call.
+unsafe extern "C-unwind" fn install_package(state: *mut lua_State) -> c_int {
+    // An installation used to run on the main thread, which starts with
+    // twice Lua's minimum stack.
+    if unsafe { lua_checkstack(state, MIN_STACK.saturating_mul(2)) } == 0 {
+        unsafe { barracuda_lua_memory_error(state) };
+    }
+    let install = unsafe { &mut *lua_touserdata(state, 1).cast::<RequiredInstall<'_>>() };
+    match install.package.install(&mut install.lua) {
+        Ok(()) => 0,
+        Err(error) if error.kind() == ErrorKind::Memory => {
+            drop(error);
+            unsafe { barracuda_lua_memory_error(state) }
+        }
+        Err(error) => unsafe { raise_lua_error(state, error) },
+    }
+}
+
+/// Whether the state's allocator can supply `bytes` in one block.
+unsafe fn has_headroom(state: *mut lua_State, bytes: usize) -> bool {
+    if bytes == 0 {
+        return true;
+    }
+    let mut userdata = null_mut();
+    let allocate = unsafe { lua_getallocf(state, &mut userdata) };
+    let block = unsafe { allocate(userdata, null_mut(), 0, bytes) };
+    if block.is_null() {
+        return false;
+    }
+    unsafe { allocate(userdata, block, bytes, 0) };
+    true
 }
 
 unsafe extern "C-unwind" fn instruction_hook_dispatch(
