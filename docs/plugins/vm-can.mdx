@@ -1,0 +1,74 @@
+---
+title: "CAN Plugin"
+sidebarTitle: "CAN"
+description: "Send and receive CAN frames from Lua with the `can` package."
+---
+
+Installs the `can` Lua package over the Board's CAN buses, the primary one by
+default.
+
+- Plugin ID: `can`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `can.devices` (`*`)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `can`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes every `Can` controller of the Board that no other Plugin
+claims, the primary one first, and installs the `can` Lua package. It consumes the semantic peripheral and never
+reaches the CAN controller or its pins.
+
+The controller stays off the bus until a script starts it at the bus's bit
+rate, so the device never disturbs a bus it has not been told about.
+
+Lua API:
+
+- `can.list() -> { name, ... }`: the Board names of the CAN buses, the
+  primary one first
+- `can.available([name]) -> boolean`
+- `can.start(bitrate[, name]) -> true` joins the bus at `bitrate` bits per second,
+  such as 125000, 250000, 500000, or 1000000; starting again changes the rate
+- `can.stop([name]) -> true` leaves the bus
+- `can.bitrate([name]) -> integer | nil` returns the bit rate while started
+- `can.state([name]) -> string` returns `"stopped"`, `"error-active"`,
+  `"error-passive"`, or `"bus-off"`
+- `can.send(id, data[, name]) -> true` sends a data frame of 0 to 8 bytes and returns
+  once the bus carried it; an identifier above 0x7FF is sent as a 29-bit
+  extended identifier
+- `can.send_extended(id, data[, name]) -> true` sends with an extended identifier
+  even when it fits 11 bits
+- `can.request(id, length[, name]) -> true` and
+  `can.request_extended(id, length[, name])`
+  send a remote frame asking for `length` bytes
+- `can.receive([timeout_ms[, name]]) -> frame` waits for the next frame,
+  `\{id = ..., extended = false, remote = false, data = "...", length = 3\}`;
+  after `timeout_ms` it returns `nil, "timeout"`
+
+`name` is a Board device name from `list`; without it a call uses the primary
+bus, so a script written for one bus runs unchanged on a Board with
+several. To name a bus without the optional values before it, pass `nil` for
+them.
+
+A bit rate the controller cannot make, an unknown name, a frame out of range, a transfer
+while stopped or off the bus, or a call while another is running returns
+`nil, error`. A frame no other node acknowledges fails once the controller
+turns error-passive.
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2. Boards without a CAN bus still
+install the package; `available` returns false and every other call returns
+`nil, error`. Plugin revocation prevents every further call.
+
+```lua
+local can = require("can")
+can.start(500000)
+can.send(0x123, "\x01\x02\x03")
+local frame = can.receive(1000)
+if frame then print(frame.id, #frame.data) end
+```

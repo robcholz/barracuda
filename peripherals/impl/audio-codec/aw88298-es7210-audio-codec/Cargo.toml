@@ -1,0 +1,29 @@
+[package]
+name = "barracuda-aw88298-es7210-audio-codec"
+version = "0.1.0"
+edition = "2024"
+description = "AW88298 speaker amplifier and ES7210 microphone audio-codec implementation"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-aw88298.workspace = true
+barracuda-driver-aw9523.workspace = true
+barracuda-driver-axp2101.workspace = true
+barracuda-driver-es7210.workspace = true
+barracuda-peripheral.workspace = true
+embedded-hal.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

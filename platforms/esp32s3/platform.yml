@@ -17,7 +17,7 @@ build:
       cargo install espup
       espup install --toolchain-version 1.98.1.0
 hal:
-  bindings: [digital-input, digital-output, gpio, spi-device, quad-spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, camera-capture, i2s-stream, capacitive-touch]
+  bindings: [digital-input, digital-output, gpio, spi-device, quad-spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, camera-capture, parallel-output, i2s-stream, pdm-i2s-stream, capacitive-touch, analog-input, pulse-counter, power-hold, rmt-output, rmt-input, pwm-output, twai]
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2, SPI3]
   runtime-uart-controllers: [UART1]
@@ -42,6 +42,14 @@ hal:
     - controller: I2S0
       dma-channels: [DMA_CH0]
       dma-buffer-bytes: 4096
+  # A Board's microSD card takes slot 0 of the SD host; both ESP32-S3 slots
+  # reach any pin through the GPIO matrix and run from the Board's own 3.3 V.
+  sdmmc-slots:
+    - slot: 0
+  # RMT: channels 0-3 transmit and 4-7 receive (esp-hal `rmt`).
+  rmt-channels:
+    transmit: [0, 1, 2, 3]
+    receive: [4, 5, 6, 7]
 selection:
   board-chips:
     - esp32s3
@@ -58,9 +66,11 @@ application:
   launcher:
     program: espflash
     arguments: [flash, --monitor, "{application}"]
-  # The bootloader, partition table and app merged from 0x0. Its padding
-  # erases otadata, so a device that had switched to ota_1 boots ota_0 again,
-  # and it ends before kv_database, which keeps the device's settings.
+  # The bootloader, partition table and app merged from 0x0. The app goes to
+  # ota_0, the first app slot of every Board and the only one below 16 MiB of
+  # flash. Its padding erases otadata, so a device that had switched to ota_1
+  # boots ota_0 again, and it ends before kv_database, which keeps the
+  # device's settings.
   release:
     driver: command
     program: espflash

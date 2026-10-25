@@ -1,0 +1,45 @@
+---
+title: "NFC 插件"
+sidebarTitle: "NFC"
+description: "用 `nfc` Lua 包在 Lua 中读取 NFC 卡片和标签。"
+---
+
+基于开发板的 NFC 读卡器安装 `nfc` Lua 包，默认使用主读卡器。
+
+- 插件 ID：`nfc`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `nfc-reader.devices`（`*`）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`nfc`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件获取开发板上没有被其他插件占用的每个 `NfcReader`，主读卡器排在最前，并安装 `nfc` Lua 包。它使用的是语义层面的外设能力，从不直接操作读卡芯片、它的总线或背后的供电开关。
+
+Lua API：
+
+- `nfc.list() -> { name, ... }`：各读卡器在开发板上的名称，主读卡器排在最前
+- `nfc.available([name]) -> boolean`
+- `nfc.poll([name]) -> card | nil` 查找一次 ISO/IEC 14443-A 卡片并选中它；`card` 是 `\{uid = "04a1b2c3", atqa = 68, sak = 0\}`，UID 为小写十六进制（4、7 或 10 字节）
+- `nfc.wait([timeout_ms[, name]]) -> card` 每 100 ms 查找一次，直到有卡片应答；超过 `timeout_ms` 时返回 `nil, "timeout"`
+- `nfc.read(page[, name]) -> bytes` 用 NFC Forum Type 2 标签（NTAG、MIFARE Ultralight）支持的 `READ` 命令，读取上次查找选中的卡片从 `page` 开始的 4 页，共 16 字节
+
+`name` 是 `list` 返回的开发板设备名；不给出时调用使用主读卡器，所以为单个读卡器写的脚本在有多个读卡器的开发板上无需修改。只想指定读卡器而不给出它前面的可选参数时，这些参数传 `nil`。
+
+卡片已离开、MIFARE Classic 卡片（需认证后才应答 `READ`）、在成功查找之前调用 `read`，或在另一次调用进行期间调用，都会返回 `nil, error`。场内同时有多张卡片时报告为错误，不做防冲突选择。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2。没有读卡器的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
+
+```lua
+local nfc = require("nfc")
+local card = nfc.wait(10000)
+if card then
+  print(card.uid)
+  local header = nfc.read(0)
+end
+```

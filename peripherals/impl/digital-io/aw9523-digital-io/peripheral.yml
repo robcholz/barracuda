@@ -1,0 +1,46 @@
+id: aw9523-digital-io
+api-version: 1
+peripheral: digital-io
+implementation:
+  package: barracuda-aw9523-digital-io
+  crate: barracuda_aw9523_digital_io
+  factory: "::{{crate}}::Aw9523DigitalIoImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::Aw9523DigitalIoBindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::Aw9523DigitalIoConfig::new({{parameter.address}}, {{parameter.output-pins}}, {{parameter.input-pins}}, {{parameter.output-active-level}}, {{parameter.input-active-level}})"
+# Relay or transistor outputs and isolated inputs on the pins of an AW9523B
+# I/O expander. The implementation owns only its pins: it configures them
+# through read-modify-write of the per-pin registers and leaves other pins of
+# the expander alone.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 58h with AD1 and AD0 low; each strap adds to it.
+    default: 88
+  # The expander pins of the outputs and of the inputs, one bit per pin: bit
+  # 0 is P0_0, bit 7 P0_7, bit 8 P1_0, bit 15 P1_7. Channels are numbered in
+  # ascending pin order, so a Board lists them in the order it labels them.
+  output-pins:
+    type: integer
+    required: true
+  input-pins:
+    type: integer
+    default: 0
+  # The level that switches an output on, and the level an energized input
+  # puts on its pin.
+  output-active-level:
+    type: enum
+    values: [high, low]
+    rust-values:
+      high: "::barracuda_aw9523_digital_io::ActiveLevel::High"
+      low: "::barracuda_aw9523_digital_io::ActiveLevel::Low"
+    default: high
+  input-active-level:
+    type: enum
+    values: [high, low]
+    rust-values:
+      high: "::barracuda_aw9523_digital_io::ActiveLevel::High"
+      low: "::barracuda_aw9523_digital_io::ActiveLevel::Low"
+    default: high

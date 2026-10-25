@@ -1,0 +1,6 @@
+id = "lora"
+depends-on = ["vm"]
+description = "Registers the built-in LoRa radio Lua package."
+
+[peripherals.lora]
+devices = "*"

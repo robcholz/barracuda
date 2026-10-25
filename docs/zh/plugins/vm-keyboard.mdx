@@ -1,0 +1,38 @@
+---
+title: "Keyboard 插件"
+sidebarTitle: "Keyboard"
+description: "用 `keyboard` Lua 包在 Lua 中读取开发板键盘的按键和输入的字符。"
+---
+
+基于开发板的键盘安装 `keyboard` Lua 包，默认使用主键盘。
+
+- 插件 ID：`keyboard`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `keyboard.devices`（`*`）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`keyboard`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件获取开发板上没有被其他插件占用的每个 `Keyboard`，主键盘排在最前，并安装 `keyboard` Lua 包。矩阵扫描或按键控制器、键位表以及修饰键状态，仍由所选的实现拥有。
+
+Lua API：
+
+- `keyboard.list() -> { name, ... }`：各键盘在开发板上的名称，主键盘排在最前
+- `keyboard.available([name]) -> boolean`：指定名称的键盘（不给出时为主键盘）能否打开
+- `keyboard.open([name]) -> handle`：打开指定名称的键盘，不给出时打开主键盘
+- `handle:read() -> key, pressed, text, modifiers, code`；没有按键变化时不返回任何值
+- `handle:wait(timeout_ms) -> key, pressed, text, modifiers, code`；超时前没有按键变化时不返回任何值，每 10 ms 检查一次
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+`key` 表示按键的作用：可打印按键用其未按 Shift 时的字符（`"a"`、`"1"`、`";"`、`" "`），其他按键为 `"enter"`、`"backspace"`、`"delete"`、`"tab"`、`"escape"`、`"shift"`、`"control"`、`"alt"`、`"option"`、`"fn"`、`"up"`、`"down"`、`"left"`、`"right"`，或 `"f1"` 到 `"f24"`。按下时 `pressed` 为 `true`。`text` 是按下时按键位表和所按修饰键输入的字符；松开或不输入字符的按键为 `nil`。`modifiers` 是事件之后仍按住的修饰键之和：Shift 1、Control 2、Alt 4、Option 8、Fn 16。`code` 是按键的位置，在同一块开发板上保持不变。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2。
+
+没有键盘的开发板报告不可用。这个只能移动的内置能力每个设备每次开机只允许一个句柄；显式关闭、词法 `<close>`、垃圾回收和插件被撤销都会阻止后续操作。本插件不做后台扫描，也不拥有长时间运行的任务：脚本停止读取，键盘也就停止扫描。

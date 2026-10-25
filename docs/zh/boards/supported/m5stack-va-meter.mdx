@@ -29,3 +29,20 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `buttons` | 按键 A 和 B（GPIO2、GPIO0） | [`buttons`](/zh/plugins/vm-buttons) |
+| `buzzer` | 无源蜂鸣器（GPIO14） | [`buzzer`](/zh/plugins/vm-buzzer) |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g8` | `GPIO8` |
+| `grove-g9` | `GPIO9` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g8", "up")
+print(pin:read())
+```

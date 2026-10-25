@@ -29,3 +29,28 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `inertial-measurement` | 运动传感器（BMI270） | [`motion`](/zh/plugins/vm-imu) |
+| `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `buttons` | 按键 A 和 B（GPIO11、GPIO12） | [`buttons`](/zh/plugins/vm-buttons) |
+| `power-button` | 电源键（M5PM1） | [`buttons`](/zh/plugins/vm-buttons) |
+| `audio-codec` | 音频编解码器（ES8311） | [`audio`](/zh/plugins/vm-audio) |
+| `infrared` | 红外发射器和接收器（GPIO46、GPIO42） | [`infrared`](/zh/plugins/vm-infrared) |
+
+M5PM1 只测量电池电压；是否在充电取自接在 M5PM1 引脚上的充电器状态线。
+
+电源键从 M5PM1 的按键状态读取，按住时读为按下。开发板关闭了 M5PM1 的单击复位，所以单击是一个应用按键：脚本和插件把它当作一次单击收到，开发板不再复位。双击仍会关机，长按仍会进入下载模式。M5PM1 会一直保留这个设置直到自身断电，复位和重新烧录都不会改变它；在该设备上设置 `single-click-reset: keep` 可恢复出厂的单击复位。`buttons` 是主 `buttons` 设备。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO10` |
+| `port-a-sda` | `GPIO9` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

@@ -161,7 +161,9 @@ Events carry `seq`, `at_us` (microseconds since the manager started), and
 A device model's notes follow its transaction as
 `{"kind":"device","bus":"I2C0","address":67,"model":"pi4ioe5v6408","note":"P3 high"}`.
 `result` is `ok`, `nack`, `arbitration-loss`, `timeout`, or `bus-error`. The
-log keeps the latest 4096 events. An `spi` event keeps the first 32 bytes of
+log keeps 4096 events; when it is full, it drops the oldest event of the kind
+it holds most of, so a display's stream of SPI and GPIO events does not push
+out the run's I2C transactions. An `spi` event keeps the first 32 bytes of
 each direction and the transfer's `length`, since a display streams kilobytes
 per transfer. A violation carries the `seq` of the
 transaction that exposed it, `at_us`, `bus`, `address`, `model`, `rule`, and

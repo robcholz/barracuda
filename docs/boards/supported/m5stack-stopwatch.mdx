@@ -11,7 +11,7 @@ The M5Stack StopWatch is an ESP32-S3 Board from M5Stack.
 - Chip: ESP32-S3
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32s3-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-stopwatch/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,40 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-stopwatch/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | Round display (CO5300, quad SPI) | [`display`](/plugins/vm-display) |
+| `inertial-measurement` | Motion sensor (BMI270) | [`motion`](/plugins/vm-imu) |
+| `real-time-clock` | Real-time clock (RX8130CE) | — |
+| `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `buttons` | Buttons A and B (GPIO2, GPIO1) | [`buttons`](/plugins/vm-buttons) |
+| `power-button` | Power button (M5PM1 power key) | [`buttons`](/plugins/vm-buttons) |
+| `audio-codec` | Audio codec (ES8311) | [`audio`](/plugins/vm-audio) |
+| `vibration` | Vibration motor (M5IOE1 PWM, IO9) | [`vibration`](/plugins/vm-vibration) |
+
+The M5PM1 measures the battery voltage only; whether the battery charges comes
+from the charger's status line on an M5PM1 pin.
+
+The power button is read from the M5PM1's button status and reads pressed while
+the key is down. The Board turns off the M5PM1's single-click reset, so a single click is an
+application button: scripts and Plugins receive it as a click instead of the
+Board resetting. A double click still turns the Board off, and a long press
+still enters download mode. The M5PM1 keeps this setting until it loses power,
+across resets and reflashing; `single-click-reset: keep` on the device brings
+back the factory single-click reset.
+`buttons` is the primary `buttons` device.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO11` |
+| `port-a-sda` | `GPIO10` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

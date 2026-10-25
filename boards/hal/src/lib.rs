@@ -24,32 +24,71 @@ pub use providers::{
     RuntimePlatform, RuntimePwmPlatform, RuntimeUartPlatform, SpiProvider, SpiRequest, UartConfig,
     UartDataBits, UartParity, UartProvider, UartRequest, UartStopBits, UnsupportedFunction,
 };
+pub use providers::{DirectedUart, DirectedUartError};
 pub use runtime::{LeaseError, ResourceKind};
 
 /// Stable attached audio peripheral API.
 pub use barracuda_peripheral::audio;
 /// Stable attached-button peripheral API.
 pub use barracuda_peripheral::buttons;
+/// Stable attached buzzer peripheral API.
+pub use barracuda_peripheral::buzzer;
 /// Stable attached camera peripheral API.
 pub use barracuda_peripheral::camera;
+/// Stable attached CAN bus API.
+pub use barracuda_peripheral::can;
+/// Stable attached fixed-function digital I/O API.
+pub use barracuda_peripheral::digital_io;
 /// Stable attached display peripheral API.
 pub use barracuda_peripheral::display;
+/// Stable attached EEPROM peripheral API.
+pub use barracuda_peripheral::eeprom;
+/// Stable attached environment-sensor peripheral API.
+pub use barracuda_peripheral::environment;
 /// Stable attached inertial-measurement peripheral API.
 pub use barracuda_peripheral::imu;
 /// Stable attached indicator peripheral API.
 pub use barracuda_peripheral::indicator;
+/// Stable attached infrared remote-control API.
+pub use barracuda_peripheral::infrared;
+/// Stable attached keyboard peripheral API.
+pub use barracuda_peripheral::keyboard;
 /// Stable attached LED-strip peripheral API.
 pub use barracuda_peripheral::led_strip;
+/// Stable attached LoRa radio API.
+pub use barracuda_peripheral::lora;
+/// Stable attached NFC card-reader API.
+pub use barracuda_peripheral::nfc_reader;
 /// Stable attached electrical-power monitoring API.
 pub use barracuda_peripheral::power;
 /// Stable real-time clock API.
 pub use barracuda_peripheral::real_time_clock;
 /// Stable attached removable-filesystem peripheral API.
 pub use barracuda_peripheral::removable_storage;
+/// Stable attached rotary-encoder peripheral API.
+pub use barracuda_peripheral::rotary_encoder;
+/// Stable attached secure-element peripheral API.
+pub use barracuda_peripheral::secure_element;
 /// Stable touch-input API.
 pub use barracuda_peripheral::touch;
+/// Stable attached vibration-motor API.
+pub use barracuda_peripheral::vibration;
+/// One statically dispatched type over a Board's devices of one kind, used by
+/// the generated Board HAL when a Board declares several devices of a kind.
+pub use barracuda_peripheral::{
+    audio_codec_set, buttons_set, buzzer_set, camera_set, can_set, digital_io_set, display_set,
+    eeprom_set, environment_sensor_set, imu_set, indicator_set, infrared_set, keyboard_set,
+    led_strip_set, lora_set, nfc_reader_set, power_monitor_set, real_time_clock_set,
+    rotary_encoder_set, secure_element_set, touch_set, vibration_set,
+};
 /// Stable factory contract implemented by every peripheral implementation.
-pub use barracuda_peripheral::{display_set, Instance, PeripheralImplementation};
+pub use barracuda_peripheral::{Instance, PeripheralImplementation};
+
+/// Items the generated Board HAL reaches through this crate.
+#[doc(hidden)]
+pub mod __private {
+    pub use log;
+}
 
 /// Statically allocated owner for one blocking I2C bus shared by attached peripherals.
 pub struct SharedI2cBus<Bus> {
@@ -149,6 +188,16 @@ pub trait QuadSpiBus {
 
     /// Writes one opcode, one 24-bit address, and an optional payload.
     fn write(&mut self, opcode: u8, address: u32, data: &[u8]) -> Result<(), Self::Error>;
+
+    /// Writes one opcode, one 24-bit address, and an optional payload, the
+    /// payload also on one data line. Display controllers take register
+    /// parameters this way and only pixel data on four lines.
+    fn write_single_line(
+        &mut self,
+        opcode: u8,
+        address: u32,
+        data: &[u8],
+    ) -> Result<(), Self::Error>;
 }
 
 /// Two-channel capacitive-touch sampling transport supplied by a Platform.
@@ -158,6 +207,20 @@ pub trait CapacitiveTouchChannels {
 
     /// Reads the two hardware capacitance counters together.
     fn read(&mut self) -> Result<[u32; 2], Self::Error>;
+}
+
+/// Quadrature edge count supplied by a Platform's pulse-counter unit.
+///
+/// `embedded-hal` has no encoder contract. The Platform counts every edge of
+/// both encoder signals, up while B leads A and down while A leads B, and
+/// widens the hardware counter in software: a reader that looks at least
+/// once every 16 384 edges sees every one.
+pub trait QuadratureDecoder {
+    /// Counter failure returned by the Platform adapter.
+    type Error: core::fmt::Debug;
+
+    /// Returns the signed number of edges counted since construction.
+    fn count(&mut self) -> Result<i64, Self::Error>;
 }
 
 /// Error family shared by one exposed analog peripheral.
@@ -173,6 +236,223 @@ pub trait AnalogInput: AnalogErrorType {
 
     /// Samples the channel in its native integer range.
     fn read(&mut self) -> Result<u32, Self::Error>;
+}
+
+/// One analog input a peripheral implementation samples in millivolts.
+///
+/// The Platform applies its converter's calibration, so implementations such
+/// as a battery monitor behind a resistor divider or a resistor-ladder button
+/// array compare voltages instead of raw converter codes, which differ per
+/// chip and per attenuation. `embedded-hal` 1.0 has no analog contract.
+pub trait AnalogVoltageInput: AnalogErrorType {
+    /// Samples the pin once and returns its voltage in millivolts.
+    fn read_millivolts(&mut self) -> Result<u32, Self::Error>;
+}
+
+/// Bus control an SD card in SPI mode needs beyond `embedded-hal`'s
+/// `SpiDevice`.
+///
+/// The SD specification identifies a card at no more than 400 kHz, then runs
+/// it at its full clock, and wakes it with at least 74 clock cycles while its
+/// chip select is high. An `SpiDevice` fixes its clock and always asserts its
+/// chip select, so a Platform's SPI device type also implements this.
+pub trait SpiDeviceControl: embedded_hal::spi::ErrorType {
+    /// Returns the clock of this device's following transactions, initially
+    /// the one the Board declares.
+    fn frequency_hz(&self) -> u32;
+
+    /// Sets the clock of this device's following transactions.
+    fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error>;
+
+    /// Clocks `bytes` out with this device's chip select released.
+    fn write_deselected(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
+}
+
+/// Bus control a bit-oriented protocol on an SPI controller needs beyond
+/// `embedded-hal`'s `SpiBus`: the clock and mode, and transfers shorter than
+/// a byte.
+///
+/// A JTAG test-access port driven through an SPI controller (TCK on SCK, TDI
+/// on MOSI, TDO on MISO, TMS on a GPIO the implementation owns) moves between
+/// states one clock at a time, which a byte-oriented `SpiBus` cannot clock.
+/// A Platform's `spi-bus` type implements this where its controller can.
+pub trait SpiBusControl: embedded_hal::spi::ErrorType {
+    /// Applies `frequency_hz` and `mode` to the following transfers.
+    fn configure(
+        &mut self,
+        frequency_hz: u32,
+        mode: embedded_hal::spi::Mode,
+    ) -> Result<(), Self::Error>;
+
+    /// Clocks out the low `bits` bits of `value`, 1 through 8, most
+    /// significant first, and returns once the last has been clocked.
+    fn write_bits(&mut self, value: u8, bits: u8) -> Result<(), Self::Error>;
+}
+
+/// One half of a pulse symbol: an output level held for a number of ticks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PulseLevel {
+    /// Whether the line is high.
+    pub high: bool,
+    /// How long the level lasts, in ticks of the channel's resolution.
+    pub ticks: u16,
+}
+
+impl PulseLevel {
+    /// Longest level one symbol half holds.
+    pub const MAX_TICKS: u16 = 0x7fff;
+
+    /// Creates one level; `ticks` above [`Self::MAX_TICKS`] mean the maximum.
+    #[must_use]
+    pub const fn new(high: bool, ticks: u16) -> Self {
+        Self {
+            high,
+            ticks: if ticks > Self::MAX_TICKS {
+                Self::MAX_TICKS
+            } else {
+                ticks
+            },
+        }
+    }
+}
+
+/// Carrier a pulse output modulates onto its active level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PulseCarrier {
+    /// Carrier frequency in hertz.
+    pub frequency_hz: u32,
+    /// Share of each carrier period the line is active, 1 through 99 percent.
+    pub duty_percent: u8,
+}
+
+/// Timing and line configuration of one pulse output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PulseOutputConfig {
+    /// Tick frequency symbol lengths count in.
+    pub tick_hz: u32,
+    /// Level the line rests at between transmissions; its opposite is the
+    /// active level.
+    pub idle_high: bool,
+    /// Carrier modulated onto the active level, if any.
+    pub carrier: Option<PulseCarrier>,
+}
+
+/// Timing configuration of one pulse input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PulseInputConfig {
+    /// Tick frequency received symbol lengths count in.
+    pub tick_hz: u32,
+    /// A level lasting this many ticks ends a reception.
+    pub idle_ticks: u16,
+    /// Pulses shorter than this many nanoseconds are ignored as glitches.
+    pub filter_ns: u32,
+}
+
+/// A hardware pulse-train generator: one output channel that clocks out
+/// level and duration pairs on its own, as WS2812 LED chains and infrared
+/// transmitters need. `embedded-hal` has no such contract.
+///
+/// Symbols are the Platform's own representation, so a sequence built once
+/// is handed to the hardware without conversion. A sequence ends with
+/// [`PulseOutput::end_marker`].
+pub trait PulseOutput {
+    /// One hardware symbol: two levels in order.
+    type Symbol: Copy;
+    /// Configuration or transfer failure.
+    type Error: core::fmt::Debug;
+
+    /// Builds one symbol. A zero-tick second level ends the transmission
+    /// after the first.
+    fn symbol(first: PulseLevel, second: PulseLevel) -> Self::Symbol;
+
+    /// Returns the symbol that ends a sequence.
+    fn end_marker() -> Self::Symbol;
+
+    /// Applies the tick resolution, idle level, and carrier for the following
+    /// transmissions.
+    fn configure(&mut self, config: PulseOutputConfig) -> Result<(), Self::Error>;
+
+    /// Transmits `symbols` and returns when the last has been sent, keeping
+    /// the CPU busy so the hardware is refilled without delay.
+    fn transmit_blocking(&mut self, symbols: &[Self::Symbol]) -> Result<(), Self::Error>;
+
+    /// Transmits `symbols`, waiting for the end without blocking the
+    /// executor.
+    fn transmit(
+        &mut self,
+        symbols: &[Self::Symbol],
+    ) -> impl Future<Output = Result<(), Self::Error>>;
+}
+
+/// A hardware pulse-train recorder: one input channel that measures the
+/// level and duration pairs of a signal, such as an infrared receiver's.
+pub trait PulseInput {
+    /// One hardware symbol: two levels in order.
+    type Symbol: Copy;
+    /// Configuration or transfer failure.
+    type Error: core::fmt::Debug;
+
+    /// Returns a cleared symbol to fill a receive buffer with.
+    fn empty_symbol() -> Self::Symbol;
+
+    /// Splits one received symbol into its two levels; a zero-tick level
+    /// ends the reception.
+    fn levels(symbol: Self::Symbol) -> (PulseLevel, PulseLevel);
+
+    /// Returns the most symbols one reception records; a receive buffer
+    /// longer than this is used only up to it.
+    fn capacity(&self) -> usize;
+
+    /// Applies the tick resolution, idle threshold, and glitch filter for the
+    /// following receptions.
+    fn configure(&mut self, config: PulseInputConfig) -> Result<(), Self::Error>;
+
+    /// Waits for one signal and records it into `symbols`, returning how many
+    /// symbols it filled. Dropping the future stops the reception.
+    fn receive(
+        &mut self,
+        symbols: &mut [Self::Symbol],
+    ) -> impl Future<Output = Result<usize, Self::Error>>;
+}
+
+/// Frequency control a tone output needs beyond `embedded-hal`'s
+/// `SetDutyCycle`, whose frequency is fixed: a buzzer changes pitch by
+/// retuning its PWM timer. The duty cycle keeps its share of the period.
+pub trait PwmFrequencyControl: embedded_hal::pwm::SetDutyCycle {
+    /// Returns the lowest and highest frequency the output reaches, in hertz.
+    fn frequency_range(&self) -> (u32, u32);
+
+    /// Retunes the output to `frequency_hz`.
+    fn set_frequency_hz(&mut self, frequency_hz: u32) -> Result<(), Self::Error>;
+}
+
+/// An on-chip classic CAN controller (the ESP TWAI) wired to a transceiver.
+///
+/// `embedded-can` defines frames and a polling `nb` contract but no awaitable
+/// transfers, so the Platform supplies this narrow one. The controller stays
+/// off the bus until [`CanController::start`].
+pub trait CanController {
+    /// Controller or bus failure.
+    type Error: core::fmt::Debug;
+
+    /// Returns whether the controller can run at `bitrate` bits per second.
+    fn supports_bitrate(&self, bitrate: u32) -> bool;
+
+    /// Joins the bus at `bitrate` bits per second, leaving it first when
+    /// already started.
+    fn start(&mut self, bitrate: u32) -> Result<(), Self::Error>;
+
+    /// Leaves the bus.
+    fn stop(&mut self);
+
+    /// Returns the controller's part in the bus.
+    fn state(&self) -> can::BusState;
+
+    /// Sends one frame and returns once the bus carried it.
+    fn transmit(&mut self, frame: &can::Frame) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Waits for the next frame.
+    fn receive(&mut self) -> impl Future<Output = Result<can::Frame, Self::Error>>;
 }
 
 /// One Board-exposed analog output channel.
@@ -521,6 +801,31 @@ impl touch::TouchPeripheral for NoPeripherals {
     }
 }
 
+/// Uninhabited indicator used when a Board declares no indicator.
+pub struct UnavailableIndicator {
+    never: Infallible,
+}
+
+impl indicator::Indicator for UnavailableIndicator {
+    type Error = Infallible;
+
+    fn set_enabled(&mut self, _enabled: bool) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn is_enabled(&mut self) -> Result<bool, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl indicator::IndicatorPeripheral for NoPeripherals {
+    type Indicator = UnavailableIndicator;
+
+    fn take_indicator(&mut self, _instance: Instance) -> Option<Self::Indicator> {
+        None
+    }
+}
+
 /// Uninhabited attached-button input used when a Board declares no buttons.
 pub struct UnavailableButtons {
     never: Infallible,
@@ -532,12 +837,413 @@ impl buttons::Buttons for UnavailableButtons {
     fn read(&mut self) -> Result<buttons::ButtonSnapshot, Self::Error> {
         match self.never {}
     }
+
+    fn poll_event(&mut self) -> Result<Option<buttons::ButtonEvent>, Self::Error> {
+        match self.never {}
+    }
 }
 
 impl buttons::ButtonsPeripheral for NoPeripherals {
     type Buttons = UnavailableButtons;
 
     fn take_buttons(&mut self, _instance: Instance) -> Option<Self::Buttons> {
+        None
+    }
+}
+
+/// Uninhabited environment sensor used when a Board declares none.
+pub struct UnavailableEnvironmentSensor {
+    never: Infallible,
+}
+
+impl environment::EnvironmentSensor for UnavailableEnvironmentSensor {
+    type Error = Infallible;
+
+    fn quantities(&self) -> environment::Quantities {
+        match self.never {}
+    }
+
+    async fn read(&mut self) -> Result<environment::EnvironmentReading, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl environment::EnvironmentSensorPeripheral for NoPeripherals {
+    type EnvironmentSensor = UnavailableEnvironmentSensor;
+
+    fn take_environment_sensor(&mut self, _instance: Instance) -> Option<Self::EnvironmentSensor> {
+        None
+    }
+}
+
+/// Uninhabited keyboard used when a Board declares no keyboard.
+pub struct UnavailableKeyboard {
+    never: Infallible,
+}
+
+impl keyboard::Keyboard for UnavailableKeyboard {
+    type Error = Infallible;
+
+    fn poll_event(&mut self) -> Result<Option<keyboard::KeyEvent>, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl keyboard::KeyboardPeripheral for NoPeripherals {
+    type Keyboard = UnavailableKeyboard;
+
+    fn take_keyboard(&mut self, _instance: Instance) -> Option<Self::Keyboard> {
+        None
+    }
+}
+
+/// Uninhabited rotary encoder used when a Board declares no encoder.
+pub struct UnavailableRotaryEncoder {
+    never: Infallible,
+}
+
+impl rotary_encoder::RotaryEncoder for UnavailableRotaryEncoder {
+    type Error = Infallible;
+
+    fn position(&mut self) -> Result<i64, Self::Error> {
+        match self.never {}
+    }
+
+    fn delta(&mut self) -> Result<i64, Self::Error> {
+        match self.never {}
+    }
+
+    fn reset(&mut self) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl rotary_encoder::RotaryEncoderPeripheral for NoPeripherals {
+    type RotaryEncoder = UnavailableRotaryEncoder;
+
+    fn take_rotary_encoder(&mut self, _instance: Instance) -> Option<Self::RotaryEncoder> {
+        None
+    }
+}
+
+/// Uninhabited buzzer used when a Board has no attached buzzer.
+pub struct UnavailableBuzzer {
+    never: Infallible,
+}
+
+impl buzzer::Buzzer for UnavailableBuzzer {
+    type Error = Infallible;
+
+    fn frequency_range(&self) -> (u32, u32) {
+        match self.never {}
+    }
+
+    fn start(&mut self, _frequency_hz: u32, _volume: buzzer::Volume) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn stop(&mut self) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn play_note(
+        &mut self,
+        _note: buzzer::Note,
+        _volume: buzzer::Volume,
+    ) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl buzzer::BuzzerPeripheral for NoPeripherals {
+    type Buzzer = UnavailableBuzzer;
+
+    fn take_buzzer(&mut self, _instance: Instance) -> Option<Self::Buzzer> {
+        None
+    }
+}
+
+/// Uninhabited vibration motor used when a Board has no attached motor.
+pub struct UnavailableVibration {
+    never: Infallible,
+}
+
+impl vibration::Vibration for UnavailableVibration {
+    type Error = Infallible;
+
+    fn has_variable_strength(&self) -> bool {
+        match self.never {}
+    }
+
+    fn set(&mut self, _strength: vibration::Strength) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn pulse(
+        &mut self,
+        _pattern: &[vibration::Pulse],
+        _strength: vibration::Strength,
+    ) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl vibration::VibrationPeripheral for NoPeripherals {
+    type Vibration = UnavailableVibration;
+
+    fn take_vibration(&mut self, _instance: Instance) -> Option<Self::Vibration> {
+        None
+    }
+}
+
+/// Uninhabited infrared transceiver used when a Board has none.
+pub struct UnavailableInfrared {
+    never: Infallible,
+}
+
+impl infrared::Infrared for UnavailableInfrared {
+    type Error = Infallible;
+
+    fn can_receive(&self) -> bool {
+        match self.never {}
+    }
+
+    async fn send_nec(&mut self, _command: infrared::NecCommand) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn send_raw(
+        &mut self,
+        _carrier: infrared::Carrier,
+        _timings_us: &[u16],
+    ) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn receive(
+        &mut self,
+        _timings_us: &mut [u16],
+    ) -> Result<infrared::Received, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl infrared::InfraredPeripheral for NoPeripherals {
+    type Infrared = UnavailableInfrared;
+
+    fn take_infrared(&mut self, _instance: Instance) -> Option<Self::Infrared> {
+        None
+    }
+}
+
+/// Uninhabited EEPROM used when a Board has none.
+pub struct UnavailableEeprom {
+    never: Infallible,
+}
+
+impl eeprom::Eeprom for UnavailableEeprom {
+    type Error = Infallible;
+
+    fn geometry(&self) -> eeprom::EepromGeometry {
+        match self.never {}
+    }
+
+    async fn read(&mut self, _offset: u32, _buffer: &mut [u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn write(&mut self, _offset: u32, _data: &[u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+}
+
+impl eeprom::EepromPeripheral for NoPeripherals {
+    type Eeprom = UnavailableEeprom;
+
+    fn take_eeprom(&mut self, _instance: Instance) -> Option<Self::Eeprom> {
+        None
+    }
+}
+
+/// Uninhabited secure element used when a Board has none.
+pub struct UnavailableSecureElement {
+    never: Infallible,
+}
+
+impl secure_element::SecureElement for UnavailableSecureElement {
+    type Error = Infallible;
+
+    async fn serial_number(&mut self) -> Result<secure_element::SerialNumber, Self::Error> {
+        match self.never {}
+    }
+
+    async fn fill_random(&mut self, _buffer: &mut [u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn public_key(
+        &mut self,
+        _slot: secure_element::KeySlot,
+    ) -> Result<secure_element::P256PublicKey, Self::Error> {
+        match self.never {}
+    }
+
+    async fn sign_digest(
+        &mut self,
+        _slot: secure_element::KeySlot,
+        _digest: &[u8; 32],
+    ) -> Result<secure_element::P256Signature, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl secure_element::SecureElementPeripheral for NoPeripherals {
+    type SecureElement = UnavailableSecureElement;
+
+    fn take_secure_element(&mut self, _instance: Instance) -> Option<Self::SecureElement> {
+        None
+    }
+}
+
+/// Uninhabited NFC card reader used when a Board has none.
+pub struct UnavailableNfcReader {
+    never: Infallible,
+}
+
+impl nfc_reader::NfcReader for UnavailableNfcReader {
+    type Error = Infallible;
+
+    async fn poll(&mut self) -> Result<Option<nfc_reader::Card>, Self::Error> {
+        match self.never {}
+    }
+
+    async fn read_block(
+        &mut self,
+        _block: u8,
+    ) -> Result<[u8; nfc_reader::BLOCK_BYTES], Self::Error> {
+        match self.never {}
+    }
+}
+
+impl nfc_reader::NfcReaderPeripheral for NoPeripherals {
+    type NfcReader = UnavailableNfcReader;
+
+    fn take_nfc_reader(&mut self, _instance: Instance) -> Option<Self::NfcReader> {
+        None
+    }
+}
+
+/// Uninhabited LoRa radio used when a Board has none.
+pub struct UnavailableLora {
+    never: Infallible,
+}
+
+impl lora::Lora for UnavailableLora {
+    type Error = Infallible;
+
+    fn limits(&self) -> lora::RadioLimits {
+        match self.never {}
+    }
+
+    async fn configure(&mut self, _config: lora::LoraConfig) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn transmit(&mut self, _payload: &[u8]) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn receive(&mut self, _buffer: &mut [u8]) -> Result<lora::Received, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl lora::LoraPeripheral for NoPeripherals {
+    type Lora = UnavailableLora;
+
+    fn take_lora(&mut self, _instance: Instance) -> Option<Self::Lora> {
+        None
+    }
+}
+
+/// Uninhabited CAN controller used when a Board has none.
+pub struct UnavailableCan {
+    never: Infallible,
+}
+
+impl can::Can for UnavailableCan {
+    type Error = Infallible;
+
+    fn supports_bitrate(&self, _bitrate: u32) -> bool {
+        match self.never {}
+    }
+
+    fn start(&mut self, _bitrate: u32) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn stop(&mut self) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn bitrate(&self) -> Option<u32> {
+        match self.never {}
+    }
+
+    fn state(&self) -> can::BusState {
+        match self.never {}
+    }
+
+    async fn transmit(&mut self, _frame: &can::Frame) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    async fn receive(&mut self) -> Result<can::Frame, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl can::CanPeripheral for NoPeripherals {
+    type Can = UnavailableCan;
+
+    fn take_can(&mut self, _instance: Instance) -> Option<Self::Can> {
+        None
+    }
+}
+
+/// Uninhabited digital I/O bank used when a Board has none.
+pub struct UnavailableDigitalIo {
+    never: Infallible,
+}
+
+impl digital_io::DigitalIo for UnavailableDigitalIo {
+    type Error = Infallible;
+
+    fn output_count(&self) -> usize {
+        match self.never {}
+    }
+
+    fn input_count(&self) -> usize {
+        match self.never {}
+    }
+
+    fn set_output(&mut self, _index: usize, _on: bool) -> Result<(), Self::Error> {
+        match self.never {}
+    }
+
+    fn outputs(&self) -> digital_io::Levels {
+        match self.never {}
+    }
+
+    fn read_inputs(&mut self) -> Result<digital_io::Levels, Self::Error> {
+        match self.never {}
+    }
+}
+
+impl digital_io::DigitalIoPeripheral for NoPeripherals {
+    type DigitalIo = UnavailableDigitalIo;
+
+    fn take_digital_io(&mut self, _instance: Instance) -> Option<Self::DigitalIo> {
         None
     }
 }

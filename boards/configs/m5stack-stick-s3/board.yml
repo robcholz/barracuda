@@ -2,12 +2,26 @@ name: m5stack-stick-s3
 profile: screen
 hardware:
   chip: esp32s3
+  # ESP32-S3-PICO-1-N8R8.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_ex_in` board_M5StickS3: SCL G48 / SDA G47,
+        # at the M5PM1's 100 kHz (M5Unified `M5PM1_Class`).
+        peripheral: I2C0
+        scl: GPIO48
+        sda: GPIO47
+        frequency-hz: 100000
     spi-device:
       display-spi:
         peripheral: SPI3
@@ -15,7 +29,44 @@ peripherals:
         mosi: GPIO39
         chip-select: GPIO41
         frequency-hz: 40000000
+    i2s-stream:
+      audio-stream:
+        # M5Unified `_begin_audio` (board_M5StickS3): MCLK GPIO18, BCK
+        # GPIO17, WS GPIO15, data out GPIO14, data in GPIO16.
+        peripheral: I2S0
+        dma: DMA_CH1
+        bclk: GPIO17
+        ws: GPIO15
+        dout: GPIO14
+        din: GPIO16
+        mclk: GPIO18
+        sample-rate-hz: 16000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO46, active high (Espressif `m5stack_sticks3`:
+        # schematic sheet 4, NMOS Q1 gate on net G46_IR_TX).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO46
+    rmt-input:
+      ir-receive:
+        # VSOP38338 receiver on GPIO42, idle high and low while it sees the
+        # carrier (Espressif `m5stack_sticks3`: schematic sheet 4, net
+        # G42_IR_RX).
+        peripheral: RMT
+        channel: 4
+        pin: GPIO42
   devices:
+    audio-codec:
+      # ES8311 (18h) on the internal bus; the M5PM1's G3 enables the AW8737
+      # amplifier (M5Unified `_speaker_enabled_cb_sticks3`).
+      implementation: es8311-audio-codec
+      bindings: { control: internal-i2c, stream: audio-stream }
+      parameters:
+        m5pm1-amplifier-pin: 3
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO38, dc: GPIO45, reset: GPIO21, spi: display-spi }
@@ -26,3 +77,40 @@ peripherals:
         offset-x: 52
         offset-y: 40
         invert-colors: true
+    # The battery behind the M5PM1 at 6Eh; the charger's status is M5PM1 G0
+    # (M5Unified `Power_Class::isCharging`).
+    power-monitor:
+      implementation: m5pm1-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters: { charge-status: g0 }
+    # The power key on the M5PM1's PWR_BTN, M5Unified `BtnPWR`: the side
+    # button: a click powers on or resets, a double click powers off, a long
+    # press enters download mode (M5Stack StickS3 docs). The M5PM1's factory
+    # click reset is kept.
+    power-button:
+      implementation: m5pm1-buttons
+      bindings: { i2c: internal-i2c }
+    # Buttons A (GPIO11) and B (GPIO12), active low with the Board's
+    # pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      primary: true
+      bindings:
+        button-1: GPIO11
+        button-2: GPIO12
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 68h (M5Stack StickS3 pin map). M5Unified rotates its axes (X=+Y,
+        # Y=-X).
+        address: 104
+    # The infrared LED and the demodulating receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit, receive: ir-receive }
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA).
+    port-a-scl: { pin: GPIO10 }
+    port-a-sda: { pin: GPIO9 }

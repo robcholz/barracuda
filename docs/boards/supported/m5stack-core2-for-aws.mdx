@@ -11,7 +11,7 @@ The M5Stack Core2 for AWS is an ESP32 Board from M5Stack.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen-connected`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-core2-for-aws/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,57 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-core2-for-aws/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `led-strip` | 10 RGB LEDs in one chain (SK6812, GPIO25) | [`light`](/plugins/vm-led-strip) |
+| `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (FT6336U) | — |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `inertial-measurement` | Motion sensor (MPU6886) | [`motion`](/plugins/vm-imu) |
+| `power-monitor` | Battery gauge (AXP192 or AXP2101) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `power-button` | Power button (AXP192 or AXP2101 power key) | [`buttons`](/plugins/vm-buttons) |
+| `audio` | Audio (NS4168 amplifier, SPM1423 PDM microphone) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
+| `vibration` | Vibration motor (AXP192 LDO3 or AXP2101 DLDO1) | [`vibration`](/plugins/vm-vibration) |
+| `secure-element` | Secure element (ATECC608B Trust&GO, `35h`) | [`secure_element`](/plugins/vm-secure-element) |
+
+The touch panel reports a 320x280 span: the strip below the screen holds the
+three touch keys. The display implementation's PMIC power-up resets the touch
+controller with the panel.
+
+The battery gauge shares the PMIC with the display: it reads only the PMIC's
+measurement registers, and the display keeps its regulators.
+
+On v1.1 units the AXP2101 measures no current; an INA3221 at `40h` senses the
+battery current instead.
+
+The microSD card shares the display's SPI bus through its own chip select.
+
+The internal I2C bus runs at 100 kHz: the ATECC608B wakes only on a low
+pulse on SDA longer than the one a 400 kHz bus makes. Its device key is in
+slot 0.
+
+The power button is read through the PMIC, which latches a short press when the
+key is released and a long press once it has been held for the long-press time;
+the button reads pressed in one sample for each, and its events report
+a short press as a click and a long press as a long press. It sets and clears only the
+key's own interrupt bits of the PMIC.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO33` |
+| `port-a-sda` | `GPIO32` |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g36` | `GPIO36` |
+| `port-c-g13` | `GPIO13` |
+| `port-c-g14` | `GPIO14` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

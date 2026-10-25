@@ -228,6 +228,43 @@ fn select_configures_an_xtensa_esp32_target_and_flash_layout() {
 }
 
 #[test]
+fn select_links_an_esp_target_with_the_platform_linker_script() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "local-macos", "local-macos");
+    let board_path = root.path().join("boards/configs/local-macos/board.yml");
+    let board = fs::read_to_string(&board_path).expect("Board manifest");
+    fs::write(
+        &board_path,
+        board.replace(
+            "native-layout:",
+            "toolchain:\n  target: xtensa-esp32-none-elf\nnative-layout:",
+        ),
+    )
+    .expect("ESP32 target");
+    let platform_path = root.path().join("platforms/macos/platform.yml");
+    let platform = fs::read_to_string(&platform_path).expect("Platform manifest");
+    fs::write(
+        &platform_path,
+        platform
+            .replace("- os: macos", "- triple: xtensa-esp32-none-elf")
+            .replace(
+                "hal:\n",
+                "build:\n  linker-script: barracuda-esp32.x\nhal:\n",
+            ),
+    )
+    .expect("ESP32 platform linker script");
+
+    run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
+
+    let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
+        .expect("local Cargo selection");
+    assert!(cargo.contains(
+        "rustflags = [\"-C\", \"link-arg=-Tbarracuda-esp32.x\", \"-C\", \"link-arg=-nostartfiles\"]"
+    ));
+    assert!(!cargo.contains("linkall.x"));
+}
+
+#[test]
 fn select_links_a_cortex_m_target_with_the_runtime_script() {
     let root = tempdir().expect("temporary workspace");
     add_board(root.path(), "local-macos", "local-macos");

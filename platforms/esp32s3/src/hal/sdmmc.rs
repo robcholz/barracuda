@@ -1,4 +1,6 @@
-//! Bare-metal ESP32-S3 SDMMC storage binding backed directly by `esp-hal`.
+//! Bare-metal SDMMC storage binding backed directly by `esp-hal`, shared by
+//! the ESP32-S3 (slot 0) and the ESP32 (slot 1, the ESP32 includes this file);
+//! each Platform names its slot as `SDMMC_SLOT`.
 
 use embedded_io::{ErrorKind, ErrorType, SeekFrom};
 use embedded_io_async::{Read, Seek, Write};
@@ -20,7 +22,8 @@ use static_cell::StaticCell;
 
 const BLOCK_BYTES: usize = 512;
 const IDENTIFICATION_FREQUENCY_HZ: u32 = 400_000;
-const CARD_FREQUENCY_HZ: u32 = 25_000_000;
+/// The highest clock of the default bus speed mode.
+const DEFAULT_SPEED_HZ: u32 = 25_000_000;
 const POWER_UP_ATTEMPTS: usize = 100;
 
 /// Failure while constructing the ESP32-S3 SDMMC host.
@@ -32,8 +35,9 @@ pub enum SdmmcConfigError {
 
 /// Byte-addressed SD card backed by `esp-hal`'s blocking SDMMC slot.
 pub struct SdmmcDevice {
-    slot: Slot<'static, 0, Blocking>,
+    slot: Slot<'static, { super::SDMMC_SLOT }, Blocking>,
     sector: InternalMemory<[u8; BLOCK_BYTES]>,
+    frequency_hz: u32,
     initialized: bool,
     high_capacity: bool,
     position: u64,
@@ -80,24 +84,27 @@ impl ErrorType for SdmmcDevice {
     type Error = SdmmcError;
 }
 
-/// Constructs a one-bit slot from the actual ESP32-S3 `SDHOST` token.
+/// Constructs a one-bit slot from the actual ESP32-S3 `SDHOST` token; the
+/// card runs at `frequency_hz` once identified, at most the default speed
+/// mode's 25 MHz.
 pub fn sdmmc_device_1bit<CLK, CMD, D0>(
     host: SDHOST<'static>,
     clk: CLK,
     cmd: CMD,
     data0: D0,
+    frequency_hz: u32,
 ) -> Result<SdmmcDevice, SdmmcConfigError>
 where
-    CLK: SlotClk<'static, 0>,
-    CMD: SlotCmd<'static, 0>,
-    D0: SlotData<'static, 0, 0>,
+    CLK: SlotClk<'static, { super::SDMMC_SLOT }>,
+    CMD: SlotCmd<'static, { super::SDMMC_SLOT }>,
+    D0: SlotData<'static, { super::SDMMC_SLOT }, 0>,
 {
     let controller =
         SdHostController::new(host, HostConfig::default()).map_err(SdmmcConfigError::Host)?;
     static CONTROLLER: StaticCell<SdHostController<'static>> = StaticCell::new();
     let controller = CONTROLLER.init(controller);
     let slot = controller
-        .slot::<0>(SlotConfig::default())
+        .slot::<{ super::SDMMC_SLOT }>(SlotConfig::default())
         .map_err(SdmmcConfigError::Host)?
         .with_clk(clk)
         .with_cmd(cmd)
@@ -106,6 +113,8 @@ where
     Ok(SdmmcDevice {
         slot,
         sector: InternalMemory::new([0; BLOCK_BYTES]),
+        // This driver does not switch the card to high speed.
+        frequency_hz: frequency_hz.min(DEFAULT_SPEED_HZ),
         initialized: false,
         high_capacity: false,
         position: 0,
@@ -197,7 +206,7 @@ impl SdmmcDevice {
 
         self.send_command(common::select_card(rca))?.to_result()?;
         self.slot
-            .set_bus_low_level(BusWidth::Bit1, CARD_FREQUENCY_HZ)
+            .set_bus_low_level(BusWidth::Bit1, self.frequency_hz)
             .map_err(|error| SdmmcError::Card(error.into()))?;
         self.send_command(common::set_block_length(BLOCK_BYTES as u32))?
             .to_result()?;

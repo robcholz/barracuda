@@ -11,7 +11,7 @@ M5Stack ATOM U 是 M5Stack 推出的 ESP32 开发板。
 - 芯片：ESP32
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`connected`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-atom-u/partitions.csv`
 
 ## 构建和运行
@@ -26,4 +26,9 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-atom-u/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `led-strip` | RGB LED（SK6812） | [`light`](/zh/plugins/vm-led-strip) |
+| `buttons` | 按键（GPIO39） | [`buttons`](/zh/plugins/vm-buttons) |
+| `microphone` | 麦克风（SPM1423 PDM） | [`audio`](/zh/plugins/vm-audio) |
+| `infrared` | 红外发射器（GPIO12） | [`infrared`](/zh/plugins/vm-infrared) |

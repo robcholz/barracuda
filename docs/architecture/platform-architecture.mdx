@@ -183,10 +183,25 @@ Platforms without a radio supply an explicitly unsupported implementation, and
 System hands the mechanism to the one Plugin that takes it and owns the
 policy.
 
+A Platform builds its radio only for a firmware that has a Plugin to take it.
+That Plugin declares `[platform] wifi = true` in its `plugin.toml`; when an
+enabled Plugin does, the generated Plugin selection enables the `wifi` Cargo
+feature of whichever Platform is selected. Without the feature a Platform with
+a radio supplies the unsupported implementation, starts no radio, and links no
+radio code: on an ESP chip the IP stack then has no link, as no Plugin could
+ever join a network, and on the ESP32-P4 the Wi-Fi co-processor stays
+unpowered while Ethernet still carries the stack. A Platform without a radio
+declares no such feature.
+
 `entropy` is the Platform's source of unpredictable bytes, fit for
 cryptographic use: the operating system's generator on Host Platforms, a true
-random number generator fed by physical noise on devices. A Platform without
-one supplies `UnavailableEntropy`, never a weaker generator. System erases its
+random number generator fed by physical noise on devices. A device whose
+noise source cannot run beside the hardware it shares, such as an ESP chip
+without its radio, whose SAR ADC noise source blocks the ADC, runs the source
+at start-up only and seeds a ChaCha20 generator from it, the software DRBG
+Espressif recommends for this case; the generator re-keys itself after every
+fill, so its state reveals no earlier output. A Platform without a source
+supplies `UnavailableEntropy`, never a weaker generator. System erases its
 type into `PluginContext::entropy`, which every Plugin that needs randomness
 clones, and the radio into `PluginContext::wifi`.
 
@@ -291,6 +306,20 @@ HAL bindings. Move-only generated bindings prevent one chip token from being
 consumed twice. Platform providers validate runtime routing, electrical modes,
 frequencies, and controller limits before constructing a function handle.
 
+A chip controller that a Platform mechanism and a Board peripheral both use
+stays with the Platform, and the Board receives only its part. The ESP32-P4
+has one SD host whose two slots share one transfer engine: the Platform's
+Wi-Fi co-processor link uses slot 1, and a Board's microSD card uses slot 0.
+The Platform entry builds the host once and passes slot 0 to the generated
+Board bindings beside the chip peripherals, as the bindings macro's second,
+Platform hand-off argument; the card's `sdmmc-device` binding takes that slot
+and never the controller. The Platform manifest lists the slots it hands out
+and the supply each needs (`hal.sdmmc-slots`), and Board validation refuses a
+card on the co-processor's slot, so `cargo board select` rejects a Board whose
+declarations would claim one slot twice. The two users share the engine
+through the vendor HAL's own first-come-first-served lock, with no priority,
+and the card keeps each transfer short so the link is never starved.
+
 ## Peripherals and exposed I/O
 
 Board configuration distinguishes optional attached product hardware from
@@ -312,7 +341,7 @@ peripherals:
       primary: true
       bindings: { ... }
     status-panel:
-      implementation: gdeh0154d67-display
+      implementation: epaper-1in54-display
       bindings: { ... }
 
 exposed-io:
@@ -329,10 +358,11 @@ Platform types, Plugin identities, and application policy do not belong in the
 Board matrix. An implementation identifier selects registered composition
 code; YAML does not name a Rust type or crate path.
 
-Device names are the Board's own. A Board may attach several displays; every
-other peripheral kind has at most one device. With several devices of a kind,
-exactly one is marked `primary: true`, a hardware fact about the product's
-main device rather than a Plugin choice. A kind with one device needs no mark.
+Device names are the Board's own. A Board may attach several devices of any
+kind except removable storage, which System mounts as one slot. With several
+devices of a kind, exactly one is marked `primary: true`, a hardware fact about
+the product's main device rather than a Plugin choice. A kind with one device
+needs no mark.
 
 Board resources contain no third hardware category:
 
@@ -349,9 +379,14 @@ each selected Board. Every generated peripheral field is `Option<T>` because no
 peripheral kind is mandatory. Each peripheral trait takes a device by
 `Instance`, the device's position among the Board's devices of that kind in
 name order; Plugins never build an `Instance` themselves but take the
-constants their build resolved from their declared slots. Several displays are
-returned as one generated `BoardDisplay` enum over the Board's display
-implementations, built by `display_set!`, so dispatch stays static. The single
+constants their build resolved from their declared slots. One device of a
+kind is returned as its concrete type. Several are returned as one generated
+`Board<Kind>` enum over the Board's implementations of that kind, such as
+`BoardDisplay` or `BoardPowerMonitor`, built by that kind's set macro
+(`display_set!`, `power_monitor_set!`, and so on), so dispatch stays static. A
+device that fails to initialize is logged and left `None`, and the Board
+starts without it; only a shared bus or controller that cannot be built fails
+Board initialization. The single
 exposed-I/O value owns all runtime physical resources.
 System places it in `PluginContext` behind one shared `Arc`; Plugins that use
 exposed hardware clone that owner, not independent protocol collections. Platform-owned
@@ -424,8 +459,20 @@ API to Boards with different controller numbering.
 Reusable peripheral implementations import `embedded-hal`, `embedded-hal-async`, and established
 domain ecosystem traits directly. Barracuda defines a narrow binding only when
 the ecosystem has no suitable contract. Current examples are parallel camera
-frame reception and PCM streaming; they live with the peripheral API
-rather than forming a second general-purpose HAL. The selected build keeps
+frame reception, PCM streaming, and the eight-bit Intel 8080-style parallel
+output that feeds both a MIPI DBI panel controller and a directly driven
+e-paper panel's source driver; they live with the peripheral API rather than
+forming a second general-purpose HAL. The Board HAL adds two more where
+`embedded-hal` stops: `AnalogVoltageInput`, a calibrated ADC channel read in
+millivolts; `PulseOutput` and `PulseInput`, a pulse-train channel that clocks
+out or records level-and-duration symbols for LED chains and infrared;
+`PwmFrequencyControl`, which retunes a PWM output's frequency for a buzzer;
+`CanController`, an on-chip CAN controller with awaitable transfers, which
+`embedded-can` lacks; `SpiDeviceControl`, which lets an SD card in SPI mode change
+its device's clock and clock it with the chip select released; and
+`SpiBusControl`, which sets an SPI bus's clock and mode and clocks out fewer
+than eight bits, so a JTAG port driven through the controller can step its
+state machine. The selected build keeps
 concrete storage and dispatch statically allocated; consumers do not look up a
 Platform, Board, or peripheral implementation at runtime, and async HAL traits are
 not converted into `dyn` trait objects.
@@ -761,6 +808,13 @@ Platform owns the execution work required to keep its IP service alive. System
 and Plugins receive the usable IP stack handle, not its runner or
 platform-specific setup objects.
 
+A Board with more than one link, such as wired Ethernet and a Wi-Fi station,
+still yields one `ip_stack`. The Platform runs it over
+`barracuda_platform::FailoverNetworkDriver`, which carries traffic on the
+preferred link while it is up and on the fallback link otherwise. Each switch
+reports the link down once, so the stack restarts DHCP. Choosing a link is
+Platform work; System and Plugins never see which link carries the stack.
+
 ## Logging and tracing
 
 Ordinary diagnostics across Platform, HAL, System, Core, and Plugins use the
@@ -1016,9 +1070,9 @@ Platform services -> { IP, entropy, partitions } ------------------------+-> Sys
 
 Platform crates do not own peripheral implementations or Board
 composition. They do own their vendor-HAL token vocabulary and GPIO, I2C, SPI,
-camera, I2S, and delay constructors. DMA-backed media resources are composed
-statically: `camera-capture` and `i2s-stream` declarations size storage with
-`dma-buffer-bytes`, and the selected Platform allocates it at the concrete Board
+camera, parallel-output, I2S, and delay constructors. DMA-backed media
+resources are composed statically: `camera-capture`, `parallel-output`,
+`i2s-stream`, and `pdm-i2s-stream` declarations size storage with `dma-buffer-bytes`, and the selected Platform allocates it at the concrete Board
 call site. Semantic adaptation remains under `peripherals/impl`; reusable
 register and protocol behavior belongs under `drivers/chips`. Board-related
 crates remain under `boards/`; the selected Target composition root remains

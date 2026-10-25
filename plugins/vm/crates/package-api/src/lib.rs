@@ -11,6 +11,10 @@ use barracuda_lua::{Lua, Package, Result as LuaResult};
 use portable_atomic_util::{Arc, Weak};
 use spin::Mutex;
 
+mod devices;
+
+pub use devices::{BoardDevices, LentDevice};
+
 /// Lua heap one installed package may keep in a run once its installation's
 /// garbage is collected.
 ///

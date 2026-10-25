@@ -1,0 +1,26 @@
+[package]
+name = "barracuda-atom-s3-display"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda display implementation for the M5Stack AtomS3 0.85-inch panel, GC9107 or ST7735S detected at start-up"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-mipi-dbi-display.workspace = true
+barracuda-peripheral.workspace = true
+embedded-graphics-core.workspace = true
+embedded-hal.workspace = true
+mipidsi.workspace = true
+static_cell.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

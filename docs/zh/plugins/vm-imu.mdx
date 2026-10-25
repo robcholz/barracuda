@@ -4,12 +4,12 @@ sidebarTitle: "IMU"
 description: "用 `motion` Lua 包在 Lua 中读取开发板的运动传感器。"
 ---
 
-基于开发板的主 IMU 安装 `motion` Lua 包。
+基于开发板的 IMU 安装 `motion` Lua 包，默认使用主 IMU。
 
 - 插件 ID：`imu`
 - 依赖：`vm`
 - 设置：无
-- 上下文资源：外设槽位 `inertial-measurement.device`（`primary`，可选）
+- 上下文资源：外设槽位 `inertial-measurement.devices`（`*`）
 - 提供的能力：无
 - 所需能力：来自 `vm` 的 `LuaPackageRegistry`
 - Workflow：无
@@ -19,17 +19,20 @@ description: "用 `motion` Lua 包在 Lua 中读取开发板的运动传感器�
 - 任务：无
 - 存储：无
 
-本插件只获取一次开发板的主 `Imu` 能力，并安装 `motion` Lua 包。I2C 的所有权、芯片初始化、整数单位换算以及相对于开发板的坐标轴映射，仍由所选的实现和生成的开发板 HAL 拥有。
+本插件获取开发板上没有被其他插件占用的每个 `Imu`，主 IMU 排在最前，并安装 `motion` Lua 包。I2C 的所有权、芯片初始化、整数单位换算以及相对于开发板的坐标轴映射，仍由所选的实现和生成的开发板 HAL 拥有。
 
 Lua API：
 
-- `motion.available() -> boolean`
-- `motion.open() -> handle`
-- `handle:descriptor() -> accelerometer_rate_hz, gyroscope_rate_hz, accelerometer_range_mg, gyroscope_range_mdps, has_temperature`
-- `handle:read() -> acceleration_x_mg, acceleration_y_mg, acceleration_z_mg, angular_velocity_x_mdps, angular_velocity_y_mdps, angular_velocity_z_mdps, temperature_mc`
+- `motion.list() -> { name, ... }`：各 IMU 在开发板上的名称，主 IMU 排在最前
+- `motion.available([name]) -> boolean`：指定名称的 IMU（不给出时为主 IMU）能否打开
+- `motion.open([name]) -> handle`：打开指定名称的 IMU，不给出时打开主 IMU
+- `handle:descriptor() -> accelerometer_rate_hz, gyroscope_rate_hz, accelerometer_range_mg, gyroscope_range_mdps, has_temperature, magnetometer_rate_hz`
+- `handle:read() -> acceleration_x_mg, acceleration_y_mg, acceleration_z_mg, angular_velocity_x_mdps, angular_velocity_y_mdps, angular_velocity_z_mdps, temperature_mc, magnetic_field_x_nt, magnetic_field_y_nt, magnetic_field_z_nt`
+
+如果开发板的 IMU 带有磁力计（例如 M5Stack 在 BMI270 或 MPU6886 旁边安装的 BMM150），`magnetometer_rate_hz` 是它的测量频率，每次读取还会附带以纳特斯拉为单位的磁场，坐标轴与加速度相同。没有磁力计时，以及磁场使磁力计饱和的那次采样，这些值为 `nil`。
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
-当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 1。
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 3。
 
-没有 IMU 的开发板报告不可用。这个只能移动的内置能力每次开机只允许一个句柄；显式关闭、词法 `<close>`、垃圾回收和插件被撤销都会阻止后续操作。本插件不做后台采样，也不拥有长时间运行的任务。
+没有 IMU 的开发板报告不可用。这个只能移动的内置能力每个设备每次开机只允许一个句柄；显式关闭、词法 `<close>`、垃圾回收和插件被撤销都会阻止后续操作。本插件不做后台采样，也不拥有长时间运行的任务。

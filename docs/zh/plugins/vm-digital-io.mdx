@@ -1,0 +1,47 @@
+---
+title: "Digital I/O 插件"
+sidebarTitle: "Digital I/O"
+description: "用 `digital_io` Lua 包在 Lua 中控制开发板的继电器并读取隔离输入。"
+---
+
+基于开发板的数字 I/O 组安装 `digital_io` Lua 包，默认使用主 I/O 组：即 M5Stack StamPLC 这类控制器上的继电器或晶体管输出和隔离输入。
+
+- 插件 ID：`digital-io`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `digital-io.devices`（`*`）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`digital_io`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件获取开发板上没有被其他插件占用的每个 `DigitalIo` 组，主 I/O 组排在最前，并安装 `digital_io` Lua 包。它使用的是语义层面的外设能力，从不直接操作背后的扩展芯片或引脚。开发板上未占用的引脚请改用 [GPIO](/zh/plugins/vm-gpio) 包。
+
+输出和输入都按产品上的标注顺序从 1 开始编号：继电器 1 是输出 1，输入 1 是输入 1。继电器或晶体管导通时输出为开；端子有电时输入为开。
+
+Lua API：
+
+- `digital_io.list() -> { name, ... }`：各 I/O 组在开发板上的名称，主 I/O 组排在最前
+- `digital_io.available([name]) -> boolean`
+- `digital_io.counts([name]) -> outputs, inputs`
+- `digital_io.set(output, on[, name]) -> true` 切换一个输出
+- `digital_io.get(output[, name]) -> boolean` 返回该输出最后一次被设置的状态
+- `digital_io.outputs([name]) -> table` 返回所有输出的状态，`\{true, false, ...\}`
+- `digital_io.read(input[, name]) -> boolean` 读取一个输入
+- `digital_io.inputs([name]) -> table` 读取所有输入
+
+`name` 是 `list` 返回的开发板设备名；不给出时调用使用主 I/O 组，所以为单个 I/O 组写的脚本在有多个 I/O 组的开发板上无需修改。只想指定 I/O 组而不给出它前面的可选参数时，这些参数传 `nil`。
+
+不存在的通道返回 `nil, error`。输出在启动时为关。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2。没有该设备的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
+
+```lua
+local io = require("digital_io")
+io.set(1, true)
+if io.read(3) then io.set(2, true) end
+```

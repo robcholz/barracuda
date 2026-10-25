@@ -17,13 +17,14 @@ use barracuda_plugin::manager::{
 use barracuda_workflow_plugin::WorkflowActionRegistry;
 
 pub use barracuda_lua::{
-    Bytes, Context, Error, Function, Lua, LuaValue, MetaMethod, Package, Result, Table, UserData,
-    UserDataHandle, UserDataMethods, Variadic,
+    Bytes, Context, Error, Function, Lua, LuaValue, MetaMethod, Package, Result, Table, Trailing,
+    UserData, UserDataHandle, UserDataMethods, Variadic,
 };
 pub use barracuda_vm_package_api::{
-    LuaPackage, LuaPackageRegistration, LuaPackageRegistry, LuaPackageRegistryError,
-    LuaPackageScope, PackageInterface, PackageLoading, LUA_PACKAGE_HEAP_BUDGET_BYTES,
-    LUA_PACKAGE_INSTALL_HEADROOM_BYTES, LUA_PACKAGE_INSTALL_PEAK_BYTES, MAX_BUILTIN_EXTENSIONS,
+    BoardDevices, LentDevice, LuaPackage, LuaPackageRegistration, LuaPackageRegistry,
+    LuaPackageRegistryError, LuaPackageScope, PackageInterface, PackageLoading,
+    LUA_PACKAGE_HEAP_BUDGET_BYTES, LUA_PACKAGE_INSTALL_HEADROOM_BYTES,
+    LUA_PACKAGE_INSTALL_PEAK_BYTES, MAX_BUILTIN_EXTENSIONS,
 };
 pub use barracuda_vm_runtime::{
     SeedSource, Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmListResponse,

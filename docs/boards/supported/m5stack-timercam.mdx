@@ -11,7 +11,7 @@ The M5Stack TimerCamera is an ESP32 Board from M5Stack.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`connected`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-timercam/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,25 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-timercam/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `status-led` | Indicator LED | — |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
+
+The Platform entry drives `GPIO33`, the battery power latch (`hardware.power-hold`), high before anything else is built, so the Board stays on without USB power.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g4` | `GPIO4` |
+| `grove-g13` | `GPIO13` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g4", "up")
+print(pin:read())
+```

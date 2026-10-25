@@ -11,7 +11,7 @@ M5Stack ATOM Display 是 M5Stack 推出的 ESP32 开发板。
 - 芯片：ESP32
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen-connected`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-atom-display/partitions.csv`
 
 ## 构建和运行
@@ -26,4 +26,8 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-atom-display/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | HDMI 输出，1280 x 720，60 Hz（GW1NR-9C FPGA、LT8618SX 发送器） | [`display`](/zh/plugins/vm-display) |
+
+FPGA 断电后不保留配置。启动时，除非 FPGA 在复位后仍保留着设计，显示屏会通过 FPGA 的 SPI 线以 JTAG 加载 M5Stack 的 FPGA 设计（来自 M5GFX），然后设置视频模式并启动 LT8618SX。绘制内容会立即写入 FPGA 的帧存储；用显示屏的 `width` 和 `height` 设置更小的绘制尺寸时，画面会放大到 720p，绘制占用的 SPI 总线也更少。

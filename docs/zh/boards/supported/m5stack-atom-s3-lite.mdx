@@ -26,4 +26,23 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-atom-s3-lite/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `led-strip` | RGB LED（WS2812，GPIO35） | [`light`](/zh/plugins/vm-led-strip) |
+| `buttons` | 按键（GPIO41） | [`buttons`](/zh/plugins/vm-buttons) |
+| `infrared` | 红外发射器（GPIO4） | [`infrared`](/zh/plugins/vm-infrared) |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g1` | `GPIO1` |
+| `grove-g2` | `GPIO2` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g1", "up")
+print(pin:read())
+```

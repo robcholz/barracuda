@@ -1,0 +1,38 @@
+id: scd4x-sen5x-environment-sensor
+api-version: 1
+peripheral: environment-sensor
+implementation:
+  package: barracuda-scd4x-sen5x-environment-sensor
+  crate: barracuda_scd4x_sen5x_environment_sensor
+  factory: "::{{crate}}::Scd4xSen5xEnvironmentSensorImplementation<{{binding.i2c.type}}, {{binding.power-enable.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Scd4xSen5xBindings::new({{binding.i2c.value}}, {{binding.power-enable.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Scd4xSen5xConfig::new({{parameter.scd4x-address}}, {{parameter.sen5x-address}}, {{parameter.power-active-level}})"
+# A Sensirion SCD40 or SCD41 (CO2, temperature, humidity) and a SEN50,
+# SEN54, or SEN55 (particulate matter and, by variant, temperature,
+# humidity, VOC and NOx indices) on one I2C bus, presented as one device.
+bindings:
+  i2c:
+    kind: i2c-device
+  # The sensors' supply switch, when a GPIO controls it.
+  power-enable:
+    kind: digital-output
+    required: false
+    initial-from:
+      parameter: power-active-level
+      values: { high: low, low: high }
+parameters:
+  # The SCD4x's fixed address 62h.
+  scd4x-address:
+    type: integer
+    default: 98
+  # The SEN5x's fixed address 69h.
+  sen5x-address:
+    type: integer
+    default: 105
+  power-active-level:
+    type: enum
+    values: [high, low]
+    rust-values:
+      high: "true"
+      low: "false"
+    default: high

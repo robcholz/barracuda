@@ -6,6 +6,7 @@ description = "Revision-aware MIPI DSI display implementation for the M5Stack Ta
 license = "AGPL-3.0-only"
 
 [dependencies]
+barracuda-board-hal.workspace = true
 barracuda-driver-gt911.workspace = true
 barracuda-driver-ili9881c.workspace = true
 barracuda-driver-pi4ioe5v6408.workspace = true

@@ -1,7 +1,41 @@
 name: m5stack-atom-psram
+profile: connected
 hardware:
   chip: esp32
+  # ESP32-PICO-V3-02.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: quad-spi
+    size-bytes: 2097152
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    spi-output:
+      rgb-led-data:
+        # SK6812 on GPIO27 (M5Unified `_pin_table_other0` (RGBLED), board_M5AtomPsram).
+        data: GPIO27
+        frequency-hz: 2400000
+  devices:
+    # The RGB LED under the button, one LED, GRB order.
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
+    # The button under the front, GPIO39, active low with the Board's pull-up
+    # (M5Unified `M5Unified::update`); GPIO39 has no internal bias.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO39
+exposed-io:
+  pins:
+    # Grove port G26/G32 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g26: { pin: GPIO26 }
+    grove-g32: { pin: GPIO32 }

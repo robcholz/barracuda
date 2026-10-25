@@ -26,4 +26,46 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-powerhub/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `buttons` | 按键 A（GPIO11）和按键 B（电源协处理器） | [`buttons`](/zh/plugins/vm-buttons) |
+| `can` | CAN 总线（TWAI，SIT1044 收发器，TX GPIO39，RX GPIO40） | [`can`](/zh/plugins/vm-can) |
+| `led-strip` | 8 个 RGB LED（WS2812C，电源协处理器） | [`light`](/zh/plugins/vm-led-strip) |
+| `power-monitor` | 电池电压和电流（电源协处理器） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `real-time-clock` | 实时时钟（RX8130CE，电源协处理器） | — |
+
+内部 I2C 总线（SDA `GPIO45`，SCL `GPIO48`，100 kHz）上 `50h` 的 STM32G031 电源协处理器转发实时时钟、电池监测、LED 和按键 B，这些器件位于它自己的总线上。每个设备只访问协处理器中属于自己的寄存器，用法与 M5Unified 相同；M5Stack 没有公开寄存器表。电池读数来自 PowerHub Kit 的 2S 电池组；没有电池组时，监测器报告没有电池。
+
+协处理器的端口电源开关（USB、Port A、Port C、RS485/CAN）、各端口的电压和电流读数，以及它背后的六个 INA226 监测器都没有声明。
+
+在脚本按总线的位速率启动之前，CAN 控制器不会接入总线。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO16` |
+| `port-a-sda` | `GPIO15` |
+| `port-c-g1` | `GPIO1` |
+| `port-c-g2` | `GPIO2` |
+| `header-g4` | `GPIO4` |
+| `header-g5` | `GPIO5` |
+| `header-g6` | `GPIO6` |
+| `header-g7` | `GPIO7` |
+| `header-g41` | `GPIO41` |
+| `header-g42` | `GPIO42` |
+| `header-g43` | `GPIO43` |
+| `header-g44` | `GPIO44` |
+| `rs485-tx` | `GPIO8` |
+| `rs485-rx` | `GPIO17` |
+| `rs485-dir` | `GPIO18` |
+
+`header-*` 引脚位于 EXT 2.54-16P 排针上。`rs485-tx`、`rs485-rx` 和 `rs485-dir` 是板载 RS485 收发器的 UART 和方向引脚。把它们作为一个 RS485 接口打开，以 `rs485-dir` 作为驱动使能引脚，端口就只在写入时驱动总线：`uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")`。
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

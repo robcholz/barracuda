@@ -1,7 +1,69 @@
 name: m5stack-atom-s3r-ext
 hardware:
   chip: esp32s3
+  # ESP32-S3-PICO-1-N8R8.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified internal bus of the AtomS3R family: SCL G0, SDA G45.
+        peripheral: I2C0
+        scl: GPIO0
+        sda: GPIO45
+        frequency-hz: 400000
+    rmt-output:
+      ir-transmit:
+        # IR LED driver `IR_LED_DRV` on GPIO47 (docs.m5stack.com AtomS3R,
+        # AtomS3R-CAM, and AtomS3R-Ext pin maps, "BMI270 & IR": the block's
+        # other pins are the BMI270 bus G0/G45 and the button G41 in
+        # M5Unified).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO47
+  devices:
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 68h (M5Stack pin map).
+        address: 104
+        # M5Unified `IMU_Class::begin` (AtomS3R, -CAM, -Ext): the BMI270's X and Y
+        # swapped and the new Y inverted; the BMM150 at 10h on its auxiliary
+        # bus (`BMI270_Class::begin`), X and Z inverted, in the same Board axes.
+        axis-x: "+y"
+        axis-y: "-x"
+        magnetometer: bmm150
+        magnetometer-axis-x: "-x"
+        magnetometer-axis-z: "-z"
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+exposed-io:
+  pins:
+    # Grove (PORT.CUSTOM) G1/G2: M5Stack AtomS3R-Ext pin map.
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }
+    # 2.54 mm proto header, as printed (M5Stack AtomS3R-Ext pin map).
+    header-g3: { pin: GPIO3 }
+    header-g4: { pin: GPIO4 }
+    header-g9: { pin: GPIO9 }
+    header-g10: { pin: GPIO10 }
+    header-g11: { pin: GPIO11 }
+    header-g12: { pin: GPIO12 }
+    header-g13: { pin: GPIO13 }
+    header-g17: { pin: GPIO17 }
+    header-g21: { pin: GPIO21 }
+    header-g40: { pin: GPIO40 }
+    header-g42: { pin: GPIO42 }
+    header-g46: { pin: GPIO46 }
+    header-g48: { pin: GPIO48 }

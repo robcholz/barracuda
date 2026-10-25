@@ -1,10 +1,61 @@
 name: m5stack-unit-poep4
 hardware:
   chip: esp32p4
+  # ESP32-P4NRW32.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: hex
+    size-bytes: 33554432
+  # IP101GRI 10/100 PHY behind the PoE front end, on the EMAC's RMII pads.
+  # The PHY drives the 50 MHz reference clock into GPIO50. Pins: M5Stack's
+  # Unit PoE-P4 pin map; PHY address 1 and the external clock: M5Stack's
+  # Unit PoE-P4 Arduino Ethernet example.
+  ethernet:
+    phy:
+      model: ip101gri
+      address: 1
+      reset: GPIO51
+    rmii:
+      reference-clock:
+        source: external
+        input: GPIO50
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO14 (docs.m5stack.com Unit PoE-P4 (U213) pin map).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO14
+  devices:
+    # The button on GPIO45, active low with the Board's pull-up (M5Unified
+    # `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO45
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+exposed-io:
+  pins:
+    # Grove port G53/G54 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g53: { pin: GPIO53 }
+    grove-g54: { pin: GPIO54 }
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.

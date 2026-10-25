@@ -1,0 +1,28 @@
+id: stopwatch-co5300-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-stopwatch-co5300-display
+  crate: barracuda_stopwatch_co5300_display
+  factory: "::{{crate}}::StopWatchDisplayImplementation<{{binding.bus.type}}, {{binding.expander.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::StopWatchDisplayBindings::new({{binding.bus.value}}, {{binding.expander.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::StopWatchDisplayConfig::new({{parameter.expander-address}}, {{parameter.orientation}})"
+bindings:
+  bus:
+    kind: quad-spi-device
+  # The I2C bus of the M5IOE1 expander holding the panel reset and enables.
+  expander:
+    kind: i2c-device
+parameters:
+  expander-address:
+    type: integer
+    default: 79
+  orientation:
+    type: enum
+    values: [deg0, deg90, deg180, deg270]
+    rust-values:
+      deg0: "::barracuda_peripheral::display::DisplayOrientation::Deg0"
+      deg90: "::barracuda_peripheral::display::DisplayOrientation::Deg90"
+      deg180: "::barracuda_peripheral::display::DisplayOrientation::Deg180"
+      deg270: "::barracuda_peripheral::display::DisplayOrientation::Deg270"
+    default: deg0

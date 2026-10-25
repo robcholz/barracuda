@@ -69,10 +69,19 @@ peripherals:
         input-address: 64
     front-buttons:
       implementation: capacitive-touch-buttons
+      primary: true
       bindings:
         channels: front-buttons
       parameters:
         threshold-basis-points: 150
+    # BOOT on GPIO0, active low, with the pull-up Espressif's esp_boards
+    # `esp_vocat_1_2` enables.
+    boot-button:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO0
+      parameters:
+        pull: up
     green-status-led:
       implementation: indicator-led
       bindings:

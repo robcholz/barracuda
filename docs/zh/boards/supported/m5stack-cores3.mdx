@@ -11,7 +11,7 @@ M5Stack CoreS3 是 M5Stack 推出的 ESP32-S3 开发板。
 - 芯片：ESP32-S3
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32s3-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-cores3/partitions.csv`
 
 ## 构建和运行
@@ -26,4 +26,43 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-cores3/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `touch` | 触摸控制器（FT6336U） | — |
+| `inertial-measurement` | 运动传感器（BMI270，其辅助总线上带 BMM150 磁力计） | [`motion`](/zh/plugins/vm-imu) |
+| `environment-sensor` | 环境光和接近传感器（LTR-553ALS） | [`environment`](/zh/plugins/vm-environment-sensor) |
+| `real-time-clock` | 实时时钟（BM8563） | — |
+| `power-monitor` | 电量计（AXP2101） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `power-button` | 电源键（AXP2101） | [`buttons`](/zh/plugins/vm-buttons) |
+| `audio-codec` | 音频编解码器（AW88298 功放、ES7210 麦克风 ADC） | [`audio`](/zh/plugins/vm-audio) |
+| `camera` | 摄像头（GC0308，320x240 RGB565） | [`camera`](/zh/plugins/vm-camera) |
+
+触摸实现通过 `58h` 处 AW9523B 扩展芯片的 P0_0 释放控制器的复位，该扩展芯片本身不是设备。摄像头实现打开摄像头电源（AXP2101 的 ALDO3），并通过同一扩展芯片的 P1_0 释放传感器的复位。
+
+电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。
+
+AXP2101 不测量电池电流，所以 `measure` 报告电池电压，电流为零。
+
+microSD 卡槽没有声明：它的 MISO（GPIO35）同时是显示屏的 D/C 线，共享的 SPI 总线无法在两者之间切换。
+
+电源键通过 PMIC 读取：按键松开时 PMIC 锁存一次短按，按住达到长按时间时锁存一次长按；每次按下，按键在一次采样中读为按下。短按在事件中报告为单击，长按报告为长按。它只设置和清除 PMIC 中电源键自己的中断位。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO1` |
+| `port-a-sda` | `GPIO2` |
+| `port-b-g8` | `GPIO8` |
+| `port-b-g9` | `GPIO9` |
+| `port-c-g17` | `GPIO17` |
+| `port-c-g18` | `GPIO18` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

@@ -1,0 +1,45 @@
+---
+title: "Secure Element 插件"
+sidebarTitle: "Secure Element"
+description: "用 `secure_element` Lua 包在 Lua 中使用开发板安全芯片保管的密钥签名，并读取其序列号和随机数。"
+---
+
+基于开发板的安全芯片安装 `secure_element` Lua 包，默认使用主安全芯片。
+
+- 插件 ID：`secure-element`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `secure-element.devices`（`*`）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`secure_element`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件获取开发板上没有被其他插件占用的每个 `SecureElement`，主安全芯片排在最前，并安装 `secure_element` Lua 包。安全芯片保管的私钥从不离开芯片；脚本请求它签名、计算公钥，并读取它的出厂序列号和随机数发生器。
+
+Lua API：
+
+- `secure_element.list() -> { name, ... }`：各安全芯片在开发板上的名称，主安全芯片排在最前
+- `secure_element.available([name]) -> boolean`
+- `secure_element.serial_number([name]) -> binary string`：安全芯片出厂时唯一的序列号（ATECC608 为 9 字节）
+- `secure_element.random(length[, name]) -> binary string`：由芯片随机数发生器生成的 1 到 1024 个随机字节
+- `secure_element.public_key(slot[, name]) -> binary string`：`slot` 中私钥对应的 P-256 公钥，先 X 后 Y，各 32 字节，大端序
+- `secure_element.sign(slot, digest[, name]) -> binary string`：用 `slot` 中的私钥对 32 字节摘要（例如 SHA-256 哈希）生成的 P-256 ECDSA 签名，先 R 后 S，各 32 字节，大端序
+
+`name` 是 `list` 返回的开发板设备名；不给出时调用使用主安全芯片，所以为单个安全芯片写的脚本在有多个安全芯片的开发板上无需修改。只想指定安全芯片而不给出它前面的可选参数时，这些参数传 `nil`。
+
+哪些槽位保存私钥在芯片出厂配置时就已固定。Microchip Trust&GO ATECC608（TNGTLS），例如 M5Stack Core2 for AWS 上的芯片，把设备密钥保存在槽位 0。槽位中没有 P-256 私钥、摘要不是 32 字节，或在另一次调用运行期间调用，都会返回 `nil, error`。
+
+随机字节来自安全芯片，而不是开发板的熵源；本插件不会更改开发板的熵源。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2。没有安全芯片的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
+
+```lua
+local se = require("secure_element")
+local digest = string.rep("\0", 32) -- 实际使用时为 SHA-256 哈希
+local signature = se.sign(0, digest)
+```

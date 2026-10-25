@@ -1,7 +1,55 @@
 name: m5stack-atom-s3
+profile: screen
 hardware:
   chip: esp32s3
+  # ESP32-S3FN8.
+  flash-size: 8mb
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_ex_in` (AtomS3): SCL G39 / SDA G38.
+        peripheral: I2C1
+        scl: GPIO39
+        sda: GPIO38
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        # M5GFX `board_M5AtomS3`: SPI3, SCLK G17, MOSI G21 as the one
+        # bidirectional data line, CS G15, written at 40 MHz and probed at 8 MHz.
+        peripheral: SPI3
+        sck: GPIO17
+        mosi: GPIO21
+        three-wire: true
+        read-frequency-hz: 8000000
+        chip-select: GPIO15
+        frequency-hz: 40000000
+  devices:
+    display:
+      # GC9107 or ST7735S, identified from the panel's ID at start-up.
+      implementation: atom-s3-display
+      bindings:
+        spi: display-spi
+        dc: GPIO33
+        reset: GPIO34
+        # M5GFX drives the backlight with non-inverted PWM on G16.
+        backlight: GPIO16
+    # MPU6886 at 68h (M5Unified `IMU_Class::begin`).
+    inertial-measurement:
+      implementation: mpu6886-imu
+      bindings: { i2c: internal-i2c }
+    # The button under the screen, GPIO41, active low with the Board's pull-up
+    # (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO41
+exposed-io:
+  pins:
+    # Grove (PORT.CUSTOM) G1/G2: M5Stack AtomS3 pin map.
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }

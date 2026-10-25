@@ -10,7 +10,7 @@ The ESP32-S3-BOX-2 is an ESP32-S3 Board from Espressif.
 - Chip: ESP32-S3
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32s3-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen`](/boards/profiles)
 - Flash layout: `boards/configs/esp32s3-box-2/partitions.csv`
 
 ## Build and run
@@ -28,3 +28,5 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `audio-codec` | Audio codec (ES8389) | [`audio`](/plugins/vm-audio) |
+| `display` | Display (MIPI DBI, 8-bit parallel) | [`display`](/plugins/vm-display) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |

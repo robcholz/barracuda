@@ -18,26 +18,34 @@ profile 是分层的。每个 profile 在它所扩展的 profile 之上添加插
 | `lua` | `minimal` | VM 以及不需要网络的 Lua 包，其中包括开发板硬件对应的 Lua 包 | 否 | 是 |
 | `network` | `minimal` | Wi-Fi、Web 服务器、强制门户、HTTP、门户的文件管理器 | 是 | 否 |
 | `ai` | `network` | Agent、它的工具和消息网关 | 是 | 否 |
-| `headless` | `lua`、`ai` | 需要网络或 Agent 的 Lua 包 | 是 | 是 |
+| `connected` | `lua`、`network` | 需要网络但不需要 Agent 的 Lua 包：HTTP 和 Web 服务器 | 是 | 是 |
+| `headless` | `connected`、`ai` | 需要 Agent 的 Lua 包 | 是 | 是 |
 | `ui` | — | 带 System UI 的应用管理器、系统字体、Files 和 Workflows 应用 | 否 | 是 |
 | `screen-offline` | `lua`、`ui` | 无其他新增 | 否 | 是 |
-| `screen` | `headless`、`ui` | System UI 中的 Wi-Fi、Sessions 和 Settings 应用 | 是 | 是 |
+| `screen-connected` | `connected`、`ui` | System UI 中的 Wi-Fi、Settings 应用 | 是 | 是 |
+| `screen` | `headless`、`screen-connected` | Sessions 应用 | 是 | 是 |
 
 ```text
                  minimal
                 /       \
              lua         network
-              |  \          |
-              |   \         ai
-              |    \       /
-              |    headless          (the default)
-              |        \
-              |       screen = headless + ui + …
+              | \        /    |
+              |  connected    ai
+              |    |     \    |
+              |    |     headless               (the default)
+              |    |         |
+              |  screen-connected = connected + ui + …
+              |          \   |
+              |          screen = headless + screen-connected + …
               |
        screen-offline = lua + ui
 ```
 
-`ui` 是一个层，而不是一个产品：它没有用于硬件的 Lua 包，也无法联网。带屏幕的开发板应指定 `screen` 或 `screen-offline`。
+不带 Wi-Fi 的配置也不构建无线电：取走平台无线电的是 `wifi` 插件，所以没有它时，ESP 固件不链接 Wi-Fi 驱动、无线电固件和网络任务，IP 协议栈也没有链路。
+
+`ui` 是一个层，而不是一个产品：它没有用于硬件的 Lua 包，也无法联网。带屏幕的开发板应指定 `screen`、`screen-connected` 或 `screen-offline`。
+
+`connected` 和 `screen-connected` 就是去掉 Agent 的 `headless` 和 `screen`：可以联网，Lua 脚本可以发出和处理 HTTP 请求，但没有 Agent、它的工具、消息网关和 Sessions 应用。它们用于 Flash 装不下 Agent 的开发板。名字说明了它们与 `lua` 和 `screen-offline` 的区别：设备会联网。
 
 `screen-offline` 没有 Settings 和 Sessions 应用：Settings 依赖 Wi-Fi，Sessions 依赖 Agent。音量和亮度在控制中心里调节。
 
@@ -52,9 +60,24 @@ plugins:
     enabled: false
 ```
 
-- 带屏幕的产品指定 `screen`；如果从不联网，就指定 `screen-offline`。
-- 不带屏幕的产品不指定，构建 `headless`，或者选择更窄的层：`minimal`、`lua`、`network` 或 `ai`。
+- 带屏幕的产品指定 `screen`；Flash 装不下 Agent 时指定 `screen-connected`；如果从不联网，就指定 `screen-offline`。
+- 不带屏幕的产品不指定，构建 `headless`，或者选择更窄的层：Flash 装不下 Agent 时选 `connected`，或者 `minimal`、`lua`、`network`、`ai`。
 - 只多一个或少一个插件时，在开发板的 `plugins.<id>.enabled` 中设置，而不是新建 profile。
+
+## 装进 Flash
+
+固件必须装进开发板的应用槽位（参见[开发板](/zh/boards/overview)中的 ESP Flash 布局）：4 MiB Flash 上是 2816 KiB。在 ESP32 上，它还必须装进芯片为代码映射的 3 MiB 加 192 KiB。`headless` 的 release 构建在 ESP32-C3、ESP32-C6 和 ESP32-S3 上约为 4 MiB，`screen` 在 ESP32-S3 上约为 5 MiB；在 ESP32 上，`headless` 会超出代码窗口。在 ESP32 上，`connected` 约为 2.3 MiB，`screen-connected` 约为 3.1 MiB，超过了 4 MiB 开发板的槽位，所以带屏幕的 4 MiB ESP32 开发板构建 `screen-offline`。STM32U5A5 从 2.5 MiB 的 flash 区域运行，`headless` 会超出约 227 KiB。因此各开发板构建：
+
+| 芯片 | Flash | 不带屏幕 | 带屏幕 |
+| --- | --- | --- | --- |
+| ESP32 | 4 MiB | `connected` | `screen-offline` |
+| ESP32 | 8 MiB、16 MiB | `connected` | `screen-connected` |
+| ESP32-C3 | 4 MiB | `connected` | — |
+| ESP32-C6 | 4 MiB | `connected` | — |
+| ESP32-C6 | 8 MiB、16 MiB | `headless` | `screen` |
+| ESP32-S3 | 8 MiB、16 MiB | `headless` | `screen` |
+| ESP32-P4 | 16 MiB | `headless` | `screen` |
+| STM32U5A5 | 4 MiB | `connected` | — |
 
 ## 添加 profile
 

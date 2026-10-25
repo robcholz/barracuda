@@ -34,7 +34,7 @@ fn workspace() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     let root_path = root.path();
     for (kind, id) in [
-        ("display", "gdeh0154d67-display"),
+        ("display", "epaper-1in54-display"),
         ("touch", "cst816t-touch"),
     ] {
         let source = Path::new(REPOSITORY)
@@ -107,8 +107,8 @@ fn claims(selection: &Selection, id: &str) -> Vec<(String, String, Filled)> {
 }
 
 const ONE_DISPLAY: &str =
-    "peripherals:\n  devices:\n    panel:\n      implementation: gdeh0154d67-display\n";
-const THREE_DISPLAYS: &str = "peripherals:\n  devices:\n    front:\n      implementation: gdeh0154d67-display\n      primary: true\n    back-eink:\n      implementation: gdeh0154d67-display\n    status:\n      implementation: gdeh0154d67-display\n";
+    "peripherals:\n  devices:\n    panel:\n      implementation: epaper-1in54-display\n";
+const THREE_DISPLAYS: &str = "peripherals:\n  devices:\n    front:\n      implementation: epaper-1in54-display\n      primary: true\n    back-eink:\n      implementation: epaper-1in54-display\n    status:\n      implementation: epaper-1in54-display\n";
 
 #[test]
 fn boards_without_a_profile_use_base() {
@@ -260,6 +260,20 @@ fn the_system_ui_takes_the_primary_screen_and_lua_the_rest() {
             Filled::Many(vec![device("panel", 0)])
         )]
     );
+    let selection = run(
+        root.path(),
+        &format!("{THREE_DISPLAYS}plugins:\n  display:\n    enabled: true\n"),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        claims(&selection, "display")[0].2,
+        Filled::Many(vec![
+            device("front", 1),
+            device("back-eink", 0),
+            device("status", 2)
+        ])
+    );
 }
 
 #[test]
@@ -275,9 +289,10 @@ fn wiring_overrides_defaults_and_is_checked() {
         claims(&selection, "ui")[0].2,
         Filled::One(Some(device("status", 2)))
     );
+    // The primary display comes first in the rest.
     assert_eq!(
         claims(&selection, "display")[0].2,
-        Filled::Many(vec![device("back-eink", 0), device("front", 1)])
+        Filled::Many(vec![device("front", 1), device("back-eink", 0)])
     );
 
     for (wiring, expected) in [

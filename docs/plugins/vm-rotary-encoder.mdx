@@ -1,0 +1,51 @@
+---
+title: "Rotary Encoder Plugin"
+sidebarTitle: "Rotary Encoder"
+description: "Read how far the Board's knob has turned in Lua with the `encoder` package."
+---
+
+Installs the `encoder` Lua package over the Board's rotary encoders, the
+primary one by default.
+
+- Plugin ID: `rotary-encoder`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `rotary-encoder.devices` (`*`)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `encoder`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes every `RotaryEncoder` of the Board that no other Plugin claims,
+the primary one first, and installs the `encoder` Lua package. The Platform's pulse counter counts
+the encoder's edges in hardware, so turns between reads are not lost.
+
+Lua API:
+
+- `encoder.list() -> { name, ... }`: the Board names of the rotary encoders, the
+  primary one first
+- `encoder.available([name]) -> boolean`: whether the named rotary encoder, or
+  the primary one, can be opened
+- `encoder.open([name]) -> handle`: opens the named rotary encoder, or the
+  primary one
+- `handle:position() -> edges`, signed, since start or the last reset
+- `handle:delta() -> edges` turned since the previous `delta`
+- `handle:reset()` makes the current position zero
+- `handle:is_open() -> boolean`
+- `handle:close()`
+
+Positions count quadrature edges, four per full cycle of the encoder's two
+signals. A push on the knob is a button of the Board's `buttons`
+peripheral, not part of this package.
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2.
+
+Boards without a rotary encoder report unavailable. The move-only built-in
+capability permits one handle per device and boot; explicit close, lexical `<close>`,
+collection, and Plugin revocation prevent further operations. The Plugin
+owns no long-running tasks.

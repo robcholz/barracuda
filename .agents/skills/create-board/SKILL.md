@@ -59,9 +59,10 @@ plugins:
   selected Platform must list each category in its `hal.bindings`.
 - Each `peripherals.devices` entry names an `implementation` that exists under
   `peripherals/impl/<kind>/<implementation-id>/peripheral.yml` and fills that
-  manifest's bindings and parameters. A Board may have several displays;
-  every other kind has at most one device. With several devices of a kind,
-  mark exactly one `primary: true`.
+  manifest's bindings and parameters. A Board may have several devices of
+  any kind except `removable-storage`; with several devices of a kind, mark
+  exactly one `primary: true`, the product's main one. A device that fails
+  to initialize at boot is logged and the Board starts without it.
 - `exposed-io.pins` names only the pins applications may claim at runtime,
   each once, by a stable name printed on the product (`port-a-sda`,
   `expansion-1`). A pin used by a peripheral is never also exposed.
@@ -74,10 +75,16 @@ plugins:
 
 ## 3. Add the native layout
 
-Copy the layout of a Board on the same chip and fit it to this Board's
-flash: `partitions.csv` (ESP-IDF, including both OTA slots) on ESP chips,
-`memory.x` on STM32, `file-layout.yml` on host Boards. The native file is the
-only layout source; never add a converter or a second table.
+Copy the layout of a Board on the same chip and flash size:
+`partitions.csv` (ESP-IDF) on ESP chips, `memory.x` on STM32,
+`file-layout.yml` on host Boards. The native file is the only layout source;
+never add a converter or a second table.
+
+An ESP table has `ota_0` alone on 4 MiB and 8 MiB of flash and `ota_0` plus
+`ota_1` on 16 MiB, never a `factory` app
+([ESP flash layout](../../../docs/boards/overview.mdx#esp-flash-layout)).
+Then pick a profile whose firmware fits the slot
+([Fitting the flash](../../../docs/boards/profiles.mdx#fitting-the-flash)).
 
 ## 4. Add missing hardware support
 

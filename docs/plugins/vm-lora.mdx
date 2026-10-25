@@ -1,0 +1,68 @@
+---
+title: "LoRa Plugin"
+sidebarTitle: "LoRa"
+description: "Send and receive LoRa packets from Lua with the `lora` package."
+---
+
+Installs the `lora` Lua package over the Board's LoRa radios, the primary one
+by default.
+
+- Plugin ID: `lora`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `lora.devices` (`*`)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `lora`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes every `Lora` radio of the Board that no other Plugin claims,
+the primary one first, and installs the `lora` Lua package. It consumes the semantic peripheral and never
+reaches the transceiver, its SPI device, or the expander behind it.
+
+Lua API:
+
+- `lora.list() -> { name, ... }`: the Board names of the radios, the primary
+  one first
+- `lora.available([name]) -> boolean`
+- `lora.limits([name]) -> table` returns `\{min_frequency_hz, max_frequency_hz,
+  min_power_dbm, max_power_dbm\}`, the band the Board's RF front end passes
+  and the radio's power range
+- `lora.configure(settings[, name]) -> true` applies `\{frequency_hz = ...,
+  spreading_factor = 8, bandwidth_hz = 250000, coding_rate = 8,
+  power_dbm = 10, preamble = 12, sync_word = 0x12, crc = true\}`; only
+  `frequency_hz` is required, the rest default to the values shown (M5Stack
+  UIFlow's). `bandwidth_hz` is a LoRa bandwidth from 7800 to 500000 and
+  `coding_rate` is 5 through 8 for 4/5 to 4/8
+- `lora.send(bytes[, name]) -> true` sends one packet of 1 to 255 bytes and returns
+  once it has been sent
+- `lora.receive([timeout_ms[, name]]) -> bytes, rssi_dbm, snr_db` waits for one
+  packet with a valid header and CRC; after `timeout_ms` it returns
+  `nil, "timeout"`
+
+`name` is a Board device name from `list`; without it a call uses the primary
+radio, so a script written for one radio runs unchanged on a Board with
+several. To name a radio without the optional values before it, pass `nil` for
+them.
+
+Configure each radio before its first `send` or `receive`; every node of a
+network uses the same settings, and the frequency must be one the local
+regulations allow. A setting out of range, an unknown name, or a call
+while another is running on the same radio returns `nil, error`. Cancelling a `receive` leaves the radio
+listening until the next call.
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2. Boards without a LoRa radio still
+install the package; `available` returns false and every other call returns
+`nil, error`. Plugin revocation prevents every further call.
+
+```lua
+local lora = require("lora")
+lora.configure({ frequency_hz = 868100000, spreading_factor = 9, bandwidth_hz = 125000 })
+lora.send("hello")
+local data, rssi, snr = lora.receive(5000)
+```

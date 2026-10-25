@@ -1,0 +1,39 @@
+id: it8951-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-it8951-display
+  crate: barracuda_it8951_display
+  factory: "::{{crate}}::It8951DisplayImplementation<{{binding.spi.type}}, {{binding.ready.type}}, {{binding.panel-power.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::It8951Bindings::new({{binding.spi.value}}, {{binding.ready.value}}, {{binding.panel-power.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::It8951DisplayConfig::new({{parameter.width}}, {{parameter.height}}, {{parameter.mounting}})"
+bindings:
+  # Full-duplex: the controller answers device-information and status reads.
+  spi:
+    kind: spi-device
+  # HRDY: high when the host interface accepts the next packet.
+  ready:
+    kind: digital-input
+  # Supply of the controller and panel; cycling it resets the controller.
+  panel-power:
+    kind: digital-output
+    initial: low
+parameters:
+  # Native panel geometry in the controller's scan direction.
+  width:
+    type: integer
+    required: true
+  height:
+    type: integer
+    required: true
+  # Clockwise turn from the panel's scan direction to the Board's upright
+  # view (M5GFX `offset_rotation`).
+  mounting:
+    type: enum
+    values: [deg0, deg90, deg180, deg270]
+    rust-values:
+      deg0: "::barracuda_peripheral::display::DisplayOrientation::Deg0"
+      deg90: "::barracuda_peripheral::display::DisplayOrientation::Deg90"
+      deg180: "::barracuda_peripheral::display::DisplayOrientation::Deg180"
+      deg270: "::barracuda_peripheral::display::DisplayOrientation::Deg270"
+    default: deg0

@@ -1,0 +1,34 @@
+id: ina3221-power-monitor
+api-version: 1
+peripheral: power-monitor
+implementation:
+  package: barracuda-ina3221-power-monitor
+  crate: barracuda_ina3221_power_monitor
+  factory: "::{{crate}}::Ina3221PowerMonitorImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::Ina3221Bindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::Ina3221Config::new({{parameter.address}}, {{parameter.channel}}, {{parameter.shunt-micro-ohms}})"
+# One channel of a TI INA3221 three-channel shunt and bus voltage monitor.
+# A Board declares one device per channel it uses; the devices of one chip
+# share it by reading only their own channel's registers, and none writes
+# the chip, which keeps its power-on configuration (all channels,
+# continuous conversion), as M5Unified `INA3221_Class` does.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 40h: A0 tied to GND.
+    default: 64
+  # The INA3221 channel, CH1 to CH3 as the datasheet numbers them.
+  channel:
+    type: enum
+    values: [ch1, ch2, ch3]
+    rust-values:
+      ch1: "0"
+      ch2: "1"
+      ch3: "2"
+    required: true
+  shunt-micro-ohms:
+    type: integer
+    required: true

@@ -1,7 +1,134 @@
 name: m5stack-paper-color
+profile: screen
 hardware:
   chip: esp32s3
+  # ESP32-S3R8 with 16 MB flash.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2s-stream:
+      audio-stream:
+        # ES8311 speaker DAC and ES7210 microphone ADC: MCLK G42, BCLK G40,
+        # WS G41, DOUT G38, DIN G39 (M5Unified PaperColor speaker and microphone
+        # configuration). DOUT and DIN are named from the ESP32-S3's side.
+        peripheral: I2S0
+        dma: DMA_CH0
+        bclk: GPIO40
+        ws: GPIO41
+        dout: GPIO38
+        din: GPIO39
+        mclk: GPIO42
+        sample-rate-hz: 48000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+    i2c-device:
+      internal:
+        # M5GFX board_M5PaperColor / M5Unified internal I2C: M5PM1 (0x6E),
+        # RX8130 RTC (0x32), SHT40 (0x44). M5GFX talks to the M5PM1 at 100 kHz.
+        peripheral: I2C0
+        scl: GPIO2
+        sda: GPIO3
+        frequency-hz: 100000
+    spi-device:
+      epd-spi:
+        # M5GFX board_M5PaperColor: ED2208 on SPI2 at 4 MHz. The microSD card
+        # shares SCK and MOSI (MISO GPIO14, chip-select GPIO47).
+        peripheral: SPI2
+        sck: GPIO15
+        mosi: GPIO13
+        miso: GPIO14
+        chip-select: GPIO44
+        frequency-hz: 4000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5PaperColor). The card's supply,
+        # M5PM1 G3, is switched on by the display with the panel's.
+        peripheral: SPI2
+        sck: GPIO15
+        mosi: GPIO13
+        miso: GPIO14
+        chip-select: GPIO47
+        frequency-hz: 20000000
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO48 (docs.m5stack.com PaperColor pin map).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO48
+  devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    display:
+      implementation: paper-color-display
+      bindings:
+        spi: epd-spi
+        dc: GPIO43
+        busy: GPIO11
+        # M5GFX pulses GPIO12 as the panel reset (`_pin_reset(GPIO_NUM_12)`).
+        reset: GPIO12
+        i2c: internal
+    # The battery behind the M5PM1 at 6Eh the display also uses; M5Unified
+    # reads no charge status on this Board.
+    power-monitor:
+      implementation: m5pm1-power-monitor
+      bindings: { i2c: internal }
+    # The power key on the M5PM1's PWR_BTN, M5Unified `BtnPWR`: the power
+    # button (ON/OFF/RESET/BOOT): a press powers on or restarts, two presses
+    # power off (M5Stack PaperColor docs). The M5PM1's factory click reset is
+    # kept.
+    power-button:
+      implementation: m5pm1-buttons
+      bindings: { i2c: internal }
+    # Buttons A, B, C on GPIO10, GPIO9, GPIO1, active low with the Board's
+    # pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      primary: true
+      bindings:
+        button-1: GPIO10
+        button-2: GPIO9
+        button-3: GPIO1
+    audio-codec:
+      # ES8311 at 18h and ES7210 at 40h on the internal bus; codec power G45 and
+      # speaker amplifier G46, both active high (M5Unified
+      # `_speaker_enabled_cb_papercolor`, `_microphone_enabled_cb_papercolor`).
+      implementation: es8311-es7210-audio-codec
+      bindings:
+        control: internal
+        stream: audio-stream
+        codec-power-enable: GPIO45
+        amplifier-enable: GPIO46
+      parameters:
+        output-address: 24
+        input-address: 64
+    # SHT40 at 44h on the internal bus, SYS_SDA G3 / SYS_SCL G2 (M5Stack
+    # PaperColor pin map).
+    environment-sensor:
+      implementation: sht4x-environment-sensor
+      bindings: { i2c: internal }
+      parameters:
+        address: 68
+    real-time-clock:
+      implementation: rx8130ce-rtc
+      bindings: { i2c: internal }
+      parameters:
+        # RX8130CE at 32h (M5Unified RTC_Class; M5Stack PaperColor pin map).
+        address: 50
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA).
+    port-a-scl: { pin: GPIO5 }
+    port-a-sda: { pin: GPIO4 }

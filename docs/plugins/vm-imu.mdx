@@ -4,12 +4,13 @@ sidebarTitle: "IMU"
 description: "Read the Board's motion sensor from Lua with the `motion` package."
 ---
 
-Installs the `motion` Lua package over the Board's primary IMU.
+Installs the `motion` Lua package over the Board's IMUs, the
+primary one by default.
 
 - Plugin ID: `imu`
 - Dependencies: `vm`
 - Settings: none
-- Context resources: peripheral slot `inertial-measurement.device` (`primary`, optional)
+- Context resources: peripheral slot `inertial-measurement.devices` (`*`)
 - Provided capabilities: none
 - Required capabilities: `LuaPackageRegistry` from `vm`
 - Workflow: none
@@ -19,24 +20,34 @@ Installs the `motion` Lua package over the Board's primary IMU.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary `Imu` capability exactly once
-and installs the `motion` Lua package. I2C ownership, chip initialization, integer
+This Plugin takes every `Imu` of the Board that no other Plugin claims,
+the primary one first, and installs the `motion` Lua package. I2C ownership, chip initialization, integer
 unit conversion, and Board-relative axis mapping remain owned by the selected
 implementation and generated Board HAL.
 
 Lua API:
 
-- `motion.available() -> boolean`
-- `motion.open() -> handle`
-- `handle:descriptor() -> accelerometer_rate_hz, gyroscope_rate_hz, accelerometer_range_mg, gyroscope_range_mdps, has_temperature`
-- `handle:read() -> acceleration_x_mg, acceleration_y_mg, acceleration_z_mg, angular_velocity_x_mdps, angular_velocity_y_mdps, angular_velocity_z_mdps, temperature_mc`
+- `motion.list() -> { name, ... }`: the Board names of the IMUs, the
+  primary one first
+- `motion.available([name]) -> boolean`: whether the named IMU, or
+  the primary one, can be opened
+- `motion.open([name]) -> handle`: opens the named IMU, or the
+  primary one
+- `handle:descriptor() -> accelerometer_rate_hz, gyroscope_rate_hz, accelerometer_range_mg, gyroscope_range_mdps, has_temperature, magnetometer_rate_hz`
+- `handle:read() -> acceleration_x_mg, acceleration_y_mg, acceleration_z_mg, angular_velocity_x_mdps, angular_velocity_y_mdps, angular_velocity_z_mdps, temperature_mc, magnetic_field_x_nt, magnetic_field_y_nt, magnetic_field_z_nt`
+
+On a Board whose IMU has a magnetometer, such as the BMM150 that M5Stack
+fits beside the BMI270 or MPU6886, `magnetometer_rate_hz` is its rate and each
+read adds the magnetic field in nanotesla, in the same Board axes as the
+acceleration. Without one, and for a sample in which the field saturated the
+magnetometer, those values are `nil`.
 - `handle:is_open() -> boolean`
 - `handle:close()`
 
 While the Board has the device, the package declares a stable interface
-(`PackageInterface::Stable`), version 1.
+(`PackageInterface::Stable`), version 3.
 
 Boards without an IMU report unavailable. The move-only built-in capability
-permits one handle per boot; explicit close, lexical `<close>`, collection, and
+permits one handle per device and boot; explicit close, lexical `<close>`, collection, and
 Plugin revocation prevent further operations. The Plugin performs no
 background sampling and owns no long-running tasks.

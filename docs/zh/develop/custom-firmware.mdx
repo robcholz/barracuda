@@ -14,7 +14,7 @@ description: "通过选择、精简和添加插件，让固件适配特定芯片
     从 `boards/configs/` 下使用同款芯片的开发板入手，或者添加一个新的。参见[开发板](/zh/boards/overview)；如果是新的芯片系列，参见[平台架构](/zh/architecture/platform-architecture)。
   </Step>
   <Step title="选择最窄的 profile">
-    选择能覆盖任务的最小 [profile](/zh/boards/profiles)：`minimal`、`lua`、`network`、`ai`、`headless`、`screen-offline` 或 `screen`。如果产品需要自己的层，就在 `boards/profiles/` 下添加一个 profile。
+    选择能覆盖任务的最小 [profile](/zh/boards/profiles)：`minimal`、`lua`、`network`、`ai`、`connected`、`headless`、`screen-offline`、`screen-connected` 或 `screen`。如果产品需要自己的层，就在 `boards/profiles/` 下添加一个 profile。
   </Step>
   <Step title="精简和添加单个插件">
     在开发板的 `board.yml` 中用 `plugins.<id>.enabled` 开启或关闭单个插件。未启用的插件根本不会进入固件。缺少的插件用 [create-plugin](/zh/develop/write-a-plugin) 编写。

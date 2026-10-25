@@ -1,7 +1,160 @@
 name: m5stack-stamp-plc
+profile: screen
 hardware:
   chip: esp32s3
+  # Stamp-S3A (ESP32-S3FN8).
+  flash-size: 8mb
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified internal bus: SCL G15, SDA G13.
+        peripheral: I2C0
+        scl: GPIO15
+        sda: GPIO13
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        # M5GFX `board_M5StampPLC`: SCLK G7, MOSI G8, CS G12 at 40 MHz. The
+        # bus's MISO (G9) belongs to the microSD slot, which is not declared.
+        peripheral: SPI2
+        sck: GPIO7
+        mosi: GPIO8
+        # The microSD card's data out; the LCD only listens.
+        miso: GPIO9
+        chip-select: GPIO12
+        frequency-hz: 40000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5StampPLC): the microSD card
+        # shares the LCD's bus with its own chip select, GPIO10.
+        peripheral: SPI2
+        sck: GPIO7
+        mosi: GPIO8
+        miso: GPIO9
+        chip-select: GPIO10
+        frequency-hz: 20000000
+    rmt-output:
+      rgb-led-data:
+        # The Stamp-S3A module's WS2812 on GPIO21 (M5Unified
+        # `_pin_table_other0` (RGBLED), board_M5StampPLC).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO21
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO44 (M5Unified `_begin_audio` board_M5StampPLC:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO44
+    twai:
+      can-bus:
+        # SIT1044 CAN transceiver: TX G42, RX G43 (M5StamPLC `pin_config.h`
+        # STAMPLC_PIN_CAN_TX/RX; StamPLC IO schematic G42_CAN_TX, G43_CAN_RX).
+        peripheral: TWAI0
+        tx: GPIO42
+        rx: GPIO43
+  devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    display:
+      # 1.14-inch ST7789V2; M5GFX `Light_M5StackStampPLC` switches its
+      # backlight with PI4IOE5V6408 (0x43) output 7, lit while low.
+      implementation: mipi-dbi-pi4ioe5v6408-display
+      bindings:
+        spi: display-spi
+        dc: GPIO6
+        reset: GPIO3
+        expander: internal-i2c
+      parameters:
+        controller: st7789
+        width: 135
+        height: 240
+        offset-x: 52
+        offset-y: 40
+        invert-colors: true
+        orientation: deg90
+        expander-address: 67
+        backlight-pin: 7
+        backlight-active-high: false
+    # Buttons A, B, C on P2, P1, P0 of the PI4IOE5V6408 at 43h the
+    # display's backlight also uses, active low with the expander's
+    # pull-ups (M5Unified `M5Unified::begin` and `update`).
+    buttons:
+      implementation: pi4ioe5v6408-buttons
+      bindings: { i2c: internal-i2c }
+      parameters: { button-1: p2, button-2: p1, button-3: p0 }
+    power-monitor:
+      implementation: ina226-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # INA226 at 40h across a 10 mOhm shunt (M5Unified Power_Class, StampPLC:
+        # `shunt_res = 0.01f`, ESP32-S3 `Ina226 = { 0x40 }`).
+        address: 64
+        shunt-micro-ohms: 10000
+    # LM75B at 48h on the internal bus, SCL G15 / SDA G13 (M5Stack StamPLC
+    # sensor pin map: "LM75BDP (0x48)").
+    environment-sensor:
+      implementation: lm75b-environment-sensor
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 72
+    real-time-clock:
+      implementation: rx8130ce-rtc
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # RX8130CE at 32h (M5Unified RTC_Class; M5Stack StamPLC pin map).
+        address: 50
+    # The Stamp-S3A's RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: rgb-led-data
+        # The Stamp-S3A switches the LED supply on with GPIO38 high
+        # (docs.m5stack.com StamPLC).
+        power-enable: GPIO38
+      parameters:
+        led-count: 1
+        color-order: grb
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
+    can:
+      implementation: twai-can
+      bindings: { controller: can-bus }
+    # Relays 1-4 on P0_0-P0_3 and isolated inputs 1-8 on P0_4-P0_7 and
+    # P1_4-P1_7 of the AW9523B at 59h (M5StamPLC `_out_pin_list`,
+    # `_in_pin_list`, and its AW9523 driver's default address; docs.m5stack.com
+    # StamPLC pin map). A relay driver turns a high output into a closed
+    # relay, and each EL3H4 optocoupler pulls its input high while energized
+    # (StamPLC IO schematic). The AW9523B's reset is G3_PHY_RST, the LCD's
+    # reset line, so the device's name sorts after `display` and it is set
+    # up after the display's reset pulse.
+    plc-io:
+      implementation: aw9523-digital-io
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 89
+        # P0_0-P0_3 (0x000f) and P0_4-P0_7 with P1_4-P1_7 (0xf0f0).
+        output-pins: 15
+        input-pins: 61680
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Port C: M5Stack
+    # StamPLC pin map.
+    port-a-scl: { pin: GPIO1 }
+    port-a-sda: { pin: GPIO2 }
+    port-c-g4: { pin: GPIO4 }
+    port-c-g5: { pin: GPIO5 }
+    # RS485 transceiver TX, RX, and direction (M5Stack StamPLC pin map).
+    rs485-tx: { pin: GPIO0 }
+    rs485-rx: { pin: GPIO39 }
+    rs485-dir: { pin: GPIO46 }

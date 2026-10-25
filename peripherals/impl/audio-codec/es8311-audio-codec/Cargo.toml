@@ -8,6 +8,8 @@ license = "AGPL-3.0-only"
 [dependencies]
 portable-atomic.workspace = true
 barracuda-driver-es8311.workspace = true
+barracuda-driver-m5ioe1.workspace = true
+barracuda-driver-m5pm1.workspace = true
 barracuda-peripheral.workspace = true
 embedded-hal.workspace = true
 

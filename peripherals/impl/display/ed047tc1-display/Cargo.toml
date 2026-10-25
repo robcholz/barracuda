@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-ed047tc1-display"
+version = "0.1.0"
+edition = "2024"
+description = "Buffered 16-level implementation for Barracuda of a directly driven ED047TC1 4.7-inch 960 x 540 e-paper panel over an 8-bit parallel output"
+license = "AGPL-3.0-only"
+
+[dependencies]
+barracuda-driver-ed047tc1.workspace = true
+barracuda-peripheral.workspace = true
+embedded-graphics-core.workspace = true
+embedded-hal.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

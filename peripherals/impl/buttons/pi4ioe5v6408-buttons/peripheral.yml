@@ -1,0 +1,162 @@
+id: pi4ioe5v6408-buttons
+api-version: 1
+peripheral: buttons
+implementation:
+  package: barracuda-pi4ioe5v6408-buttons
+  crate: barracuda_pi4ioe5v6408_buttons
+  factory: "::{{crate}}::Pi4ioe5v6408ButtonsImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::Pi4ioe5v6408ButtonsBindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::Pi4ioe5v6408ButtonsConfig::new({{parameter.address}}, {{parameter.button-1}}, [{{parameter.button-2}}, {{parameter.button-3}}, {{parameter.button-4}}, {{parameter.button-5}}, {{parameter.button-6}}, {{parameter.button-7}}, {{parameter.button-8}}], {{parameter.active-level}}, {{parameter.pull}}, {{parameter.debounce-ms}}, {{parameter.long-press-ms}})"
+# Buttons on input pins of a PI4IOE5V6408 I/O expander. The implementation
+# configures only its own pins as inputs; other pins of the same expander
+# stay with the implementations that own them, such as a display backlight.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 43h: ADDR strapped low.
+    default: 67
+  # The expander pin of each button, numbered in the order the Board
+  # documents them. Buttons take the dense indices 0 through 7 of the
+  # semantic snapshot, so a Board fills button-1 first and leaves no gap.
+  button-1:
+    type: enum
+    values: [p0, p1, p2, p3, p4, p5, p6, p7]
+    rust-values:
+      p0: "0"
+      p1: "1"
+      p2: "2"
+      p3: "3"
+      p4: "4"
+      p5: "5"
+      p6: "6"
+      p7: "7"
+    required: true
+  button-2:
+    type: enum
+    values: [none, p0, p1, p2, p3, p4, p5, p6, p7]
+    rust-values:
+      none: "None"
+      p0: "Some(0)"
+      p1: "Some(1)"
+      p2: "Some(2)"
+      p3: "Some(3)"
+      p4: "Some(4)"
+      p5: "Some(5)"
+      p6: "Some(6)"
+      p7: "Some(7)"
+    default: none
+  button-3:
+    type: enum
+    values: [none, p0, p1, p2, p3, p4, p5, p6, p7]
+    rust-values:
+      none: "None"
+      p0: "Some(0)"
+      p1: "Some(1)"
+      p2: "Some(2)"
+      p3: "Some(3)"
+      p4: "Some(4)"
+      p5: "Some(5)"
+      p6: "Some(6)"
+      p7: "Some(7)"
+    default: none
+  button-4:
+    type: enum
+    values: [none, p0, p1, p2, p3, p4, p5, p6, p7]
+    rust-values:
+      none: "None"
+      p0: "Some(0)"
+      p1: "Some(1)"
+      p2: "Some(2)"
+      p3: "Some(3)"
+      p4: "Some(4)"
+      p5: "Some(5)"
+      p6: "Some(6)"
+      p7: "Some(7)"
+    default: none
+  button-5:
+    type: enum
+    values: [none, p0, p1, p2, p3, p4, p5, p6, p7]
+    rust-values:
+      none: "None"
+      p0: "Some(0)"
+      p1: "Some(1)"
+      p2: "Some(2)"
+      p3: "Some(3)"
+      p4: "Some(4)"
+      p5: "Some(5)"
+      p6: "Some(6)"
+      p7: "Some(7)"
+    default: none
+  button-6:
+    type: enum
+    values: [none, p0, p1, p2, p3, p4, p5, p6, p7]
+    rust-values:
+      none: "None"
+      p0: "Some(0)"
+      p1: "Some(1)"
+      p2: "Some(2)"
+      p3: "Some(3)"
+      p4: "Some(4)"
+      p5: "Some(5)"
+      p6: "Some(6)"
+      p7: "Some(7)"
+    default: none
+  button-7:
+    type: enum
+    values: [none, p0, p1, p2, p3, p4, p5, p6, p7]
+    rust-values:
+      none: "None"
+      p0: "Some(0)"
+      p1: "Some(1)"
+      p2: "Some(2)"
+      p3: "Some(3)"
+      p4: "Some(4)"
+      p5: "Some(5)"
+      p6: "Some(6)"
+      p7: "Some(7)"
+    default: none
+  button-8:
+    type: enum
+    values: [none, p0, p1, p2, p3, p4, p5, p6, p7]
+    rust-values:
+      none: "None"
+      p0: "Some(0)"
+      p1: "Some(1)"
+      p2: "Some(2)"
+      p3: "Some(3)"
+      p4: "Some(4)"
+      p5: "Some(5)"
+      p6: "Some(6)"
+      p7: "Some(7)"
+    default: none
+  # The level a pressed button puts on its pin, the same for every button.
+  active-level:
+    type: enum
+    values: [low, high]
+    rust-values:
+      low: "::barracuda_pi4ioe5v6408_buttons::ActiveLevel::Low"
+      high: "::barracuda_pi4ioe5v6408_buttons::ActiveLevel::High"
+    default: low
+  # The expander's internal bias on the button pins.
+  pull:
+    type: enum
+    values: [none, up, down]
+    rust-values:
+      none: "::barracuda_pi4ioe5v6408_buttons::Pull::None"
+      up: "::barracuda_pi4ioe5v6408_buttons::Pull::Up"
+      down: "::barracuda_pi4ioe5v6408_buttons::Pull::Down"
+    default: up
+  # How long a new level must hold before a press or release counts. 10 ms
+  # is M5Unified's `Button_Class` default.
+  debounce-ms:
+    type: integer
+    default: 10
+  # How long a press lasts before it is a long press, reported while the
+  # button is still down; a shorter press is a click. 500 ms is M5Unified's
+  # `Button_Class` hold time.
+  long-press-ms:
+    type: integer
+    default: 500

@@ -1,0 +1,6 @@
+id = "vibration"
+depends-on = ["vm"]
+description = "Registers the built-in vibration-motor Lua package."
+
+[peripherals.vibration]
+devices = "*"

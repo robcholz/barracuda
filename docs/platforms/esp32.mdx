@@ -80,6 +80,18 @@ bootloader, partition table and app merged from `0x0`, beside
 both; to write them yourself, run `espflash write-bin` with each part's offset
 from `manifest.json`.
 
+The firmware runs from flash through the chip's cache, so its code and
+read-only data are limited by the window the cache maps them into, as well as
+by the Board's OTA slot. The ESP32 maps code from `0x400D0000` to
+`0x40400000`, 3 MiB and 192 KiB, and read-only data into 4 MiB; the ESP32-P4
+maps both into one 64 MiB window, and the ESP32-C6 into one 16 MiB window.
+esp-hal's linker scripts stop at 3 MiB and 4 MiB there, so those three
+Platforms link with their own memory map in `platforms/<chip>/ld`, which
+`build.linker-script` in `platform.yml` names: esp-hal's, with the window
+ESP-IDF links its applications into. The ESP32-C3 keeps esp-hal's 4 MiB each
+for code and read-only data (the chip maps 8 MiB), and the ESP32-S3 32 MiB
+each, the whole window.
+
 ## Hardware the Platforms drive
 
 Every ESP32 Platform provides digital inputs and outputs, GPIO, SPI devices,
@@ -90,12 +102,146 @@ these controllers on a Board's exposed pins:
 | --- | --- | --- | --- | --- |
 | `esp32` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | `ADC1` |
 | `esp32s3` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | `ADC1` |
-| `esp32p4` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | `ADC1` |
+| `esp32p4` | `I2C0`, `I2C1` | `SPI2`, `SPI3` | `UART1` | none |
 | `esp32c3` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 | `esp32c6` | `I2C0` | `SPI2` | `UART1` | `ADC1` |
 
-ESP32-S3 adds quad SPI devices, SD/MMC cards, camera capture, I2S audio
-streams, and capacitive touch.
+Every ESP32 Platform also drives the remote-control transceiver (the RMT)
+for peripherals: transmit channels (`rmt-output`) and receive channels
+(`rmt-input`) on any pin, which one transceiver at 80 MHz serves. An LED chain
+on a transmit channel takes no SPI controller, and an infrared LED gets its
+carrier from the channel. The ESP32's eight channels each transmit or
+receive; the ESP32-S3 and ESP32-P4 transmit on channels 0 to 3 and receive on
+4 to 7, the ESP32-C3 and ESP32-C6 transmit on 0 and 1 and receive on 2 and 3.
+The transceiver runs in esp-hal's blocking mode: an LED write keeps the CPU
+until the chain is out, and an awaited infrared transfer polls the channel
+every 500 µs.
+
+Every Platform but the ESP32-P4 drives a retunable PWM output for a buzzer
+(`pwm-output`): one LEDC timer and channel, at ten bits of duty. The LEDC
+controller is built once and shared with the runtime PWM pool, which keeps
+`Timer0` and `Channel0`; a Board's outputs take the others.
+
+An `spi-bus` also clocks out fewer than eight bits through the controller's
+command phase and changes its clock and mode (`SpiBusControl`), which the
+ATOM Display uses to load its FPGA over JTAG on its SPI lines.
+
+Several `spi-device` declarations may name one SPI controller, such as a
+display and a microSD card on one bus: the controller is built once, and each
+device keeps its chip select and runs at its own clock. A transaction takes
+the bus out of a short critical section, so a long display transfer never
+holds interrupts off.
+
+ESP32, ESP32-S3, ESP32-C3, and ESP32-C6 sample analog inputs for peripherals
+(`analog-input`): each Board input names its ADC controller and pin, inputs on
+one controller share its converter, and implementations read calibrated
+millivolts at 11 dB attenuation, up to about 3.1 V. A battery behind a
+resistor divider and a resistor-ladder button array use it.
+
+ESP32, ESP32-S3, and ESP32-C6 decode a quadrature encoder on unit 0 of their
+pulse counter (`pulse-counter`), counting every edge of both signals. The
+ESP32-C3 has no pulse counter, and esp-hal has no PCNT driver for the
+ESP32-P4 yet.
+
+ESP32-S3 drives a classic CAN bus on its TWAI controller (`twai`) through
+esp-hal's interrupt-driven driver. The controller joins the bus only when an
+application chooses the bit rate; each start rebuilds the driver at the new
+rate from the 80 MHz APB clock, with 20 time quanta a bit (25 for
+800 kbit/s, otherwise 16 or 10) and the sample point near 80 %, so any rate
+the clock divides to exactly works, from 5 kbit/s to 1 Mbit/s.
+
+ESP32 and ESP32-S3 drive a PDM microphone and an I2S amplifier on one I2S0
+controller (`pdm-i2s-stream`). M5Stack wires the microphone's clock and the
+amplifier's word select to one pin, so the controller switches to PDM receive,
+with the chip's PDM-to-PCM filter, for each read and to standard I2S transmit
+for each write; either side may be absent.
+
+ESP32 adds I2S audio streams (`i2s-stream`, without an MCLK pin: the chip
+routes its master clock only to fixed pins) and SD/MMC cards on slot 1 of its
+SD host, whose fixed pins are CLK `GPIO14`, CMD `GPIO15`, and D0 `GPIO2`.
+It has no `camera-capture`: esp-hal has no camera receiver for the ESP32, whose
+I2S0 camera mode widens every sensor byte to a 32-bit DMA word in internal RAM
+only, so a frame has to be streamed through small buffers and compacted under
+an interrupt deadline the Platform does not have.
+
+ESP32-S3 adds quad SPI devices, SD/MMC cards, camera capture, an 8-bit
+parallel output (`parallel-output`, the LCD_CAM controller in i8080 mode, with
+or without a data/command line), I2S audio streams, and capacitive touch.
+
+Camera capture (`camera-capture`) is the LCD_CAM controller receiving an
+eight-bit DVP sensor. One capture is one frame: the receiver waits for the end
+of a VSYNC pulse, which it takes as active high, and stops when the
+destination is full or at the next pulse. Its DMA storage, `dma-buffer-bytes`,
+comes from bulk memory, which is PSRAM on a Board that has it. A Board whose
+camera module has its own oscillator leaves out `xclk` and
+`xclk-frequency-hz`, and the controller drives no master clock. The receiver
+busy-waits for at most one frame period at each step, so a capture holds the
+executor for up to two frames.
+
+ESP32-P4 adds I2S audio streams (`i2s-stream`, through the same adapter as
+the ESP32-S3) and the MIPI DSI host (`dsi-host`): the link, the RGB565
+framebuffer in PSRAM that VDMA scans out, DCS commands before and during
+video, and the backlight pin, which it switches on and off because esp-hal has
+no LEDC driver for the ESP32-P4. It has no `mipi-csi` camera host: esp-hal has
+no CSI receiver, CSI bridge, or ISP driver for the ESP32-P4.
+
+The ESP32-P4 also drives a microSD card (`sdmmc-device`) on slot 0 of its one
+SD host. That slot's fixed pads are `GPIO39` to `GPIO44`, powered from the
+chip's LDO VO4 at 3.3 V, so a Board's card declares `slot: 0`,
+`power-channel: 4`, and `power-millivolts: 3300`. The Platform owns the SD
+host: at startup it builds the host once, keeps slot 1 for a Wi-Fi
+co-processor, and hands slot 0 to the Board's card. `cargo board select`
+refuses a card on slot 1, or on the slot a Board's co-processor uses. The card
+runs on four lines at its `frequency-hz`, switched to high speed above 25 MHz,
+and at most 40 MHz. It and the co-processor take turns on the SD host's one
+transfer engine in the order they ask, with no priority between them. One
+card transfer moves at most 4 KiB, so a large file never holds Wi-Fi up for
+longer than one such transfer, about 0.2 ms at 40 MHz.
+
+The ESP32, ESP32-S3, ESP32-C3, and ESP32-C6 drive their Wi-Fi radio with
+esp-radio: a station, whose IP stack runs DHCP, and the setup access point on
+a second stack. A firmware builds the radio only when an enabled Plugin takes
+the Platform's Wi-Fi, as the `wifi` Plugin does in every profile with network.
+Without one, the firmware links no Wi-Fi driver, radio firmware, or radio
+task, the IP stack has no link, and the radio stays off. The random number
+generator is true-random only while noise feeds it: with the radio, the radio
+does. Without it, the Platform runs the SAR ADC noise source at start-up,
+before the Board takes the ADC, seeds a ChaCha20 generator from 128 bytes of
+it, and stops it, so the ADC stays free for runtime and Board channels; the
+generator re-keys itself after every fill.
+
+The ESP32-P4 has no radio. Its IP stack runs on whichever network link the
+Board declares:
+
+- **Wired Ethernet**, under `hardware.ethernet`: the EMAC on the Board's RMII
+  pins, an IEEE 802.3 PHY at its address, and a DHCP client.
+- **A Wi-Fi co-processor**, under `hardware.wifi-coprocessor`: an ESP32-C6
+  running ESP-Hosted-MCU on SD host slot 1, beside the Board's microSD card on
+  slot 0 if it has one. At startup the Platform switches
+  on the co-processor's power if the Board declares a switch, resets it, and
+  checks the INIT event its firmware sends. It logs the firmware version when
+  the firmware reports one. A wrong chip, firmware without Wi-Fi, another RPC
+  version, or an SDIO transfer layout this host does not implement stops the
+  co-processor and logs `Wi-Fi is unavailable: <reason>`. The Wi-Fi Plugin
+  then sees no Wi-Fi capabilities. Otherwise the co-processor provides a
+  station, scanning, and the setup access point.
+- **Both**: one IP stack that uses Ethernet while its link is up and the
+  Wi-Fi station otherwise. It restarts DHCP on every switch. The setup access
+  point is a second stack on the co-processor.
+
+On a Board with neither, the stack has no link and the Wi-Fi Plugin opens no
+setup hotspot. The co-processor is the Platform's radio, so a firmware without
+a Plugin that takes Wi-Fi leaves it unpowered and builds no ESP-Hosted driver:
+the stack then runs over Ethernet alone, or has no link.
+
+The ESP32-P4's entropy is its random number generator fed by SAR ADC noise,
+started the way ESP-IDF starts it on this radio-less chip: at startup the
+Platform sets SAR ADC1 sampling an internal channel under the digital
+controller and keeps it running. On chip revision v3.0 and later it also
+starts the LP_TRNG block and reads it, as ESP-IDF does. Each random byte folds
+the generator's output over at least 16 µs. SAR ADC1 then belongs to the
+entropy source, so the ESP32-P4 has no runtime ADC. The IP stacks seed their
+sequence numbers from the chip's base MAC.
 
 ## Boards
 

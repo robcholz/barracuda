@@ -1,10 +1,163 @@
 name: m5stack-tab5x
+profile: screen
 hardware:
   chip: esp32p4
+  # Tab5 with an ESP32-P4 of revision v3.0 or later (M5Unified, M5Stack's
+  # Arduino core 3.3.10): ESP32-P4NRW32 with 16 MB flash and 32 MB PSRAM.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: hex
+    size-bytes: 33554432
+  # ESP32-C6-MINI-1U with M5Stack's factory ESP-Hosted-MCU slave firmware on
+  # SDIO2: CLK GPIO12, CMD GPIO13, D0-D3 GPIO11/10/9/8, and the C6's enable
+  # on GPIO15 (M5Stack's Tab5 pin map, M5Unified `hostedSetPins`, and
+  # Espressif's m5stack_tab5 `CONFIG_ESP_HOSTED_PRIV_SDIO_*` defaults).
+  # 40 MHz is ESP-Hosted's SDIO clock for an ESP32-P4 host. WLAN_PWR_EN is
+  # output P0 of the PI4IOE5V6408 at 44h on the internal bus (M5GFX's Tab5
+  # start-up drives it high; m5stack_tab5 `gpio_expander_2`).
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO12
+      cmd: GPIO13
+      d0: GPIO11
+      d1: GPIO10
+      d2: GPIO9
+      d3: GPIO8
+      frequency-hz: 40000000
+    reset: GPIO15
+    power-enable:
+      expander: pi4ioe5v6408
+      i2c: { peripheral: I2C0, scl: GPIO32, sda: GPIO31 }
+      address: 68
+      pin: 0
 toolchain:
   target: riscv32imafc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    dsi-host:
+      panel:
+        peripheral: MIPI_DSI
+        dma: VDMA_CH0
+        # LCD backlight (LEDA) on GPIO22: Espressif's m5stack_tab5 board
+        # definition (`ledc_backlight`) and M5Stack's Tab5 pin map.
+        backlight: GPIO22
+        # Two lanes; the PHY runs from on-chip LDO VO3 at 2.5 V (m5stack_tab5
+        # `ldo_mipi` and `dsi_display`, M5GFX `Bus_DSI` configuration).
+        data-lanes: 2
+        phy-power-channel: 3
+        phy-power-millivolts: 2500
+    sdmmc-device:
+      # microSD on slot 0 of the SD host, four lines on its IO_MUX pads: CLK
+      # GPIO43, CMD GPIO44, D0-D3 GPIO39-42, no card-detect line (M5Unified
+      # `_pin_table_sd` for board_M5Tab5; Espressif's esp-bsp m5stack_tab5
+      # `BSP_SD_*`, `BSP_SD_DET` not connected). Espressif's m5stack_tab5
+      # `fs_sdcard` runs it at SDMMC_FREQ_HIGHSPEED (40 MHz) with its I/O on
+      # on-chip LDO VO4 (`ldo_chan_id: 4`) at ESP-IDF's default 3.3 V
+      # (`SDMMC_HOST_DEFAULT` `io_voltage`). The Wi-Fi co-processor holds
+      # slot 1 of the same host.
+      micro-sd:
+        peripheral: SDHOST
+        slot: 0
+        clk: GPIO43
+        cmd: GPIO44
+        data: [GPIO39, GPIO40, GPIO41, GPIO42]
+        bus-width: 4
+        power-channel: 4
+        power-millivolts: 3300
+        frequency-hz: 40000000
+    i2s-stream:
+      audio-stream:
+        # ES8388 DAC and ES7210 microphone ADC on I2S0: MCLK GPIO30, BCLK
+        # GPIO27, WS GPIO29, DOUT GPIO26, DIN GPIO28, 48 kHz with a 256-fs
+        # MCLK (Espressif m5stack_tab5 `i2s_audio_out`). DOUT and DIN are
+        # named from the ESP32-P4 controller's side.
+        peripheral: I2S0
+        dma: DMA_CH0
+        bclk: GPIO27
+        ws: GPIO29
+        dout: GPIO26
+        din: GPIO28
+        mclk: GPIO30
+        sample-rate-hz: 48000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+    i2c-device:
+      # The internal bus: SDA GPIO31, SCL GPIO32 (M5Unified, M5GFX,
+      # m5stack_tab5 `i2c_master`).
+      internal:
+        peripheral: I2C0
+        scl: GPIO32
+        sda: GPIO31
+        frequency-hz: 400000
+  devices:
+    # ES8388 at 10h and ES7210 at 40h on the internal bus (M5Unified
+    # `es8388_i2c_addr`, `es7210_i2c_addr`); the speaker amplifier enable is
+    # P1 of the PI4IOE5V6408 at 43h.
+    audio-codec:
+      implementation: es8388-es7210-audio-codec
+      bindings: { control: internal, stream: audio-stream }
+    # 720x1280 MIPI DSI panel: ILI9881C, ST7123, or ST7121 depending on the
+    # unit, detected at start by its touch controller. Its reset and the
+    # touch reset are P4 and P5 of the PI4IOE5V6408 at 43h.
+    display:
+      implementation: tab5-dsi-display
+      # TP_INT on GPIO23: M5GFX drives it high while the touch controller
+      # leaves reset to strap the GT911 to 14h, then makes it an input.
+      bindings: { host: panel, i2c: internal, touch-interrupt: GPIO23 }
+      parameters:
+        # GT911 at 14h (ILI9881C units) or the ST712x touch at 55h.
+        gt911-address: 20
+        st712x-address: 85
+    touch:
+      implementation: tab5-touch
+      bindings: { i2c: internal }
+      parameters:
+        gt911-address: 20
+        st712x-address: 85
+    micro-sd:
+      implementation: sdmmc-fat-removable-storage
+      bindings: { device: micro-sd }
+    real-time-clock:
+      implementation: rx8130ce-rtc
+      bindings: { i2c: internal }
+      parameters:
+        # RX8130CE at 32h (M5Stack Tab5 pin map).
+        address: 50
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal }
+      parameters:
+        # BMI270 at 68h (M5Stack Tab5 pin map).
+        address: 104
+    power-monitor:
+      implementation: ina226-power-monitor
+      bindings: { i2c: internal }
+      parameters:
+        # INA226 at 41h (M5Stack Tab5 pin map) across a 5 mOhm shunt
+        # (M5Unified Power_Class, Tab5: `shunt_res = 0.005f`).
+        address: 65
+        shunt-micro-ohms: 5000
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:
+    # M5Unified `_pin_table_port_bc`.
+    port-a-scl: { pin: GPIO54 }
+    port-a-sda: { pin: GPIO53 }
+    port-b-g17: { pin: GPIO17 }
+    port-b-g52: { pin: GPIO52 }
+    port-c-g6: { pin: GPIO6 }
+    port-c-g7: { pin: GPIO7 }
+    # RS485 (SIT3088) RX, TX, and direction (M5Stack Tab5 pin map).
+    rs485-rx: { pin: GPIO21 }
+    rs485-tx: { pin: GPIO20 }
+    rs485-dir: { pin: GPIO34 }
 plugins:
   imessage-gateway:
     # No channel receive connections on this Board.

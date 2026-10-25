@@ -96,7 +96,7 @@ fn platform_declares_the_rustup_toolchain_for_ordinary_cargo_commands() {
         &manifest,
         yaml.replace(
             "selection:\n",
-            "build:\n  rustup-toolchain: acme\n  build-std: [core, alloc]\n  environment-file: ~/export-acme.sh\n  missing-toolchain-prompt: |\n    Install the Acme Rust toolchain first.\nselection:\n",
+            "build:\n  rustup-toolchain: acme\n  build-std: [core, alloc]\n  environment-file: ~/export-acme.sh\n  missing-toolchain-prompt: |\n    Install the Acme Rust toolchain first.\n  linker-script: acme-link.x\nselection:\n",
         ),
     )
     .expect("Platform build policy");
@@ -115,6 +115,27 @@ fn platform_declares_the_rustup_toolchain_for_ordinary_cargo_commands() {
         platform.build().missing_toolchain_prompt(),
         Some("Install the Acme Rust toolchain first.\n")
     );
+    assert_eq!(platform.build().linker_script(), Some("acme-link.x"));
+}
+
+#[test]
+fn rejects_a_linker_script_path() {
+    let root = tempdir().expect("temporary workspace");
+    add_platform(root.path(), "acme", "acme", "acme-none-elf");
+    let manifest = root.path().join("platforms/acme/platform.yml");
+    let yaml = fs::read_to_string(&manifest).expect("Platform manifest");
+    fs::write(
+        &manifest,
+        yaml.replace(
+            "selection:\n",
+            "build:\n  linker-script: ld/acme-link.x\nselection:\n",
+        ),
+    )
+    .expect("Platform linker script");
+
+    let error = discover_platforms(root.path()).expect_err("a path must fail");
+
+    assert!(error.to_string().contains("linker-script"));
 }
 
 #[test]
@@ -170,6 +191,79 @@ fn rejects_unbounded_runtime_i2s_storage() {
 
     let error = discover_platforms(root.path()).expect_err("zero DMA buffer must fail");
     assert!(error.to_string().contains("nonzero buffer"));
+}
+
+#[test]
+fn an_sdmmc_platform_lists_the_sd_host_slots_it_hands_out() {
+    let root = tempdir().expect("temporary workspace");
+    add_platform(root.path(), "acme", "acme", "acme-none-elf");
+    let manifest = root.path().join("platforms/acme/platform.yml");
+    let yaml = fs::read_to_string(&manifest).expect("Platform manifest");
+    let with = |bindings: &str, slots: &str| {
+        let yaml = yaml
+            .replace(
+                "bindings: [digital-output, i2c-device]",
+                &format!("bindings: [{bindings}]"),
+            )
+            .replace("selection:\n", &format!("{slots}selection:\n"));
+        fs::write(&manifest, yaml).expect("Platform manifest");
+        discover_platforms(root.path())
+    };
+
+    let platforms = with(
+        "sdmmc-device",
+        "  sdmmc-slots:\n    - slot: 0\n      power: { channel: 4, millivolts: 3300 }\n",
+    )
+    .expect("SD host slots");
+    let slot = platforms[0].hal().sdmmc_slot(0).expect("slot 0");
+    let power = slot.power().expect("slot 0 supply");
+    assert_eq!((power.channel(), power.millivolts()), (4, 3300));
+    assert!(platforms[0].hal().sdmmc_slot(1).is_none());
+
+    for (bindings, slots) in [
+        // The binding without a slot to hand out.
+        ("sdmmc-device", ""),
+        // Slots without the binding that takes them.
+        ("digital-output", "  sdmmc-slots:\n    - slot: 0\n"),
+        // One slot twice.
+        (
+            "sdmmc-device",
+            "  sdmmc-slots:\n    - slot: 0\n    - slot: 0\n",
+        ),
+        // A supply of no voltage.
+        (
+            "sdmmc-device",
+            "  sdmmc-slots:\n    - slot: 0\n      power: { channel: 4, millivolts: 0 }\n",
+        ),
+    ] {
+        let error = with(bindings, slots).expect_err("inconsistent SD host slots");
+        assert!(error.to_string().contains("SD host slot"), "{error}");
+    }
+}
+
+#[test]
+fn the_esp32p4_keeps_slot_1_and_powers_slot_0_from_ldo_vo4() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let platforms = discover_platforms(&root).expect("workspace Platform catalog");
+    let slots = |name: &str| {
+        platforms
+            .iter()
+            .find(|platform| platform.name() == name)
+            .expect("repository Platform")
+            .hal()
+            .sdmmc_slots()
+            .to_vec()
+    };
+
+    let esp32p4 = slots("esp32p4");
+    assert_eq!(esp32p4.len(), 1);
+    assert_eq!(esp32p4[0].slot(), 0);
+    let power = esp32p4[0].power().expect("LDO VO4");
+    assert_eq!((power.channel(), power.millivolts()), (4, 3300));
+
+    let esp32s3 = slots("esp32s3");
+    assert_eq!(esp32s3.len(), 1);
+    assert_eq!((esp32s3[0].slot(), esp32s3[0].power()), (0, None));
 }
 
 #[test]

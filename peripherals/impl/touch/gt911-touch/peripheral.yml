@@ -1,0 +1,28 @@
+id: gt911-touch
+api-version: 1
+peripheral: touch
+implementation:
+  package: barracuda-gt911-touch
+  crate: barracuda_gt911_touch
+  factory: "::{{crate}}::Gt911TouchImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::Gt911TouchBindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::Gt911TouchConfig::new({{parameter.address}}, {{parameter.width}}, {{parameter.height}})"
+# A Goodix GT911 whose reset, when it has one, another device owns or the
+# Board leaves to power-on. The controller takes 14h or 5Dh depending on its
+# interrupt line while it leaves reset; the implementation tries `address`
+# and then the other one, as M5GFX's `Touch_GT911` does.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 5Dh, Goodix's default.
+    default: 93
+  # The span the controller reports, in display coordinates.
+  width:
+    type: integer
+    required: true
+  height:
+    type: integer
+    required: true

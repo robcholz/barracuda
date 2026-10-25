@@ -28,13 +28,16 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `audio-codec` | Audio codec (ES8311 and ES7210) | [`audio`](/plugins/vm-audio) |
-| `front-buttons` | Capacitive touch buttons | — |
+| `front-buttons` | Capacitive touch buttons | [`buttons`](/plugins/vm-buttons) |
+| `boot-button` | BOOT button (GPIO0) | [`buttons`](/plugins/vm-buttons) |
 | `green-status-led` | Indicator LED | — |
-| `inertial-measurement` | IMU (BMI270) | [`motion`](/plugins/vm-imu) |
+| `inertial-measurement` | Motion sensor (BMI270) | [`motion`](/plugins/vm-imu) |
 | `power-monitor` | Battery gauge (BQ27220) | [`power_monitor`](/plugins/vm-power-monitor) |
 | `micro-sd` | microSD card slot (FAT) | — |
 | `touch` | Touch controller (CST816T) | — |
 | `video-display` | Round display (ST77916, quad SPI) | [`display`](/plugins/vm-display) |
+
+`front-buttons`, the capacitive touch buttons, is the primary `buttons` device.
 
 ## Exposed pins
 

@@ -1,27 +1,58 @@
 //! ES8311 audio codec implementation using embedded-hal I2C and a PCM binding.
+//!
+//! The speaker amplifier's enable is a GPIO, a pin of M5Stack's M5IOE1 or
+//! M5PM1 helper chip on the codec's control bus, or absent (the
+//! Cardputer-ADV's NS4150B runs whenever it is powered). The codec takes its
+//! master clock from its MCLK pin or, where none is wired, from the bit
+//! clock.
 
 #![no_std]
 
+mod enables;
+
 use core::marker::PhantomData;
 
+pub use barracuda_driver_es8311::ClockSource;
 use barracuda_driver_es8311::{Es8311, Es8311Error as Es8311RegisterError};
 use barracuda_peripheral::{
     PeripheralImplementation,
     audio::{AudioCodec, AudioDescriptor, PcmStream},
 };
 use embedded_hal::{delay::DelayNs, digital::OutputPin, i2c::I2c};
+pub use enables::{HelperEnables, HelperError};
 
 /// Board-owned ES8311 configuration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Es8311Config {
     address: u8,
+    clock: ClockSource,
+    enables: HelperEnables,
 }
 
 impl Es8311Config {
-    /// Creates configuration for one seven-bit SCCB/I2C address.
+    /// Creates configuration for one seven-bit SCCB/I2C address, clocked
+    /// from the MCLK pin, with no helper-chip enables.
     #[must_use]
     pub const fn new(address: u8) -> Self {
-        Self { address }
+        Self {
+            address,
+            clock: ClockSource::Mclk,
+            enables: HelperEnables::new(0, 0, -1),
+        }
+    }
+
+    /// Takes the master clock from `clock`.
+    #[must_use]
+    pub const fn with_clock(mut self, clock: ClockSource) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// Switches the audio supply and amplifier through helper-chip pins.
+    #[must_use]
+    pub const fn with_helper_enables(mut self, enables: HelperEnables) -> Self {
+        self.enables = enables;
+        self
     }
 }
 
@@ -29,14 +60,19 @@ impl Es8311Config {
 pub struct Es8311Bindings<I2C, I2S, AMP, DELAY> {
     control: I2C,
     stream: I2S,
-    amplifier_enable: AMP,
+    amplifier_enable: Option<AMP>,
     delay: DELAY,
 }
 
 impl<I2C, I2S, AMP, DELAY> Es8311Bindings<I2C, I2S, AMP, DELAY> {
     /// Combines the codec control bus, PCM stream, amplifier, and reset delay.
     #[must_use]
-    pub const fn new(control: I2C, stream: I2S, amplifier_enable: AMP, delay: DELAY) -> Self {
+    pub const fn new(
+        control: I2C,
+        stream: I2S,
+        amplifier_enable: Option<AMP>,
+        delay: DELAY,
+    ) -> Self {
         Self {
             control,
             stream,
@@ -57,6 +93,8 @@ pub enum Es8311InitError<ControlError, AmplifierError> {
     Control(Es8311RegisterError<ControlError>),
     /// The external speaker amplifier could not be enabled.
     Amplifier(AmplifierError),
+    /// A helper chip switching the audio supply or amplifier failed.
+    Helper(HelperError<ControlError>),
 }
 
 /// ES8311 control or stream failure.
@@ -72,7 +110,7 @@ pub enum Es8311Error<ControlError, StreamError> {
 pub struct Es8311AudioCodec<I2C, I2S, AMP> {
     control: I2C,
     stream: I2S,
-    _amplifier_enable: AMP,
+    _amplifier_enable: Option<AMP>,
     chip: Es8311,
     descriptor: AudioDescriptor,
 }
@@ -107,12 +145,24 @@ where
             return Err(Es8311InitError::UnsupportedFormat);
         }
         let chip = Es8311::new(config.address).ok_or(Es8311InitError::InvalidAddress)?;
-        chip.initialize(&mut bindings.control, &mut bindings.delay)
+        if !config.enables.is_empty() {
+            config
+                .enables
+                .supply_on(&mut bindings.control)
+                .map_err(Es8311InitError::Helper)?;
+            // M5Unified waits 10 ms for the audio rail before programming
+            // the codec.
+            bindings.delay.delay_ms(10);
+        }
+        chip.initialize_with_clock(&mut bindings.control, &mut bindings.delay, config.clock)
             .map_err(Es8311InitError::Control)?;
-        bindings
-            .amplifier_enable
-            .set_high()
-            .map_err(Es8311InitError::Amplifier)?;
+        config
+            .enables
+            .amplifier_on(&mut bindings.control)
+            .map_err(Es8311InitError::Helper)?;
+        if let Some(amplifier) = bindings.amplifier_enable.as_mut() {
+            amplifier.set_high().map_err(Es8311InitError::Amplifier)?;
+        }
         Ok(Es8311AudioCodec {
             control: bindings.control,
             stream: bindings.stream,
@@ -260,7 +310,7 @@ mod tests {
             Stream {
                 written: std::vec::Vec::new(),
             },
-            AmplifierEnable,
+            Some(AmplifierEnable),
             Delay,
         );
         let mut codec = block_on(Es8311AudioCodecImplementation::initialize(

@@ -1,0 +1,26 @@
+[package]
+name = "barracuda-driver-sx126x"
+version = "0.1.0"
+edition = "2024"
+description = "Low-level Semtech SX1261/SX1262 LoRa transceiver Driver over SPI"
+license = "AGPL-3.0-only"
+
+[dependencies]
+embedded-hal.workspace = true
+embedded-hal-async.workspace = true
+
+[dev-dependencies]
+embassy-futures.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

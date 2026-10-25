@@ -11,7 +11,7 @@ The M5Stack Station is an ESP32 Board from M5Stack.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen-connected`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-station/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,57 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-station/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `led-strip` | 7 RGB LEDs in one chain (SK6812, GPIO4) | [`light`](/plugins/vm-led-strip) |
+| `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `power-monitor` | Battery gauge (AXP192) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-a1-power` | Port A1 5 V output (INA3221 `40h` CH1, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-a2-power` | Port A2 5 V output (INA3221 `40h` CH2, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-b1-power` | Port B1 5 V output (INA3221 `40h` CH3, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-b2-power` | Port B2 5 V output (INA3221 `41h` CH1, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-c1-power` | Port C1 5 V output (INA3221 `41h` CH2, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `port-c2-power` | Port C2 5 V output (INA3221 `41h` CH3, 10 mΩ shunt) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `buttons` | Buttons A, B, C (GPIO37, GPIO38, GPIO39) | [`buttons`](/plugins/vm-buttons) |
+| `power-button` | Power button (AXP192 power key) | [`buttons`](/plugins/vm-buttons) |
+
+The battery gauge shares the PMIC with the display: it reads only the PMIC's
+measurement registers, and the display keeps its regulators.
+
+Each Grove port's 5 V output passes a 10 mΩ shunt into one INA3221 channel,
+and its current reads positive into the port. `power-monitor`, the battery, is
+the primary power monitor: the system UI's battery reads it, and so does the
+`power_monitor` Lua package when a script names no monitor. A script opens a
+port's monitor by its name, such as `power_monitor.open("port-a1-power")`.
+
+The power button is read through the PMIC, which latches a short press when the
+key is released and a long press once it has been held for the long-press time;
+the button reads pressed in one sample for each, and its events report
+a short press as a click and a long press as a long press. It sets and clears only the
+key's own interrupt bits of the PMIC. `buttons` is the primary `buttons` device.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO33` |
+| `port-a-sda` | `GPIO32` |
+| `port-b1-g25` | `GPIO25` |
+| `port-b1-g35` | `GPIO35` |
+| `port-b2-g26` | `GPIO26` |
+| `port-b2-g36` | `GPIO36` |
+| `port-c1-g13` | `GPIO13` |
+| `port-c1-g14` | `GPIO14` |
+| `port-c2-g16` | `GPIO16` |
+| `port-c2-g17` | `GPIO17` |
+
+Ports A1 and A2 carry the same bus.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

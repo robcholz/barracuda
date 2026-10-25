@@ -2,7 +2,10 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use barracuda_board_config::{parse, render_rust, ConfigError, PeripheralParameter, PluginSetting};
+use barracuda_board_config::{
+    parse, render_rust, ConfigError, CoprocessorPowerExpander, PeripheralParameter, PluginSetting,
+    RmiiReferenceClockSource, WifiCoprocessorFirmware,
+};
 use std::path::Path;
 
 const VALID: &str = r#"
@@ -20,6 +23,21 @@ fn parses_concrete_board_hardware_and_native_layout() {
     assert_eq!(board.name(), "local-macos");
     assert_eq!(board.hardware().chip(), "macos");
     assert_eq!(board.native_layout().artifact(), "file-layout.yml");
+}
+
+#[test]
+fn a_power_latch_is_a_hardware_fact_with_a_pin() {
+    let board = parse(&VALID.replace("  chip: macos\n", "  chip: macos\n  power-hold: GPIO4\n"))
+        .expect("Board with a power latch");
+    assert_eq!(board.hardware().power_hold(), Some("GPIO4"));
+    assert_eq!(
+        parse(VALID).expect("valid Board").hardware().power_hold(),
+        None
+    );
+    assert!(matches!(
+        parse(&VALID.replace("  chip: macos\n", "  chip: macos\n  power-hold: ' '\n")),
+        Err(ConfigError::EmptyHardwareIdentifier { .. })
+    ));
 }
 
 #[test]
@@ -436,6 +454,108 @@ peripherals:
 }
 
 #[test]
+fn parses_a_camera_receiver_without_a_master_clock() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    camera-capture:
+      camera:
+        peripheral: LCD_CAM
+        dma: DMA_CH0
+        pclk: GPIO45
+        vsync: GPIO46
+        href: GPIO38
+        data: [GPIO39, GPIO40, GPIO41, GPIO42, GPIO15, GPIO16, GPIO48, GPIO47]
+        dma-buffer-bytes: 153600
+"#;
+    let board = parse(yaml).expect("camera with its own oscillator");
+    let camera = board
+        .peripheral_io()
+        .camera_capture("camera")
+        .expect("camera receiver");
+    assert_eq!((camera.xclk(), camera.xclk_frequency_hz()), (None, None));
+
+    let half_clock = yaml.replace(
+        "        pclk: GPIO45",
+        "        xclk: GPIO21\n        pclk: GPIO45",
+    );
+    assert_eq!(
+        parse(&half_clock).unwrap_err(),
+        ConfigError::InvalidCameraClock {
+            resource: String::from("camera"),
+        }
+    );
+}
+
+#[test]
+fn parses_a_parallel_output_with_and_without_data_command() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    parallel-output:
+      epd-bus:
+        peripheral: LCD_CAM
+        dma: DMA_CH1
+        wr: GPIO16
+        chip-select: GPIO13
+        data: [GPIO6, GPIO14, GPIO7, GPIO12, GPIO9, GPIO11, GPIO8, GPIO10]
+        frequency-hz: 16000000
+        dma-buffer-bytes: 256
+"#;
+    let board = parse(yaml).expect("valid parallel output");
+    let output = board
+        .peripheral_io()
+        .parallel_output("epd-bus")
+        .expect("parallel output");
+    assert_eq!(
+        (
+            output.wr(),
+            output.dc(),
+            output.chip_select(),
+            output.data()[7].as_str()
+        ),
+        ("GPIO16", None, "GPIO13", "GPIO10")
+    );
+    assert_eq!(
+        (output.frequency_hz(), output.dma_buffer_bytes()),
+        (16_000_000, 256)
+    );
+    assert!(board.peripheral_io().uses_controller("LCD_CAM"));
+    assert!(board.peripheral_io().uses_dma("DMA_CH1"));
+
+    let with_dc = yaml.replace(
+        "chip-select: GPIO13",
+        "dc: GPIO15\n        chip-select: GPIO13",
+    );
+    let board = parse(&with_dc).expect("parallel output with data/command");
+    assert_eq!(
+        board
+            .peripheral_io()
+            .parallel_output("epd-bus")
+            .and_then(|output| output.dc()),
+        Some("GPIO15")
+    );
+
+    let empty = yaml.replace("dma-buffer-bytes: 256", "dma-buffer-bytes: 0");
+    assert_eq!(
+        parse(&empty).unwrap_err(),
+        ConfigError::ZeroDmaBuffer {
+            resource: String::from("epd-bus"),
+        }
+    );
+}
+
+#[test]
 fn rejects_spi_without_a_data_pin() {
     let yaml = r#"
 name: product-a
@@ -457,6 +577,66 @@ peripherals:
         parse(yaml).unwrap_err(),
         ConfigError::MissingSpiDataPin {
             resource: String::from("sensor"),
+        }
+    );
+}
+
+#[test]
+fn parses_three_wire_spi_device() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    spi-device:
+      panel:
+        peripheral: SPI3
+        sck: GPIO17
+        mosi: GPIO21
+        three-wire: true
+        read-frequency-hz: 100000
+        chip-select: GPIO15
+        frequency-hz: 40000000
+"#;
+
+    let board = parse(yaml).expect("valid three-wire SPI device");
+    let spi = board
+        .peripheral_io()
+        .spi_device("panel")
+        .expect("panel SPI device");
+    assert!(spi.three_wire());
+    assert_eq!(spi.mosi(), Some("GPIO21"));
+    assert_eq!(spi.read_frequency_hz(), 100_000);
+}
+
+#[test]
+fn rejects_three_wire_spi_device_with_separate_input() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    spi-device:
+      panel:
+        peripheral: SPI3
+        sck: GPIO17
+        mosi: GPIO21
+        miso: GPIO22
+        three-wire: true
+        chip-select: GPIO15
+        frequency-hz: 40000000
+"#;
+
+    assert_eq!(
+        parse(yaml).unwrap_err(),
+        ConfigError::InvalidThreeWireSpi {
+            resource: String::from("panel"),
         }
     );
 }
@@ -572,4 +752,409 @@ fn parses_plugin_profiles() {
     let root = barracuda_board_config::parse_profile("enable: [time]\n").expect("root profile");
     assert!(root.extends().is_empty());
     assert!(barracuda_board_config::parse_profile("enable: [ui]\nextra: true\n").is_err());
+}
+
+const ETHERNET_BOARD: &str = r#"
+name: wired-board
+hardware:
+  chip: esp32p4
+  ethernet:
+    phy:
+      model: ip101gri
+      address: 1
+      reset: GPIO51
+    rmii:
+      reference-clock:
+        source: external
+        input: GPIO50
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
+native-layout:
+  artifact: partitions.csv
+"#;
+
+#[test]
+fn parses_a_wired_ethernet_phy_as_hardware_facts() {
+    let board = parse(ETHERNET_BOARD).expect("valid wired Ethernet");
+    let ethernet = board.hardware().ethernet().expect("Ethernet");
+
+    assert_eq!(
+        (
+            ethernet.phy().model(),
+            ethernet.phy().address(),
+            ethernet.phy().reset()
+        ),
+        ("ip101gri", 1, Some("GPIO51"))
+    );
+    let rmii = ethernet.rmii();
+    assert_eq!(
+        rmii.reference_clock().source(),
+        RmiiReferenceClockSource::External
+    );
+    assert_eq!(
+        (
+            rmii.reference_clock().input(),
+            rmii.reference_clock().output()
+        ),
+        ("GPIO50", None)
+    );
+    assert_eq!(
+        [
+            rmii.mdc(),
+            rmii.mdio(),
+            rmii.tx_en(),
+            rmii.txd0(),
+            rmii.txd1(),
+            rmii.crs_dv(),
+            rmii.rxd0(),
+            rmii.rxd1()
+        ],
+        ["GPIO31", "GPIO52", "GPIO49", "GPIO34", "GPIO35", "GPIO28", "GPIO29", "GPIO30"]
+    );
+    assert_eq!(ethernet.pins().count(), 10);
+    assert!(parse(VALID)
+        .expect("Board without Ethernet")
+        .hardware()
+        .ethernet()
+        .is_none());
+}
+
+#[test]
+fn rejects_inconsistent_wired_ethernet() {
+    let invalid = |from: &str, to: &str| {
+        assert!(ETHERNET_BOARD.contains(from), "{from}");
+        parse(&ETHERNET_BOARD.replacen(from, to, 1)).unwrap_err()
+    };
+
+    assert!(matches!(
+        invalid("address: 1", "address: 32"),
+        ConfigError::InvalidEthernet { .. }
+    ));
+    assert!(matches!(
+        invalid("rxd1: GPIO30", "rxd1: GPIO29"),
+        ConfigError::InvalidEthernet { .. }
+    ));
+    assert!(matches!(
+        invalid("source: external", "source: internal"),
+        ConfigError::InvalidEthernet { .. }
+    ));
+    assert!(matches!(
+        invalid("input: GPIO50", "input: GPIO50\n        output: GPIO23"),
+        ConfigError::InvalidEthernet { .. }
+    ));
+    assert_eq!(
+        invalid("mdc: GPIO31", "mdc: ''"),
+        ConfigError::EmptyHardwareIdentifier {
+            resource: String::from("ethernet"),
+            field: "mdc",
+        }
+    );
+    let internal = parse(&ETHERNET_BOARD.replacen(
+        "source: external\n        input: GPIO50",
+        "source: internal\n        input: GPIO50\n        output: GPIO23",
+        1,
+    ))
+    .expect("internal reference clock");
+    assert_eq!(
+        internal
+            .hardware()
+            .ethernet()
+            .map(|ethernet| ethernet.rmii().reference_clock().output()),
+        Some(Some("GPIO23"))
+    );
+}
+
+const COPROCESSOR_BOARD: &str = r#"
+name: coprocessor-board
+hardware:
+  chip: esp32p4
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO12
+      cmd: GPIO13
+      d0: GPIO11
+      d1: GPIO10
+      d2: GPIO9
+      d3: GPIO8
+      frequency-hz: 40000000
+    reset: GPIO15
+    power-enable:
+      expander: pi4ioe5v6408
+      i2c: { peripheral: I2C0, scl: GPIO32, sda: GPIO31 }
+      address: 68
+      pin: 0
+native-layout:
+  artifact: partitions.csv
+"#;
+
+#[test]
+fn parses_a_wifi_coprocessor_as_hardware_facts() {
+    let board = parse(COPROCESSOR_BOARD).expect("valid co-processor");
+    let coprocessor = board.hardware().wifi_coprocessor().expect("co-processor");
+    assert_eq!(coprocessor.chip(), "esp32c6");
+    assert_eq!(
+        coprocessor.firmware(),
+        WifiCoprocessorFirmware::EspHostedMcu
+    );
+    let sdio = coprocessor.sdio();
+    assert_eq!((sdio.slot(), sdio.frequency_hz()), (1, 40_000_000));
+    assert_eq!((sdio.clk(), sdio.cmd()), ("GPIO12", "GPIO13"));
+    assert_eq!(sdio.data(), ["GPIO11", "GPIO10", "GPIO9", "GPIO8"]);
+    assert_eq!(coprocessor.reset(), "GPIO15");
+    let power = coprocessor.power_enable().expect("power switch");
+    assert_eq!(power.expander(), CoprocessorPowerExpander::Pi4ioe5v6408);
+    assert_eq!(
+        (power.i2c_peripheral(), power.scl(), power.sda()),
+        ("I2C0", "GPIO32", "GPIO31")
+    );
+    assert_eq!((power.address(), power.pin()), (0x44, 0));
+    assert_eq!(coprocessor.pins().count(), 9);
+
+    let unpowered = parse(&COPROCESSOR_BOARD.replacen(
+        "    power-enable:\n      expander: pi4ioe5v6408\n      i2c: { peripheral: I2C0, scl: GPIO32, sda: GPIO31 }\n      address: 68\n      pin: 0\n",
+        "",
+        1,
+    ))
+    .expect("co-processor without a power switch");
+    let coprocessor = unpowered
+        .hardware()
+        .wifi_coprocessor()
+        .expect("co-processor");
+    assert!(coprocessor.power_enable().is_none());
+    assert_eq!(coprocessor.pins().count(), 7);
+    assert!(parse(VALID)
+        .expect("Board without a co-processor")
+        .hardware()
+        .wifi_coprocessor()
+        .is_none());
+}
+
+#[test]
+fn rejects_inconsistent_wifi_coprocessors() {
+    let invalid = |from: &str, to: &str| {
+        assert!(COPROCESSOR_BOARD.contains(from), "{from}");
+        parse(&COPROCESSOR_BOARD.replacen(from, to, 1)).unwrap_err()
+    };
+
+    assert!(matches!(
+        invalid("slot: 1", "slot: 2"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert!(matches!(
+        invalid("frequency-hz: 40000000", "frequency-hz: 80000000"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert!(matches!(
+        invalid("d3: GPIO8", "d3: GPIO9"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert!(matches!(
+        invalid("reset: GPIO15", "reset: GPIO12"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert!(matches!(
+        invalid("address: 68", "address: 200"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert!(matches!(
+        invalid("pin: 0", "pin: 8"),
+        ConfigError::InvalidWifiCoprocessor { .. }
+    ));
+    assert_eq!(
+        invalid("clk: GPIO12", "clk: ''"),
+        ConfigError::EmptyHardwareIdentifier {
+            resource: String::from("wifi-coprocessor"),
+            field: "sdio clk",
+        }
+    );
+    assert!(matches!(
+        invalid("firmware: esp-hosted-mcu", "firmware: esp-at"),
+        ConfigError::Yaml(_)
+    ));
+}
+
+const DSI_BOARD: &str = r#"
+name: dsi-board
+hardware:
+  chip: esp32p4
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    dsi-host:
+      panel:
+        peripheral: MIPI_DSI
+        dma: VDMA_CH0
+        backlight: GPIO22
+        data-lanes: 2
+        phy-power-channel: 3
+        phy-power-millivolts: 2500
+"#;
+
+#[test]
+fn parses_dsi_hosts_with_or_without_a_backlight_pin() {
+    let board = parse(DSI_BOARD).expect("backlight pin");
+    let host = board.peripheral_io().dsi_host("panel").expect("DSI host");
+    assert_eq!(
+        (host.peripheral(), host.dma(), host.backlight()),
+        ("MIPI_DSI", "VDMA_CH0", Some("GPIO22"))
+    );
+    assert_eq!(
+        (
+            host.data_lanes(),
+            host.phy_power_channel(),
+            host.phy_power_millivolts()
+        ),
+        (2, 3, 2500)
+    );
+    assert!(board.peripheral_io().uses_controller("MIPI_DSI"));
+
+    let external = parse(&DSI_BOARD.replacen("        backlight: GPIO22\n", "", 1))
+        .expect("backlight driven by another chip");
+    let host = external
+        .peripheral_io()
+        .dsi_host("panel")
+        .expect("DSI host");
+    assert_eq!(host.backlight(), None);
+
+    assert_eq!(
+        parse(&DSI_BOARD.replacen("data-lanes: 2", "data-lanes: 5", 1)).unwrap_err(),
+        ConfigError::InvalidDsiHost {
+            resource: String::from("panel"),
+        }
+    );
+}
+
+/// A co-processor on SD host slot 1 beside a microSD card on slot 0, as on
+/// the M5Stack Tab5.
+const CARD_AND_COPROCESSOR_BOARD: &str = r#"
+name: card-board
+hardware:
+  chip: esp32p4
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO12
+      cmd: GPIO13
+      d0: GPIO11
+      d1: GPIO10
+      d2: GPIO9
+      d3: GPIO8
+      frequency-hz: 40000000
+    reset: GPIO15
+native-layout:
+  artifact: partitions.csv
+peripherals:
+  io:
+    sdmmc-device:
+      micro-sd:
+        peripheral: SDHOST
+        slot: 0
+        clk: GPIO43
+        cmd: GPIO44
+        data: [GPIO39, GPIO40, GPIO41, GPIO42]
+        bus-width: 4
+        power-channel: 4
+        power-millivolts: 3300
+        frequency-hz: 40000000
+  devices:
+    micro-sd:
+      implementation: sdmmc-fat-removable-storage
+      bindings: { device: micro-sd }
+"#;
+
+/// The card Board without its co-processor.
+fn card_board_without_coprocessor() -> String {
+    let (head, tail) = CARD_AND_COPROCESSOR_BOARD
+        .split_once("  wifi-coprocessor:")
+        .expect("co-processor section");
+    let (_, rest) = tail.split_once("native-layout:").expect("layout section");
+    format!("{head}native-layout:{rest}")
+}
+
+#[test]
+fn an_sdmmc_device_names_the_sd_host_slot_it_is_wired_to() {
+    let board = parse(CARD_AND_COPROCESSOR_BOARD).expect("card beside a co-processor");
+    let io = board.peripheral_io();
+    let card = io.sdmmc_device("micro-sd").expect("microSD slot");
+    assert_eq!((card.peripheral(), card.slot()), ("SDHOST", 0));
+    assert_eq!(
+        (card.power_channel(), card.power_millivolts()),
+        (Some(4), Some(3300))
+    );
+    assert_eq!(card.frequency_hz(), 40_000_000);
+    assert_eq!(
+        io.sdmmc_devices().map(|(name, _)| name).collect::<Vec<_>>(),
+        ["micro-sd"]
+    );
+
+    // A slot left out is slot 0, as on every ESP32-S3 Board.
+    let unnamed = parse(&CARD_AND_COPROCESSOR_BOARD.replacen("        slot: 0\n", "", 1))
+        .expect("card without a slot");
+    let card = unnamed.peripheral_io().sdmmc_device("micro-sd");
+    assert_eq!(card.map(|card| card.slot()), Some(0));
+
+    // A clock left out is the default speed mode's 25 MHz; SD tops out at 50.
+    let card_clock = "        frequency-hz: 40000000\n  devices:";
+    let default_speed = parse(&CARD_AND_COPROCESSOR_BOARD.replacen(card_clock, "  devices:", 1))
+        .expect("card without a clock");
+    let card = default_speed.peripheral_io().sdmmc_device("micro-sd");
+    assert_eq!(card.map(|card| card.frequency_hz()), Some(25_000_000));
+    assert!(matches!(
+        parse(&CARD_AND_COPROCESSOR_BOARD.replacen(
+            card_clock,
+            "        frequency-hz: 80000000\n  devices:",
+            1
+        )),
+        Err(ConfigError::InvalidSdmmcDevice { .. })
+    ));
+}
+
+#[test]
+fn a_card_cannot_take_the_slot_the_coprocessor_or_another_card_holds() {
+    let on_slot_one = |yaml: &str| yaml.replacen("        slot: 0\n", "        slot: 1\n", 1);
+    assert_eq!(
+        parse(&on_slot_one(CARD_AND_COPROCESSOR_BOARD)).unwrap_err(),
+        ConfigError::SdmmcSlotInUse {
+            resource: String::from("micro-sd"),
+            slot: 1,
+            user: String::from("the Wi-Fi co-processor"),
+        }
+    );
+
+    // Without a co-processor slot 1 is free for a card.
+    let board = parse(&on_slot_one(&card_board_without_coprocessor()))
+        .expect("card on slot 1 without a co-processor");
+    assert!(board.hardware().wifi_coprocessor().is_none());
+
+    let second_card = CARD_AND_COPROCESSOR_BOARD.replacen(
+        "  devices:\n",
+        "      second-sd:\n        peripheral: SDHOST\n        clk: GPIO1\n        cmd: GPIO2\n        data: [GPIO3]\n        bus-width: 1\n  devices:\n",
+        1,
+    );
+    assert_eq!(
+        parse(&second_card).unwrap_err(),
+        ConfigError::SdmmcSlotInUse {
+            resource: String::from("second-sd"),
+            slot: 0,
+            user: String::from("sdmmc-device `micro-sd`"),
+        }
+    );
+    assert_eq!(
+        parse(&CARD_AND_COPROCESSOR_BOARD.replacen("slot: 0", "slot: 2", 1)).unwrap_err(),
+        ConfigError::InvalidSdmmcDevice {
+            resource: String::from("micro-sd"),
+        }
+    );
 }

@@ -1,0 +1,29 @@
+id: paper-mono-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-paper-mono-display
+  crate: barracuda_paper_mono_display
+  factory: "::{{crate}}::PaperMonoDisplayImplementation<{{binding.spi.type}}, {{binding.dc.type}}, {{binding.busy.type}}, {{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::PaperMonoBindings::new({{binding.spi.value}}, {{binding.dc.value}}, {{binding.busy.value}}, {{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::PaperMonoConfig::new({{parameter.m5pm1-address}}, {{parameter.m5ioe1-address}})"
+bindings:
+  spi:
+    kind: spi-device
+  dc:
+    kind: digital-output
+    initial: low
+  # SSD1677 BUSY, active high.
+  busy:
+    kind: digital-input
+  # Internal bus with the M5PM1 (rails, front-light PWM on G3) and the
+  # M5IOE1 (panel enable on IO3, panel reset on IO5).
+  i2c:
+    kind: i2c-device
+parameters:
+  m5pm1-address:
+    type: integer
+    default: 110
+  m5ioe1-address:
+    type: integer
+    default: 79

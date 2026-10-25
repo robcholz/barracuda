@@ -1,7 +1,112 @@
 name: m5stack-stickc
+profile: screen-offline
 hardware:
   chip: esp32
+  # ESP32-PICO-D4.
+  flash-size: 4mb
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5GFX/M5Unified: the internal bus (400 kHz) of the AXP192 at 34h.
+        peripheral: I2C1
+        scl: GPIO22
+        sda: GPIO21
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        # M5GFX StickC: SPI2_HOST, write clock 27 MHz.
+        peripheral: SPI2
+        sck: GPIO13
+        mosi: GPIO15
+        chip-select: GPIO5
+        frequency-hz: 27000000
+    pdm-i2s-stream:
+      microphone:
+        # M5Unified `_begin_audio`: the SPM1423 PDM microphone, clock GPIO0
+        # and data GPIO34, on I2S0 (the ESP32's PDM receiver).
+        peripheral: I2S0
+        dma: DMA_I2S0
+        clk: GPIO0
+        din: GPIO34
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
+    rmt-output:
+      ir-transmit:
+        # IR LED on GPIO9, active high (Espressif `m5stack_stickc` gpio_ir_tx).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO9
+  devices:
+    microphone:
+      # SPM1423 PDM microphone, powered by AXP192 LDOio0 at 2.8 V (M5Unified
+      # `_microphone_enabled_cb_stickc`).
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: microphone, pmic: internal-i2c }
+      parameters:
+        pmic-power: stickc-microphone
+    display:
+      # ST7735S 80x160 at offset (26, 1) in its 132x162 frame, mounted upside
+      # down (M5GFX offset_rotation 2). AXP192 LDO3 powers it and LDO2 lights
+      # it; GPIO18 resets it.
+      implementation: m5stack-pmic-display
+      bindings: { dc: GPIO23, i2c: internal-i2c, reset: GPIO18, spi: display-spi }
+      parameters:
+        power-layout: stickc
+        controller: st7735s
+        width: 80
+        height: 160
+        offset-x: 26
+        offset-y: 1
+        invert-colors: true
+        orientation: deg180
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # MPU6886 at 68h (M5Unified `IMU_Class::begin`). Early units carry an
+    # SH200Q at 6Ch instead, which no implementation drives: on them nothing
+    # answers at 68h, the motion sensor fails to start and the Board starts
+    # without it. The probe only addresses 68h on the internal bus, which
+    # every unit has, so it disturbs nothing on those units.
+    inertial-measurement:
+      implementation: mpu6886-imu
+      bindings: { i2c: internal-i2c }
+    # The battery behind the AXP192 the display also uses.
+    power-monitor:
+      implementation: axp192-axp2101-power-monitor
+      bindings: { i2c: internal-i2c }
+    # The power key on the PMIC's PWRON pin, M5Unified `BtnPWR`: the
+    # power/reset button: 2 s on, 6 s off (M5Stack StickC docs).
+    power-button:
+      implementation: axp192-axp2101-buttons
+      bindings: { i2c: internal-i2c }
+    # Buttons A (front) and B (side) on GPIO37 and GPIO39, active low with
+    # the Board's pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      primary: true
+      bindings:
+        button-1: GPIO37
+        button-2: GPIO39
+    status-led:
+      implementation: indicator-led
+      bindings:
+        # Red status LED on GPIO10, active low (Espressif m5stack_stickc
+        # board_devices.yaml).
+        pin: GPIO10
+      parameters:
+        active-level: low
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+exposed-io:
+  pins:
+    # Grove port G32/G33 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g32: { pin: GPIO32 }
+    grove-g33: { pin: GPIO33 }

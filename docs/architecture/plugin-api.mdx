@@ -206,9 +206,11 @@ main = { fill = "primary", optional = true }   # starts without touch
 A slot is required unless it says `optional = true`; a `"*"` slot is always
 optional. A Plugin may declare several slots of one kind. Kinds are the
 `peripheral:` names of `peripherals/impl/`: `display`, `touch`, `buttons`,
-`indicator`, `led-strip`, `camera`, `audio-codec`, `inertial-measurement`,
-`power-monitor`, and `real-time-clock`. Removable storage is System-owned and
-never claimed.
+`indicator`, `led-strip`, `buzzer`, `vibration`, `infrared`, `camera`,
+`audio-codec`, `inertial-measurement`, `environment-sensor`, `keyboard`,
+`rotary-encoder`, `nfc-reader`, `lora`, `can`, `digital-io`, `power-monitor`,
+`real-time-clock`, `eeprom`, and `secure-element`. A Board may have several
+devices of any of them. Removable storage is System-owned and never claimed.
 
 The Board supplies named devices under `peripherals.devices`, marking one
 `primary: true` when it has several of a kind, and wires a slot only to
@@ -223,7 +225,8 @@ plugins:
 
 Each Board resolves every slot of every enabled Plugin at build time: a wired
 slot takes its device, then `"primary"` slots, then `"any"` slots, then the
-one `"*"` slot of a kind takes what is left in device-name order. A device
+one `"*"` slot of a kind takes what is left, the primary device first and the
+others in device-name order. A device
 taken twice, two `"*"` slots of one kind, an `"any"` slot with several
 candidates, a required slot left empty, or wiring naming an unknown device,
 a device of another kind, or an undeclared slot fails the build, and the
@@ -234,6 +237,31 @@ The Plugin's `build.rs` calls `barracuda_plugin_build::build()`, and
 `<KIND>_<SLOT>`: an `Option<Instance>` for one device, or a
 `&[(&str, Instance)]` of device names and instances for `"*"`. The Plugin
 takes its devices by those constants; it never names a Board device.
+
+A device the build resolved may still be absent at run time: a device that
+fails to initialize is logged and left out, and `take_<kind>` returns `None`
+for it. An optional slot treats that as a Board without the device. A Plugin
+with a required slot keeps the `Option` from construction and returns
+`PluginError::PeripheralUnavailable { kind, slot }` from `register` when it is
+empty; Plugin Manager logs that, leaves the Plugin and every Plugin depending
+on it out, and registers the rest.
+
+### Platform mechanisms
+
+The one Plugin that takes the Platform's Wi-Fi radio, `PluginContext::wifi`,
+declares it:
+
+```toml
+[platform]
+wifi = true
+```
+
+A firmware builds the radio only when an enabled Plugin declares it: the
+generated Plugin selection then enables the selected Platform's `wifi`
+feature. Without one, `wifi` in the context is the Platform's unsupported
+implementation and no radio code is linked. `cargo plugin sync --check`
+requires a Plugin page's Context resources to name `wifi` exactly when the
+Plugin declares it.
 
 ### Host tasks
 
@@ -337,14 +365,16 @@ impl ExamplePlugin {
 - The Plugin never stores the context or a reference to it.
 
 `PluginContext` carries only raw resources of the Platform and Board, which
-exist whether or not any Plugin uses them:
+exist whether or not any Plugin uses them, except the Wi-Fi radio, which a
+firmware builds only for a Plugin that declares it (see
+[Platform mechanisms](#platform-mechanisms)):
 
 | Field | Use |
 | --- | --- |
 | `target_identity` | Copy |
 | `ip_stack` | Copy |
 | `entropy` | Clone the `SharedEntropy` |
-| `wifi` | `take()` by the one Plugin that owns Wi-Fi policy |
+| `wifi` | `take()` by the one Plugin that owns Wi-Fi policy, which declares `[platform] wifi = true` |
 | `hal.peripherals` | `take_<peripheral>(instance)` with the Plugin's `config::peripherals` constants |
 | `hal.exposed_io` | Clone the `Arc` |
 

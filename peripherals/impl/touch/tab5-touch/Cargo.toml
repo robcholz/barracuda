@@ -7,7 +7,6 @@ license = "AGPL-3.0-only"
 
 [dependencies]
 barracuda-driver-gt911.workspace = true
-barracuda-driver-pi4ioe5v6408.workspace = true
 barracuda-driver-st712x.workspace = true
 barracuda-peripheral.workspace = true
 embedded-hal.workspace = true

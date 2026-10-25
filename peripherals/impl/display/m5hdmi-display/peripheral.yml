@@ -1,0 +1,56 @@
+id: m5hdmi-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-m5hdmi-display
+  crate: barracuda_m5hdmi_display
+  factory: "::{{crate}}::M5HdmiDisplayImplementation<{{binding.spi.type}}, {{binding.chip-select.type}}, {{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::M5HdmiBindings::new({{binding.spi.value}}, {{binding.chip-select.value}}, {{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::M5HdmiDisplayConfig::new({{parameter.width}}, {{parameter.height}}, {{parameter.refresh-hz}}, {{parameter.transmitter-address}}, {{parameter.write-frequency-hz}}, {{parameter.read-frequency-hz}}, {{parameter.jtag-frequency-hz}})"
+# HDMI output of M5Stack's video bridge (M5GFX `Panel_M5HDMI`): a Gowin
+# GW1NR-9 FPGA that holds the frame and takes drawing commands over SPI, and
+# a Lontium LT8618SX that turns its RGB video into HDMI. The FPGA keeps no
+# configuration over power loss, so at start-up the implementation loads
+# M5Stack's design into it over JTAG on the same four lines (TCK on SCK, TDI
+# on MOSI, TDO on MISO, TMS on the chip select) unless it already answers.
+bindings:
+  # The FPGA's clock and data lines, MOSI and MISO. Driving JTAG through
+  # the controller needs the Platform's bit-level `SpiBusControl`.
+  spi:
+    kind: spi-bus
+  # The FPGA's chip select, which is also JTAG TMS.
+  chip-select:
+    kind: digital-output
+    initial: high
+  # The LT8618SX's control bus.
+  i2c:
+    kind: i2c-device
+parameters:
+  # The drawing size; the FPGA scales it up to the output. 1280 x 720 is
+  # M5GFX's M5AtomDisplay default; 0 x 0 means the same.
+  width:
+    type: integer
+    default: 1280
+  height:
+    type: integer
+    default: 720
+  # 0 chooses 60, 30, or 24 Hz by size, as M5GFX does.
+  refresh-hz:
+    type: integer
+    default: 0
+  # The LT8618SX's address (M5GFX `i2c_addr = 0x39`).
+  transmitter-address:
+    type: integer
+    default: 57
+  # M5GFX writes the FPGA at up to 80 MHz and reads it at 16 MHz, and lowers
+  # either when the FPGA's ID does not read back.
+  write-frequency-hz:
+    type: integer
+    default: 40000000
+  read-frequency-hz:
+    type: integer
+    default: 16000000
+  # TCK while loading the FPGA; M5GFX bit-bangs it.
+  jtag-frequency-hz:
+    type: integer
+    default: 10000000

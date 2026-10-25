@@ -2,6 +2,8 @@ name: m5stack-cardputer
 profile: screen
 hardware:
   chip: esp32s3
+  # StampS3 (ESP32-S3FN8).
+  flash-size: 8mb
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
@@ -9,13 +11,68 @@ native-layout:
 peripherals:
   io:
     spi-device:
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5Cardputer, board_M5CardputerADV);
+        # the LCD keeps SPI3.
+        peripheral: SPI2
+        sck: GPIO40
+        mosi: GPIO14
+        miso: GPIO39
+        chip-select: GPIO12
+        frequency-hz: 20000000
       display-spi:
         peripheral: SPI3
         sck: GPIO36
         mosi: GPIO35
         chip-select: GPIO37
         frequency-hz: 40000000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` (DinMeter, Cardputer, Cardputer-ADV):
+        # the battery on ADC1 GPIO10 through a divider of two.
+        peripheral: ADC1
+        pin: GPIO10
+    pdm-i2s-stream:
+      audio:
+        # M5Unified `_begin_audio` Cardputer: the SPM1423 PDM microphone
+        # (clock GPIO43, data GPIO46) and the NS4168 amplifier (BCK GPIO41,
+        # LRCK GPIO43, data GPIO42) share GPIO43, so one I2S controller
+        # serves them in turn. I2S0 is the ESP32-S3's PDM receiver.
+        peripheral: I2S0
+        dma: DMA_CH1
+        clk: GPIO43
+        din: GPIO46
+        bclk: GPIO41
+        dout: GPIO42
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
+    rmt-output:
+      rgb-led-data:
+        # The Stamp module's WS2812B on GPIO21 (M5Unified `_pin_table_other0`
+        # (RGBLED)), on RMT channel 0 since both SPI controllers are taken.
+        # A Stamp-S3A powers it from the display backlight line, GPIO38, so
+        # it lights while the backlight is on (docs.m5stack.com Stamp-S3A).
+        peripheral: RMT
+        channel: 0
+        pin: GPIO21
+      ir-transmit:
+        # IR LED on GPIO44, active high (Espressif `m5stack_cardputer` ir_tx;
+        # docs.m5stack.com pin map), on RMT channel 1.
+        peripheral: RMT
+        channel: 1
+        pin: GPIO44
   devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    audio:
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: audio }
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 2
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO38, dc: GPIO34, reset: GPIO33, spi: display-spi }
@@ -27,3 +84,41 @@ peripherals:
         offset-y: 40
         invert-colors: true
         orientation: deg90
+    # The G0 button, active low with the Board's pull-up (M5Unified
+    # `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO0
+    # The 56-key matrix (M5Cardputer `IOMatrixKeyboardReader`): a 74HC138
+    # addressed by GPIO8, GPIO9, GPIO11 (A0-A2) and seven inputs, pulled up.
+    keyboard:
+      implementation: cardputer-keyboard
+      bindings:
+        address-0: GPIO8
+        address-1: GPIO9
+        address-2: GPIO11
+        input-1: GPIO13
+        input-2: GPIO15
+        input-3: GPIO3
+        input-4: GPIO4
+        input-5: GPIO5
+        input-6: GPIO6
+        input-7: GPIO7
+    # The Stamp module's RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+exposed-io:
+  pins:
+    # Grove (PORT.CUSTOM) G1/G2: M5Stack Cardputer pin map.
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }

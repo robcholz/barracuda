@@ -11,7 +11,7 @@ The M5Stack Tough is an ESP32 Board from M5Stack.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen-connected`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-tough/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,40 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-tough/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (CHSC6540) | — |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `power-monitor` | Battery gauge (AXP192) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `audio` | Speaker (NS4168 amplifier) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
+
+The display implementation's AXP192 reset pulse resets the touch controller
+with the panel.
+
+The battery gauge shares the PMIC with the display: it reads only the PMIC's
+measurement registers, and the display keeps its regulators.
+
+The microSD card shares the display's SPI bus through its own chip select.
+
+The microphone is not declared: M5Unified drives a PDM microphone on GPIO34, while Espressif's board files describe an analog one there.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO33` |
+| `port-a-sda` | `GPIO32` |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g36` | `GPIO36` |
+| `port-c-g13` | `GPIO13` |
+| `port-c-g14` | `GPIO14` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

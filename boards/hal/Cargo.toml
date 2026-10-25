@@ -14,9 +14,11 @@ embedded-hal-async.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"
 embedded-graphics-core.workspace = true
+log.workspace = true
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
+embassy-futures.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

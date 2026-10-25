@@ -795,6 +795,19 @@ pub fn digital_input(
     Input::new(pin, Pull::None)
 }
 
+/// A pin a peripheral implementation switches between input and output.
+pub type ConfigurablePin = DynamicPin;
+
+/// Hands a selected raw pin token to the implementation that configures it.
+#[must_use]
+pub fn configurable_pin(
+    pin: embassy_stm32::Peri<'static, impl embassy_stm32::gpio::Pin>,
+) -> ConfigurablePin {
+    DynamicPin {
+        pin: Flex::new(pin),
+    }
+}
+
 /// Runtime-configurable STM32 GPIO exposed through `embedded-hal`.
 pub struct DynamicPin {
     pin: Flex<'static>,
@@ -924,6 +937,15 @@ macro_rules! __barracuda_stm32_runtime_pwm_timer {
     };
 }
 
+/// Passes the TIM1 token through as the runtime PWM controller; unlike the
+/// ESP LEDC, the timer needs no shared state built at the Board call site.
+#[macro_export]
+macro_rules! __barracuda_stm32_pwm_controller {
+    ($timer:expr) => {
+        $timer
+    };
+}
+
 /// Resolves one TIM1 output channel declared by the Platform.
 #[macro_export]
 macro_rules! __barracuda_stm32_runtime_pwm_channel {
@@ -932,6 +954,8 @@ macro_rules! __barracuda_stm32_runtime_pwm_channel {
     };
 }
 
+#[doc(hidden)]
+pub use __barracuda_stm32_pwm_controller as pwm_controller;
 pub use __barracuda_stm32_runtime_adc_channel as runtime_adc_channel;
 #[doc(hidden)]
 pub use __barracuda_stm32_runtime_pwm_channel as runtime_pwm_channel;

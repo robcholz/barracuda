@@ -26,4 +26,29 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-capsule/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `led-strip` | RGB LED（WS2812，GPIO21） | [`light`](/zh/plugins/vm-led-strip) |
+| `inertial-measurement` | 运动传感器（BMI270） | [`motion`](/zh/plugins/vm-imu) |
+| `real-time-clock` | 实时时钟（BM8563） | — |
+| `buttons` | 按键 A 和 B（GPIO42、GPIO0） | [`buttons`](/zh/plugins/vm-buttons) |
+| `battery` | 电池电压（ADC 电阻分压） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `microphone` | 麦克风（PDM） | [`audio`](/zh/plugins/vm-audio) |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
+| `infrared` | 红外发射器（GPIO4） | [`infrared`](/zh/plugins/vm-infrared) |
+| `buzzer` | 无源蜂鸣器（GPIO2） | [`buzzer`](/zh/plugins/vm-buzzer) |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g13` | `GPIO13` |
+| `grove-g15` | `GPIO15` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g13", "up")
+print(pin:read())
+```

@@ -78,8 +78,9 @@ bindings, parameters, peripheral API, and static construction templates.
 remains hardware data and contains no Cargo package, crate path, Rust type, or
 Platform feature registration. Selection resolves and renders the complete
 composition before it writes selection state, then enables only the concrete
-peripheral implementation packages. GPIO, SPI, I2C, camera-capture, and I2S-stream
-construction comes from the independently selected Platform HAL.
+peripheral implementation packages. GPIO, SPI, I2C, camera-capture,
+parallel-output, and I2S-stream construction comes from the independently
+selected Platform HAL.
 The generated `SelectedBoardHal` is monomorphized; no runtime registry or trait
 object is added.
 
@@ -99,7 +100,8 @@ runtime error, and a restart rebuilds the complete exposed surface.
 Physical layout remains in that Board bundle but uses the boot ecosystem's
 native format:
 
-- ESP32: `partitions.csv` (including OTA slots and ESP flags).
+- ESP32: `partitions.csv` (including the app slots and ESP flags; see
+  [ESP flash layout](#esp-flash-layout)).
 - STM32: `memory.x` and linker/Embassy Boot symbols.
 - macOS and Linux: `file-layout.yml` for its file-backed NOR image.
 
@@ -107,6 +109,107 @@ Those native files are the only physical source of truth. Platform build code
 validates `board.yml` bindings against them and projects the selected region
 into `embedded-storage`/Embassy interfaces. Do not add a generic Barracuda
 partition table or a converter that emits vendor tables.
+
+`hardware` records what the product's datasheet states, read from its module
+or chip part number: the canonical `chip`, the installed `flash-size` (`4mb`,
+`8mb`, `16mb`, ...), and `external-memory` when the product has PSRAM. The
+native layout must end within `flash-size`.
+
+```yaml
+hardware:
+  chip: esp32s3
+  # ESP32-S3-PICO-1-N8R8.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: octal-spi   # quad-spi, octal-spi, or hex (ESP32-P4)
+    size-bytes: 8388608
+```
+
+`ethernet` records a wired Ethernet PHY on the chip's Ethernet MAC: the PHY
+part and its management address, the pin wired to its active-low reset, and
+the RMII pins with the source of the 50 MHz reference clock (`external` when
+the PHY or an oscillator drives it into `input`; `internal` when the chip
+drives it out on `output` and the Board loops it back into `input`). Like the
+rest of `hardware` it is a fact from the schematic, not a choice: the selected
+Platform builds its IP stack on it, and a Platform that cannot drive the
+interface rejects the Board at `cargo board select`. A pin it names belongs to
+the Platform and is never also a peripheral binding or an exposed pin.
+
+```yaml
+hardware:
+  chip: esp32p4
+  ethernet:
+    phy:
+      model: ip101gri
+      address: 1
+      reset: GPIO51
+    rmii:
+      reference-clock:
+        source: external
+        input: GPIO50
+      mdc: GPIO31
+      mdio: GPIO52
+      tx-en: GPIO49
+      txd0: GPIO34
+      txd1: GPIO35
+      crs-dv: GPIO28
+      rxd0: GPIO29
+      rxd1: GPIO30
+```
+
+`wifi-coprocessor` records a Wi-Fi radio on a second chip that the main chip
+reaches over SDIO, as on ESP32-P4 Boards, whose chip has no radio. It names
+the co-processor `chip`, the `firmware` it ships with (`esp-hosted-mcu`,
+Espressif's ESP-Hosted-MCU), the SD host `slot` with its clock, command and
+four data pins and the bus clock, the pin wired to the co-processor's
+active-low reset, and, when the Board switches the co-processor's power
+through an I/O expander, that expander's part, I2C bus, address and output.
+Like `ethernet`, it is a fact from the schematic. A Platform without the
+`wifi-coprocessor-sdio` binding rejects the Board at `cargo board select`, and
+its pins are never also peripheral bindings or exposed pins. The co-processor
+holds its SD host slot: a microSD card (`peripherals.io.sdmmc-device`) names
+another `slot`, and `cargo board select` refuses one on the same slot.
+
+```yaml
+hardware:
+  chip: esp32p4
+  wifi-coprocessor:
+    chip: esp32c6
+    firmware: esp-hosted-mcu
+    sdio:
+      slot: 1
+      clk: GPIO12
+      cmd: GPIO13
+      d0: GPIO11
+      d1: GPIO10
+      d2: GPIO9
+      d3: GPIO8
+      frequency-hz: 40000000
+    reset: GPIO15
+    power-enable:          # optional
+      expander: pi4ioe5v6408
+      i2c: { peripheral: I2C0, scl: GPIO32, sda: GPIO31 }
+      address: 68          # 44h
+      pin: 0
+```
+
+A Board may declare both `ethernet` and `wifi-coprocessor`. It still has one
+IP stack: the Platform runs it on Ethernet while the cable is up and on the
+Wi-Fi station otherwise, and restarts DHCP when it switches.
+
+`power-hold` names the pin of a battery power latch: a Board such as the
+M5StickC Plus2 switches itself off on battery once its power button is
+released, unless that pin is high. The Platform entry drives it high right
+after the chip starts, before any peripheral is built, and keeps it there. A
+Platform without the `power-hold` binding rejects the Board, and the pin is
+never also a peripheral binding or an exposed pin.
+
+```yaml
+hardware:
+  chip: esp32
+  power-hold: GPIO4
+```
 
 Select a concrete Board once, then use the ordinary build command:
 
@@ -176,6 +279,30 @@ name `user-button`. The STM32 Platform HAL replaces its former Board-specific
 HAL crate. The name `user-button` identifies the physical PC13 pin; an
 application acquires its digital function at runtime.
 
+## ESP flash layout
+
+An ESP Board's `partitions.csv` keeps `nvs`, `otadata`, and `phy_init` below
+`0x20000`, its app slots from `0x20000`, and then `kv_database`, `system`, and
+`resources`. How many app slots it has depends on its flash:
+
+| Flash | App slots | Size of each |
+| --- | --- | --- |
+| 4 MiB | `ota_0` | 2816 KiB (`0x2c0000`) |
+| 8 MiB | `ota_0` | 6912 KiB (`0x6c0000`) |
+| 16 MiB | `ota_0`, `ota_1` | 7552 KiB (`0x760000`), less where the data regions are larger |
+
+On 4 MiB and 8 MiB Boards, `ota_0` takes the room a second slot would hold, so
+the firmware can be twice as large. The data regions keep their sizes and
+offsets.
+
+`cargo run`, the release image, and the browser installer write `ota_0` on
+every Board. The ESP-IDF bootloader starts `ota_0` while `otadata` is
+erased, as the release image leaves it; with one slot it starts `ota_0`
+whatever `otadata` holds. A table therefore has no `factory` app, which the
+bootloader would start instead, and its slots run from `ota_0` without a gap;
+the Platform build rejects any other table. Pick a
+[profile](/boards/profiles#fitting-the-flash) whose firmware fits the slot.
+
 ## M5Stack Board coverage
 
 Barracuda provides selectable bundles for M5Stack controllers built on every
@@ -183,16 +310,23 @@ ESP chip family currently implemented by the workspace: ESP32, ESP32-C3,
 ESP32-C6, ESP32-S3, and ESP32-P4. Run `cargo board select` and search for the
 `m5stack-` prefix to see the complete, current catalog.
 
-The M5Stack Tab5 selects `m5stack-tab5`. Its Board HAL instantiates the onboard
-ES8388/ES7210 audio path, BMI270 inertial measurement, INA226 power monitor,
-RX8130CE real-time clock, microSD storage, revision-aware touch and DSI display,
-with pure `esp-hal` bindings. Audio, display, and touch implementations
-privately compose the PI4IOE5V6408 chip driver for their enable or reset lines;
-the expander is not a System-visible peripheral. The Board also exposes
-HY2.0-4P PORT.A, rear M5-Bus, and available SIT3088 RS-485 signals through the
-shared runtime I/O owner. The
+The M5Stack Tab5 selects `m5stack-tab5`. Its Board HAL instantiates the
+revision-aware DSI display and touch, the BMI270 inertial measurement, the
+INA226 power monitor, and the RX8130CE real-time clock, with pure `esp-hal`
+bindings. The display and touch implementations privately compose the
+PI4IOE5V6408 chip driver for their reset lines; the expander is not a
+System-visible peripheral. Its microSD card sits on slot 0 of the SD host,
+beside the Wi-Fi co-processor on slot 1. The
 `m5stack-tab5x` identity remains separate and must not be substituted based only
 on an ESP32-P4 silicon revision reported by the flashing tool.
+
+The M5Stack CoreP4X selects `m5stack-corep4x`; its 480x480 ST7102 DSI panel is
+composed by `corep4x-dsi-display`, which privately drives the M5IOE1 expander
+for the panel's power, reset, and backlight and the M5PM1 for the 5 V boost.
+The ESP32-P4-Function-EV-Board and the M5Stack Unit PoE-P4 declare their
+IP101GRI Ethernet PHYs under `hardware.ethernet`. The Tab5, the Tab5X and the
+ESP32-P4-Function-EV-Board declare their ESP32-C6 Wi-Fi co-processors under
+`hardware.wifi-coprocessor`.
 
 The fitted SC202CS camera remains absent from the Board peripheral set because
 `esp-hal` does not currently expose the ESP32-P4 MIPI-CSI/ISP data plane. It
@@ -200,9 +334,23 @@ must not be advertised until a real bare-metal driver can own that hardware.
 
 All bundles establish Board identity, the correct Rust compilation target, and
 a native ESP partition layout. The display matrix currently composes
-ILI9342C, ST7789, and GC9A01 SPI LCDs through `mipi-dbi-display`, plus the
-GDEH0154D67 e-paper panels in CoreInk and AirQ through
-`gdeh0154d67-display`. Both families expose Barracuda's stable `DisplayPeripheral`
-API. Other fixed peripherals remain absent until their reusable implementation is
+ILI9342C, ST7789, and GC9A01 SPI LCDs through `mipi-dbi-display`, the
+ESP32-S3-BOX-2's ST7789 on its eight-bit parallel bus through
+`mipi-dbi-parallel-display`, and the ESP32-P4 MIPI DSI panels of Tab5 and
+CoreP4X through `tab5-dsi-display` and `corep4x-dsi-display`. The Core2, Core2
+for AWS, Tough, StickC, StickC Plus, Station, CoreS3, CoreS3 SE, and StackChan
+power, reset, and light their ILI9342C, ST7789, or ST7735S LCD through a PMIC
+instead of GPIOs; `m5stack-pmic-display` drives them and privately composes the
+AXP192, AXP2101, and AW9523B chip drivers, so neither the PMIC nor the expander
+is a System-visible peripheral. M5Stack's e-paper panels are the 1.54-inch
+GDEH0154D67 or GDEW0154M09 in CoreInk and AirQ (`epaper-1in54-display`, which
+identifies the panel at start-up), the IT8951E-driven M5Paper
+(`it8951-display`), the directly driven ED047TC1 in PaperS3 and PaperDIY
+(`ed047tc1-display`, `paper-diy-display`) on the same `parallel-output` binding
+as the BOX-2, and the Paper Mono and PaperColor (`paper-mono-display`,
+`paper-color-display`). The ATOM Display's HDMI output
+(`m5hdmi-display`) loads M5Stack's FPGA design at start-up and drives it and
+its LT8618SX transmitter. All of them expose Barracuda's stable
+`DisplayPeripheral` API. Other fixed peripherals remain absent until their reusable implementation is
 implemented and selected in that Board's YAML. ESP32-C5 and ESP32-H2 products
 are intentionally excluded until those Platforms exist in Barracuda.

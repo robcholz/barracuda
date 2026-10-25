@@ -1,6 +1,8 @@
 name: m5stack-stamp-c6
 hardware:
   chip: esp32c6
+  # ESP32-C6FH8 (8 MB in-package flash), as M5GFX identifies the StampC6.
+  flash-size: 8mb
 toolchain:
   target: riscv32imac-unknown-none-elf
 native-layout:

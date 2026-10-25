@@ -11,7 +11,7 @@ M5Stack Unit C6L 是 M5Stack 推出的 ESP32-C6 开发板。
 - 芯片：ESP32-C6
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`riscv32imac-unknown-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-unit-c6l/partitions.csv`
 
 ## 构建和运行
@@ -26,4 +26,27 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-unit-c6l/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | OLED 显示屏（SSD1306） | [`display`](/zh/plugins/vm-display) |
+| `buttons` | 按键（PI4IOE5V6408 P0） | [`buttons`](/zh/plugins/vm-buttons) |
+| `led-strip` | RGB LED（WS2812，GPIO2） | [`light`](/zh/plugins/vm-led-strip) |
+| `buzzer` | 无源蜂鸣器（GPIO11） | [`buzzer`](/zh/plugins/vm-buzzer) |
+| `lora` | LoRa 射频（SX1262，850-930 MHz；CS GPIO23、BUSY GPIO19、DIO1 GPIO7） | [`lora`](/zh/plugins/vm-lora) |
+
+SX1262 通过自己的片选与 OLED 共用 SPI 总线。它的复位、射频开关和 LNA 使能分别接在按键也在使用的 PI4IOE5V6408 的 P7、P6 和 P5；每个实现只配置自己的引脚。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g4` | `GPIO4` |
+| `grove-g5` | `GPIO5` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g4", "up")
+print(pin:read())
+```

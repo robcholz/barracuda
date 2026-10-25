@@ -1,7 +1,36 @@
 name: m5stack-stamp-s3-bat
 hardware:
   chip: esp32s3
+  # ESP32-S3-PICO-1-N8R8.
+  flash-size: 8mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_ex_in` board_M5StampS3Bat: SCL G47 / SDA
+        # G48, at the M5PM1's 100 kHz (M5Unified `M5PM1_Class`).
+        peripheral: I2C0
+        scl: GPIO47
+        sda: GPIO48
+        frequency-hz: 100000
+  devices:
+    # The battery behind the M5PM1 at 6Eh; the charger's status is M5PM1 G2
+    # (M5Unified `Power_Class::isCharging`).
+    power-monitor:
+      implementation: m5pm1-power-monitor
+      bindings: { i2c: internal-i2c }
+      parameters: { charge-status: g2 }
+    # The power key on the M5PM1's PWR_BTN, M5Unified `BtnPWR`: the PWR button
+    # that wakes the M5PM1 (M5Stack StampS3-Bat M5PM1 docs). The M5PM1's
+    # factory click reset is kept.
+    power-button:
+      implementation: m5pm1-buttons
+      bindings: { i2c: internal-i2c }
