@@ -8,6 +8,9 @@ The IMessage BlueBubble Plugin adds a BlueBubbles server as an iMessage
 Gateway channel: it sends through the BlueBubbles API and receives through a
 webhook the server posts to the device's own webserver.
 
+No profile enables it; a Board that wants it sets
+`plugins.imessage-bluebubble.enabled: true` (see [Board profiles](/boards/profiles)).
+
 - Plugin ID: `imessage-bluebubble`
 - Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
 - Settings: none

@@ -13,6 +13,7 @@ cargo image build
 cargo image flash
 cargo image deploy
 cargo image package
+cargo image firmware
 ```
 
 All operations read `.barracuda/selected-board`; none accepts a Board or
@@ -21,6 +22,7 @@ Platform argument. `build` reads the Board's native physical layout and writes
 exist and writes it only to the selected Board's native `resources` region.
 `deploy` builds a fresh image and then flashes it. `package` packages a release
 build of the selected Board; see [Package a release](#package-a-release).
+`firmware` writes only its firmware file; see [Check the firmware](#check-the-firmware).
 The Board-native `resources` partition entry chooses `fatfs` or `littlefs`:
 file-region layouts use that region's `filesystem` field, ESP layouts use its
 partition subtype, and linker layouts use its inline `filesystem` annotation.
@@ -98,3 +100,18 @@ A command runs without a shell. Besides `{chip}` and `{layout}`, it may name
 `{flash-size}`, the Board's `hardware.flash-size`, or for an ESP partition
 table the smallest flash size that holds it. A Platform without a release
 driver, such as a host Platform, publishes no firmware.
+
+## Check the firmware
+
+`cargo image firmware` runs the same release driver without building the
+resource image, and writes `target/firmware/<board>/` with the firmware file
+alone:
+
+```bash terminal
+cargo build --release
+cargo image firmware
+```
+
+On the ESP Platforms `espflash` refuses an application larger than `ota_0`, so
+the command fails when the firmware does not fit the Board's app slot. CI runs
+it for every device Board after `cargo build --release`.

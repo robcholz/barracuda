@@ -23,7 +23,7 @@ the dependencies of every listed Plugin come along on their own.
 | `minimal` | — | workflows, time, the scheduler, power, sound | no | no |
 | `lua` | `minimal` | the VM and the Lua packages that need no network, among them those for the Board's hardware | no | yes |
 | `network` | `minimal` | Wi-Fi, the web server, the captive portal, HTTP, the portal's file manager | yes | no |
-| `ai` | `network` | the Agent, its tools, and the message gateways | yes | no |
+| `ai` | `network` | the Agent, its tools, and the message gateways except BlueBubbles and Inkbox | yes | no |
 | `connected` | `lua`, `network` | the Lua packages that need the network but not the Agent: HTTP and the web server | yes | yes |
 | `headless` | `connected`, `ai` | the Lua packages that need the Agent | yes | yes |
 | `ui` | — | the app manager with the system UI, the system fonts, the Files and Workflows apps | no | yes |
@@ -60,6 +60,15 @@ Agent: online, with Lua scripts that make and serve HTTP requests, but
 without the Agent, its tools, the message gateways, or the Sessions app.
 They are for Boards whose flash cannot hold the Agent. Their names say what
 sets them apart from `lua` and `screen-offline`: the device goes online.
+
+`ai` leaves the BlueBubbles and Inkbox channels out. A Board that wants one
+enables it:
+
+```yaml
+plugins:
+  imessage-bluebubble:
+    enabled: true
+```
 
 `screen-offline` has no Settings or Sessions app: Settings depends on Wi-Fi
 and Sessions on the Agent. Volume and brightness are in the control center.

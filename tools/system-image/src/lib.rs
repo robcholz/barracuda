@@ -29,7 +29,10 @@ mod flash;
 mod package;
 
 use flash::{FlashRequest, PlatformFlash};
-pub use package::{package_selected, Package, PackagePart, PACKAGE_OUTPUT};
+pub use package::{
+    firmware_selected, package_selected, Firmware, Package, PackagePart, FIRMWARE_OUTPUT,
+    PACKAGE_OUTPUT,
+};
 
 /// Filesystem format selected by the native `resources` partition model.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]

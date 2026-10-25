@@ -17,7 +17,7 @@ profile 是分层的。每个 profile 在它所扩展的 profile 之上添加插
 | `minimal` | — | Workflow、时间、调度器、电源、声音 | 否 | 否 |
 | `lua` | `minimal` | VM 以及不需要网络的 Lua 包，其中包括开发板硬件对应的 Lua 包 | 否 | 是 |
 | `network` | `minimal` | Wi-Fi、Web 服务器、强制门户、HTTP、门户的文件管理器 | 是 | 否 |
-| `ai` | `network` | Agent、它的工具和消息网关 | 是 | 否 |
+| `ai` | `network` | Agent、它的工具和消息网关（不含 BlueBubbles 和 Inkbox） | 是 | 否 |
 | `connected` | `lua`、`network` | 需要网络但不需要 Agent 的 Lua 包：HTTP 和 Web 服务器 | 是 | 是 |
 | `headless` | `connected`、`ai` | 需要 Agent 的 Lua 包 | 是 | 是 |
 | `ui` | — | 带 System UI 的应用管理器、系统字体、Files 和 Workflows 应用 | 否 | 是 |
@@ -46,6 +46,14 @@ profile 是分层的。每个 profile 在它所扩展的 profile 之上添加插
 `ui` 是一个层，而不是一个产品：它没有用于硬件的 Lua 包，也无法联网。带屏幕的开发板应指定 `screen`、`screen-connected` 或 `screen-offline`。
 
 `connected` 和 `screen-connected` 就是去掉 Agent 的 `headless` 和 `screen`：可以联网，Lua 脚本可以发出和处理 HTTP 请求，但没有 Agent、它的工具、消息网关和 Sessions 应用。它们用于 Flash 装不下 Agent 的开发板。名字说明了它们与 `lua` 和 `screen-offline` 的区别：设备会联网。
+
+`ai` 不带 BlueBubbles 和 Inkbox 两个渠道。需要的 Board 自己打开：
+
+```yaml
+plugins:
+  imessage-bluebubble:
+    enabled: true
+```
 
 `screen-offline` 没有 Settings 和 Sessions 应用：Settings 依赖 Wi-Fi，Sessions 依赖 Agent。音量和亮度在控制中心里调节。
 
