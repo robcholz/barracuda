@@ -1,4 +1,6 @@
 # The Agent and the message gateways on top of network, still without Lua.
+# BlueBubbles and Inkbox are left out; a Board that wants them sets
+# `plugins.imessage-bluebubble.enabled` or `plugins.imessage-inkbox.enabled`.
 extends: network
 enable:
   - agent
@@ -9,9 +11,7 @@ enable:
   - agent-time
   - agent-websearch
   - agent-workflow
-  - imessage-bluebubble
   - imessage-gateway
-  - imessage-inkbox
   - imessage-qq
   - imessage-telegram
   - imessage-web

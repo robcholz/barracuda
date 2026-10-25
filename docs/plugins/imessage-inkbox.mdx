@@ -8,6 +8,9 @@ The IMessage Inkbox Plugin adds Inkbox as an iMessage Gateway channel: it
 configures an Inkbox agent by API key or self-signup, sends through the Inkbox
 API, and receives by polling.
 
+No profile enables it; a Board that wants it sets
+`plugins.imessage-inkbox.enabled: true` (see [Board profiles](/boards/profiles)).
+
 - Plugin ID: `imessage-inkbox`
 - Dependencies: `imessage-gateway`, `webserver`, `captive-portal`
 - Settings: none

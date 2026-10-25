@@ -7,6 +7,9 @@ description: "通过 BlueBubbles 服务器访问板上 Agent。"
 IMessage BlueBubble 插件把 BlueBubbles 服务器添加为一个 iMessage
 Gateway 消息通道：它通过 BlueBubbles API 发送消息，并通过服务器推送到设备自身 Web 服务器的 webhook 接收消息。
 
+没有 profile 默认启用它；需要的 Board 在 `board.yml` 里设置
+`plugins.imessage-bluebubble.enabled: true`（见 [Board profiles](/zh/boards/profiles)）。
+
 - 插件 ID：`imessage-bluebubble`
 - 依赖：`imessage-gateway`、`webserver`、`captive-portal`
 - 设置：无

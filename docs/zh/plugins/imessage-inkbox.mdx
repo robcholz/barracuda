@@ -6,6 +6,9 @@ description: "通过 Inkbox 访问板上 Agent，可用 API key 或自助注册�
 
 IMessage Inkbox 插件把 Inkbox 添加为一个 iMessage Gateway 消息通道：它通过 API key 或自助注册配置一个 Inkbox agent，通过 Inkbox API 发送消息，并通过轮询接收消息。
 
+没有 profile 默认启用它；需要的 Board 在 `board.yml` 里设置
+`plugins.imessage-inkbox.enabled: true`（见 [Board profiles](/zh/boards/profiles)）。
+
 - 插件 ID：`imessage-inkbox`
 - 依赖：`imessage-gateway`、`webserver`、`captive-portal`
 - 设置：无
