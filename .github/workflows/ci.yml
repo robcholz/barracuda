@@ -619,13 +619,14 @@ jobs:
           unzip -o -d "$HOME/.cargo/bin" "$RUNNER_TEMP/espflash.zip" espflash
           espflash --version
 
-      # A device Board's selection forces LIBCLANG_PATH to Espressif's clang,
-      # which cannot generate the image tool's host LittleFS bindings, so the
-      # tool is built once with a host Board selected and then run directly.
+      # Espressif's clang cannot generate the image tool's host LittleFS
+      # bindings. The Xtensa toolchain action exports it as LIBCLANG_PATH and
+      # a device Board's selection forces it, so the tool is built once with
+      # a host Board selected and without that variable, then run directly.
       - name: Build the image tool
         run: |
           cargo board select local-linux
-          cargo image --help >/dev/null
+          env -u LIBCLANG_PATH -u CLANG_PATH cargo image --help >/dev/null
           host=$(rustc -vV | sed -n 's/^host: //p')
           echo "IMAGE_TOOL=$PWD/target/host-tools/$host/debug/barracuda-system-image" >> "$GITHUB_ENV"
 
