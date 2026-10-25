@@ -1,0 +1,37 @@
+id: ft5x06-touch
+api-version: 1
+peripheral: touch
+implementation:
+  package: barracuda-ft5x06-touch
+  crate: barracuda_ft5x06_touch
+  factory: "::{{crate}}::Ft5x06TouchImplementation<{{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Ft5x06Bindings::new({{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Ft5x06Config::new({{parameter.address}}, {{parameter.width}}, {{parameter.height}}, {{parameter.max-points}}, {{parameter.reset}})"
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    default: 56
+  # The span the controller reports, which may exceed the display (the
+  # Core2's touch area reaches below the screen to its three touch keys).
+  width:
+    type: integer
+    required: true
+  height:
+    type: integer
+    required: true
+  # The FT6336U reports two contacts; other family members up to five.
+  max-points:
+    type: integer
+    default: 2
+  # How the controller's reset is reached. `none`: it leaves reset with the
+  # display or at power-on. `cores3`: P0_0 of the CoreS3's AW9523B at 58h.
+  reset:
+    type: enum
+    values: [none, cores3]
+    rust-values:
+      none: "::barracuda_ft5x06_touch::TouchReset::None"
+      cores3: "::barracuda_ft5x06_touch::TouchReset::CoreS3"
+    default: none

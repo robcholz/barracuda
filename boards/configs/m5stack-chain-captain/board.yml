@@ -1,7 +1,93 @@
 name: m5stack-chain-captain
+profile: screen
 hardware:
   chip: esp32s3
+  # ESP32-S3R8 with 16 MB flash.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified internal bus: SCL G2, SDA G3, at the M5IOE1's 100 kHz.
+        peripheral: I2C0
+        scl: GPIO2
+        sda: GPIO3
+        frequency-hz: 100000
+    spi-device:
+      display-spi:
+        # M5GFX `board_M5ChainCaptain`: SPI2, SCLK G15, MOSI G16, CS G45 at
+        # 40 MHz.
+        peripheral: SPI2
+        sck: GPIO15
+        mosi: GPIO16
+        chip-select: GPIO45
+        frequency-hz: 40000000
+    i2s-stream:
+      audio-stream:
+        # M5Unified `_begin_audio` (board_M5ChainCaptain): MCLK GPIO40, BCK
+        # GPIO38, WS GPIO41, data out GPIO42, data in GPIO39.
+        peripheral: I2S0
+        dma: DMA_CH1
+        bclk: GPIO38
+        ws: GPIO41
+        dout: GPIO42
+        din: GPIO39
+        mclk: GPIO40
+        sample-rate-hz: 16000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+  devices:
+    audio-codec:
+      # ES8311 (18h) on the internal bus; the M5IOE1's G5 switches the audio
+      # rail and GPIO21 the AW8737A amplifier (M5Unified
+      # `_speaker_enabled_cb_chain_captain`).
+      implementation: es8311-audio-codec
+      bindings: { control: internal-i2c, stream: audio-stream, amplifier-enable: GPIO21 }
+      parameters:
+        m5ioe1-supply-pin: 5
+    display:
+      # 1.54-inch 240 x 240 HSD015BPN2-A0 on a JD9853; supply, reset, and
+      # backlight on the M5IOE1 at 0x4F.
+      implementation: chain-captain-display
+      bindings:
+        spi: display-spi
+        dc: GPIO46
+        expander: internal-i2c
+      parameters:
+        expander-address: 79
+    # The battery behind the M5PM1 at 6Eh. Its charge status is on the
+    # M5IOE1 (G3), which the implementation does not read.
+    power-monitor:
+      implementation: m5pm1-power-monitor
+      bindings: { i2c: internal-i2c }
+    # Buttons A, B, C on GPIO1, GPIO4, GPIO5, active low with the Board's
+    # pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO1
+        button-2: GPIO4
+        button-3: GPIO5
+    real-time-clock:
+      implementation: rx8130ce-rtc
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # RX8130CE at 32h (M5Unified RTC_Class: RX8130 on ChainCaptain).
+        address: 50
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Port B: M5Unified
+    # `_pin_table_port_bc`.
+    port-a-scl: { pin: GPIO6 }
+    port-a-sda: { pin: GPIO7 }
+    port-b-g17: { pin: GPIO17 }
+    port-b-g18: { pin: GPIO18 }

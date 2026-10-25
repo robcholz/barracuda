@@ -11,7 +11,7 @@ The M5Stack ATOM PSRAM is an ESP32 Board from M5Stack.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`connected`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-atom-psram/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,22 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-atom-psram/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `led-strip` | RGB LED (SK6812, GPIO27) | [`light`](/plugins/vm-led-strip) |
+| `buttons` | Button (GPIO39) | [`buttons`](/plugins/vm-buttons) |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g26` | `GPIO26` |
+| `grove-g32` | `GPIO32` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g26", "up")
+print(pin:read())
+```

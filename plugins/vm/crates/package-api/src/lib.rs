@@ -11,8 +11,12 @@ use barracuda_lua::{Lua, Package, Result as LuaResult};
 use portable_atomic_util::{Arc, Weak};
 use spin::Mutex;
 
+mod devices;
+
+pub use devices::{BoardDevices, LentDevice};
+
 /// Most Lua packages the registry holds at once.
-pub const MAX_LUA_PACKAGES: usize = 32;
+pub const MAX_LUA_PACKAGES: usize = 44;
 
 /// Lua heap one installed package may keep in a run once its installation's
 /// garbage is collected.

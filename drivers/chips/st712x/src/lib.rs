@@ -1,4 +1,6 @@
-//! Register-level Sitronix ST7121/ST7123 display-touch controller driver.
+//! Register-level Sitronix ST7121/ST7123 display-touch controller driver, and
+//! the initialization sequences of the ST7102, ST7121, and ST7123 DSI
+//! display controllers.
 
 #![no_std]
 
@@ -167,4 +169,59 @@ fn read<I2C: I2c>(
     data: &mut [u8],
 ) -> Result<(), I2C::Error> {
     i2c.write_read(address, &register.to_be_bytes(), data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Command, ST7102_INIT_COMMANDS};
+
+    #[test]
+    fn st7102_sequence_matches_m5gfx_lists() {
+        // M5GFX Panel_ST7102 list 0 has 20 vendor commands, then sleep out
+        // (list 1) and MADCTL with display on (list 2).
+        assert_eq!(ST7102_INIT_COMMANDS.len(), 23);
+        assert_eq!(
+            ST7102_INIT_COMMANDS.first(),
+            Some(&Command {
+                command: 0x99,
+                data: &[0x71, 0x02, 0xA2],
+                delay_ms: 0,
+            })
+        );
+        let lengths: [(u8, usize); 6] = [
+            (0xC8, 37),
+            (0xA3, 32),
+            (0xA6, 44),
+            (0xA7, 48),
+            (0xAC, 37),
+            (0xE7, 33),
+        ];
+        for (command, length) in lengths {
+            let found = ST7102_INIT_COMMANDS
+                .iter()
+                .find(|entry| entry.command == command)
+                .map(|entry| entry.data.len());
+            assert_eq!(found, Some(length), "command {command:#04x}");
+        }
+        assert_eq!(
+            &ST7102_INIT_COMMANDS[20..],
+            &[
+                Command {
+                    command: 0x11,
+                    data: &[],
+                    delay_ms: 20,
+                },
+                Command {
+                    command: 0x36,
+                    data: &[0x03],
+                    delay_ms: 0,
+                },
+                Command {
+                    command: 0x29,
+                    data: &[],
+                    delay_ms: 20,
+                },
+            ]
+        );
+    }
 }

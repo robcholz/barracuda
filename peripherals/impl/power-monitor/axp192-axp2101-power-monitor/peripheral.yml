@@ -1,0 +1,28 @@
+id: axp192-axp2101-power-monitor
+api-version: 1
+peripheral: power-monitor
+implementation:
+  package: barracuda-axp192-axp2101-power-monitor
+  crate: barracuda_axp192_axp2101_power_monitor
+  factory: "::{{crate}}::AxpPowerMonitorImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "::{{crate}}::AxpPowerMonitorBindings::new({{binding.i2c.value}})"
+  config-expression: "::{{crate}}::AxpPowerMonitorConfig::new({{parameter.address}}, {{parameter.ina3221-battery-current}})"
+# The battery of an X-Powers AXP192 or AXP2101 PMIC, identified at start.
+# The implementation owns only the PMIC's measurement registers (status,
+# ADC enable, battery ADC, fuel gauge); the regulators that power the
+# Board's other devices stay with the implementations that use them, such
+# as m5stack-pmic-display, through their own view of the shared bus.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 34h, the address of both PMICs.
+    default: 52
+  # With an AXP2101, which measures no current, take the battery current
+  # from channel 1 of an INA3221 at 40h with a 10 mOhm shunt when one
+  # answers: the M5Stack Core2 v1.1 (M5Unified `getBatteryCurrent`).
+  ina3221-battery-current:
+    type: boolean
+    default: false

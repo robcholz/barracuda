@@ -25,10 +25,82 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/esp32p4-function-ev-board/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `audio-codec` | Audio codec (ES8311) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT) | — |
+
+The display, touch, and camera connectors are not declared yet; add
+their devices to `boards/configs/esp32p4-function-ev-board/board.yml` to drive
+them. See [Peripheral composition](/boards/peripherals).
+
+## microSD card
+
+The microSD slot is on slot 0 of the ESP32-P4's SD host, on that slot's fixed
+pads. The Wi-Fi co-processor uses slot 1 of the same host. The
+[ESP32-P4 Platform](/platforms/esp32) owns the SD host and hands slot 0 to the
+`micro-sd` device. It runs the card on four lines at 40 MHz and powers its I/O
+from the chip's LDO VO4 at 3.3 V. A FAT card appears at `/removable/micro-sd`.
+The slot has no card-detect line, so a removed or swapped card is noticed the
+next time the slot is read, within about a second.
+
+| Signal | Pin |
+| --- | --- |
+| SD CLK / CMD | `GPIO43` / `GPIO44` |
+| SD D0 / D1 / D2 / D3 | `GPIO39` / `GPIO40` / `GPIO41` / `GPIO42` |
+| Card detect | none |
+| I/O supply | on-chip LDO VO4, 3.3 V |
+
+The card and Wi-Fi take turns on the SD host's one transfer engine, in the
+order they ask for it. One card transfer moves at most 4 KiB, so Wi-Fi waits
+at most about 0.2 ms for the card, however large the file.
+
+The card has not been tried on a device yet.
+
+## Wired Ethernet
+
+The Board's IP101GRI PHY is declared under `hardware.ethernet` in its
+`board.yml`, and the [ESP32-P4 Platform](/platforms/esp32) runs the IP stack
+over it: the EMAC on the RMII pads, the PHY at address 1 with its reset on
+`GPIO51`, and a DHCP client. Plug in a cable and the console logs
+`network is up at <address>`; the portal answers there on port 8787.
+
+`GPIO35`, the BOOT button, is RMII TXD1: the button is unusable while Ethernet
+runs.
+
+| Signal | Pin |
+| --- | --- |
+| Reference clock in (from the PHY) | `GPIO50` |
+| MDC / MDIO | `GPIO31` / `GPIO52` |
+| TX_EN / TXD0 / TXD1 | `GPIO49` / `GPIO34` / `GPIO35` |
+| CRS_DV / RXD0 / RXD1 | `GPIO28` / `GPIO29` / `GPIO30` |
+| PHY reset | `GPIO51` |
+
+## Wi-Fi
+
+The Wi-Fi radio is the ESP32-C6-MINI-1 co-processor, declared under
+`hardware.wifi-coprocessor` in `board.yml`. It runs Espressif's factory
+ESP-Hosted-MCU firmware, version 0.0.6 according to the ESP-Hosted
+documentation. The Platform resets the co-processor and talks to it over SDIO
+at 40 MHz. The [Wi-Fi Plugin](/plugins/wifi) opens its setup hotspot on the
+co-processor.
+
+| Signal | Pin |
+| --- | --- |
+| SDIO CLK / CMD | `GPIO18` / `GPIO19` |
+| SDIO D0 / D1 / D2 / D3 | `GPIO14` / `GPIO15` / `GPIO16` / `GPIO17` |
+| Co-processor reset | `GPIO54` |
+
+If the co-processor does not start, or runs firmware the Platform cannot
+drive, the console logs `Wi-Fi is unavailable: <reason>` and the Board keeps
+Ethernet alone.
+
+## Two links, one IP stack
+
+The Board has one IP stack over both links. The stack uses Ethernet while the
+cable's link is up and the Wi-Fi station otherwise. Each switch makes it
+restart DHCP, so the device's address changes with the link. The console logs
+`network is up at <address>` for each address it gets.
 
 ## Plugin settings
 

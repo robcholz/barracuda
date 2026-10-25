@@ -1,0 +1,57 @@
+id: gc0308-camera
+api-version: 1
+peripheral: camera
+implementation:
+  package: barracuda-gc0308-camera
+  crate: barracuda_gc0308_camera
+  factory: "::{{crate}}::Gc0308CameraImplementation<{{binding.control.type}}, {{binding.capture.type}}, {{binding.reset.type}}, {{binding.power-down.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Gc0308Bindings::new({{binding.control.value}}, {{binding.capture.value}}, {{binding.reset.value}}, {{binding.power-down.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Gc0308Config::new({{parameter.address}}, {{parameter.power-layout}}, {{parameter.alternate-sensor}})"
+# A GalaxyCore GC0308 on an eight-bit DVP bus, streaming 320x240 RGB565.
+bindings:
+  # The sensor's SCCB bus.
+  control:
+    kind: i2c-device
+  capture:
+    kind: camera-capture
+  # An active-low reset line the chip drives.
+  reset:
+    kind: digital-output
+    required: false
+    initial: high
+  # A line that cuts the sensor's supply while high: a power-down pin, or an
+  # active-low power switch such as the AtomS3R-CAM's G18.
+  power-down:
+    kind: digital-output
+    required: false
+    initial: high
+parameters:
+  address:
+    type: integer
+    # The sensor's fixed address 21h.
+    default: 33
+  # Which helper chips supply and reset the sensor:
+  # - none: the bindings above, if any.
+  # - cores3: M5Stack CoreS3 and StackChan. The implementation sets AXP2101
+  #   (34h) ALDO3 to 3.3 V and switches ALDO3, BLDO1, and BLDO2 on, as
+  #   Espressif's m5stack_cores3 power manager does for the camera, then
+  #   pulses the sensor's reset, AW9523B (58h) P1_0, low.
+  power-layout:
+    type: enum
+    values: [none, cores3]
+    rust-values:
+      none: "::barracuda_gc0308_camera::PowerLayout::None"
+      cores3: "::barracuda_gc0308_camera::PowerLayout::CoreS3"
+    default: none
+  # Another sensor a product ships in place of the GC0308 on the same wiring,
+  # probed when no GC0308 answers:
+  # - none: the GC0308 only.
+  # - ov3660: an OmniVision OV3660 at 3Ch, which then streams 320x240 JPEG
+  #   (M5Stack AtomS3R-M12, which M5Unified detects as the AtomS3R-CAM).
+  alternate-sensor:
+    type: enum
+    values: [none, ov3660]
+    rust-values:
+      none: "::barracuda_gc0308_camera::AlternateSensor::None"
+      ov3660: "::barracuda_gc0308_camera::AlternateSensor::Ov3660"
+    default: none

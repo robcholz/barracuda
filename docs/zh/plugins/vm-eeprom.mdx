@@ -1,0 +1,45 @@
+---
+title: "EEPROM 插件"
+sidebarTitle: "EEPROM"
+description: "用 `eeprom` Lua 包在 Lua 中把少量数据断电保存到开发板的 EEPROM。"
+---
+
+基于开发板的 EEPROM 安装 `eeprom` Lua 包，默认使用主 EEPROM。
+
+- 插件 ID：`eeprom`
+- 依赖：`vm`
+- 设置：无
+- 上下文资源：外设槽位 `eeprom.devices`（`*`）
+- 提供的能力：无
+- 所需能力：来自 `vm` 的 `LuaPackageRegistry`
+- Workflow：无
+- Agent 工具：无
+- Lua 包：`eeprom`
+- Web：无
+- 任务：无
+- 存储：无
+
+本插件只获取一次开发板的主 `Eeprom` 能力，并安装 `eeprom` Lua 包。它使用的是语义层面的外设能力：该能力按存储器的页边界拆分写入，并等待每一页的写周期结束，因此脚本只按字节寻址，无需关心页。
+
+Lua API：
+
+- `eeprom.list() -> { name, ... }`：各 EEPROM 在开发板上的名称，主 EEPROM 排在最前
+- `eeprom.available([name]) -> boolean`
+- `eeprom.size([name]) -> bytes`：存储器容量
+- `eeprom.page_size([name]) -> bytes`：一次写周期最多写入的字节数
+- `eeprom.read(offset, length[, name]) -> binary string`
+- `eeprom.write(offset, binary_string[, name]) -> true`：所有字节写入完成后返回
+
+`name` 是 `list` 返回的开发板设备名；不给出时调用使用主 EEPROM，所以为单个 EEPROM 写的脚本在有多个 EEPROM 的开发板上无需修改。只想指定 EEPROM 而不给出它前面的可选参数时，这些参数传 `nil`。
+
+偏移量从 0 开始按字节计数。超出存储器末尾的范围、负的偏移量或长度，或在另一次调用运行期间调用，都会返回 `nil, error`，且不会触碰存储器。取消写入时，已经写完的页保持写入状态。
+
+EEPROM 每一页能承受的写周期次数有限（通常为一百万次）；频繁变化的值应保存在内存中，偶尔再写回。
+
+当开发板具备该设备时，这个 Lua 包声明一个稳定接口（`PackageInterface::Stable`），版本 2。没有 EEPROM 的开发板仍然会安装这个 Lua 包；`available` 返回 false，其他调用返回 `nil, error`。插件被撤销会阻止所有后续调用。
+
+```lua
+local eeprom = require("eeprom")
+eeprom.write(0, string.pack("<I4", 42))
+local value = string.unpack("<I4", eeprom.read(0, 4))
+```

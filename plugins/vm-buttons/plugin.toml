@@ -1,0 +1,6 @@
+id = "buttons"
+depends-on = ["vm"]
+description = "Registers the built-in buttons Lua package."
+
+[peripherals.buttons]
+devices = "*"

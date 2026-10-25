@@ -1,7 +1,33 @@
 name: esp32c3-devkitm-1
+profile: connected
 hardware:
   chip: esp32c3
+  # ESP32-C3-MINI-1 (ESP32-C3FN4).
+  flash-size: 4mb
 toolchain:
   target: riscv32imc-unknown-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    spi-output:
+      rgb-led-data:
+        # One WS2812 on GPIO8 (Espressif esp32_c3_devkitm_1 board_devices.yaml).
+        data: GPIO8
+        frequency-hz: 2400000
+  devices:
+    # BOOT on GPIO9, active low, with the pull-up Espressif's esp_boards
+    # `esp32_c3_devkitm_1` enables.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO9
+      parameters:
+        pull: up
+    led-strip:
+      implementation: ws2812-spi-led-strip
+      bindings:
+        spi: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb

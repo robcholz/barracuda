@@ -35,10 +35,42 @@ pub enum HalBinding {
     I2cDevice,
     /// Parallel camera receiver construction.
     CameraCapture,
+    /// Eight-bit parallel output construction.
+    ParallelOutput,
     /// Full-duplex I2S stream construction.
     I2sStream,
     /// Fixed capacitive-touch channel group construction.
     CapacitiveTouch,
+    /// Calibrated ADC channel construction, several channels sharing one
+    /// converter.
+    AnalogInput,
+    /// Time-shared PDM-microphone receive and I2S-amplifier transmit stream
+    /// construction.
+    PdmI2sStream,
+    /// Quadrature pulse-counter construction: one counter unit decoding two
+    /// encoder signals.
+    PulseCounter,
+    /// Platform IP link over a Board-declared RMII Ethernet PHY
+    /// (`hardware.ethernet` in `board.yml`).
+    EthernetRmii,
+    /// Platform Wi-Fi and IP link over a Board-declared ESP-Hosted
+    /// co-processor on SDIO (`hardware.wifi-coprocessor` in `board.yml`).
+    WifiCoprocessorSdio,
+    /// A battery power latch pin the Platform entry drives high at start
+    /// (`hardware.power-hold` in `board.yml`).
+    PowerHold,
+    /// Pulse-train output channel construction on a shared remote-control
+    /// transceiver, such as an LED chain's or an infrared emitter's.
+    RmtOutput,
+    /// Pulse-train input channel construction on a shared remote-control
+    /// transceiver, such as an infrared receiver's.
+    RmtInput,
+    /// Retunable PWM output construction, one timer and channel of a PWM
+    /// controller the runtime PWM pool may share.
+    PwmOutput,
+    /// Classic CAN controller construction (the ESP TWAI) on the pins of a
+    /// Board's transceiver.
+    Twai,
 }
 
 /// One ADC channel route owned by a Platform ADC controller pool.
@@ -145,6 +177,80 @@ impl RuntimeI2sController {
     }
 }
 
+/// The on-chip regulator a Platform powers an SD host slot from.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SdmmcSlotPower {
+    channel: u8,
+    millivolts: u16,
+}
+
+impl SdmmcSlotPower {
+    /// Returns the on-chip LDO channel.
+    #[must_use]
+    pub const fn channel(&self) -> u8 {
+        self.channel
+    }
+
+    /// Returns the voltage the Platform programs on that channel.
+    #[must_use]
+    pub const fn millivolts(&self) -> u16 {
+        self.millivolts
+    }
+}
+
+/// One SD host slot a Platform hands to a Board's `sdmmc-device` binding.
+///
+/// A slot a Platform keeps for its own mechanisms, such as a Wi-Fi
+/// co-processor's SDIO link, is not listed.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SdmmcSlot {
+    slot: u8,
+    #[serde(default)]
+    power: Option<SdmmcSlotPower>,
+}
+
+impl SdmmcSlot {
+    /// Returns the SD host slot index.
+    #[must_use]
+    pub const fn slot(&self) -> u8 {
+        self.slot
+    }
+
+    /// Returns the on-chip supply the slot's pads run from, when the
+    /// Platform powers them; a Board's card on this slot declares the same.
+    #[must_use]
+    pub const fn power(&self) -> Option<SdmmcSlotPower> {
+        self.power
+    }
+}
+
+/// The channels of a Platform's remote-control transceiver a Board's
+/// `rmt-output` and `rmt-input` bindings may name.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RmtChannels {
+    #[serde(default)]
+    transmit: Vec<u8>,
+    #[serde(default)]
+    receive: Vec<u8>,
+}
+
+impl RmtChannels {
+    /// Returns the channels that can transmit.
+    #[must_use]
+    pub fn transmit(&self) -> &[u8] {
+        &self.transmit
+    }
+
+    /// Returns the channels that can receive.
+    #[must_use]
+    pub fn receive(&self) -> &[u8] {
+        &self.receive
+    }
+}
+
 /// Hardware construction capabilities implemented alongside one Platform.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -163,6 +269,10 @@ pub struct HalConfig {
     runtime_pwm_controllers: Vec<RuntimePwmController>,
     #[serde(default, rename = "runtime-i2s-controllers")]
     runtime_i2s_controllers: Vec<RuntimeI2sController>,
+    #[serde(default, rename = "sdmmc-slots")]
+    sdmmc_slots: Vec<SdmmcSlot>,
+    #[serde(default, rename = "rmt-channels")]
+    rmt_channels: RmtChannels,
     #[serde(default, rename = "peripheral-models")]
     peripheral_models: bool,
 }
@@ -214,6 +324,26 @@ impl HalConfig {
     #[must_use]
     pub fn runtime_i2s_controllers(&self) -> &[RuntimeI2sController] {
         &self.runtime_i2s_controllers
+    }
+
+    /// Returns the SD host slots a Board's `sdmmc-device` binding may use.
+    #[must_use]
+    pub fn sdmmc_slots(&self) -> &[SdmmcSlot] {
+        &self.sdmmc_slots
+    }
+
+    /// Finds the SD host slot a Board's `sdmmc-device` binding names.
+    #[must_use]
+    pub fn sdmmc_slot(&self, slot: u8) -> Option<&SdmmcSlot> {
+        self.sdmmc_slots
+            .iter()
+            .find(|candidate| candidate.slot == slot)
+    }
+
+    /// Returns the remote-control transceiver channels Boards may name.
+    #[must_use]
+    pub const fn rmt_channels(&self) -> &RmtChannels {
+        &self.rmt_channels
     }
 
     /// Returns whether the HAL places a device model behind each declared
@@ -321,6 +451,54 @@ impl HalConfig {
                     return Err(invalid_hal(path, "a runtime I2S DMA channel is duplicated"));
                 }
             }
+        }
+
+        let mut sdmmc_slots = BTreeSet::new();
+        for slot in &self.sdmmc_slots {
+            if !sdmmc_slots.insert(slot.slot) {
+                return Err(invalid_hal(
+                    path,
+                    "an SD host slot is listed more than once",
+                ));
+            }
+            if slot
+                .power
+                .is_some_and(|power| power.channel == 0 || power.millivolts == 0)
+            {
+                return Err(invalid_hal(
+                    path,
+                    "an SD host slot's power needs a nonzero channel and voltage",
+                ));
+            }
+        }
+        if sdmmc_slots.is_empty() == self.supports(HalBinding::SdmmcDevice) {
+            return Err(invalid_hal(
+                path,
+                "a Platform with the sdmmc-device binding lists the SD host slots it hands out, and only then",
+            ));
+        }
+        if self.rmt_channels.transmit.is_empty() == self.supports(HalBinding::RmtOutput)
+            || self.rmt_channels.receive.is_empty() == self.supports(HalBinding::RmtInput)
+        {
+            return Err(invalid_hal(
+                path,
+                "a Platform with the rmt-output or rmt-input binding lists the channels that transmit or receive, and only then",
+            ));
+        }
+        let mut rmt_transmit = BTreeSet::new();
+        let mut rmt_receive = BTreeSet::new();
+        if !self
+            .rmt_channels
+            .transmit
+            .iter()
+            .all(|channel| rmt_transmit.insert(*channel))
+            || !self
+                .rmt_channels
+                .receive
+                .iter()
+                .all(|channel| rmt_receive.insert(*channel))
+        {
+            return Err(invalid_hal(path, "an RMT channel is listed more than once"));
         }
         Ok(())
     }
@@ -614,6 +792,8 @@ pub struct BuildConfig {
     environment_file: Option<PathBuf>,
     #[serde(default)]
     missing_toolchain_prompt: Option<String>,
+    #[serde(default)]
+    linker_script: Option<String>,
 }
 
 impl BuildConfig {
@@ -648,7 +828,26 @@ impl BuildConfig {
         self.missing_toolchain_prompt.as_deref()
     }
 
+    /// Returns the top linker script the Platform's target links with in
+    /// place of its runtime crate's, found on the link search path the
+    /// Platform's build script adds.
+    #[must_use]
+    pub fn linker_script(&self) -> Option<&str> {
+        self.linker_script.as_deref()
+    }
+
     fn validate(&self, path: &Path) -> Result<(), ResolveError> {
+        if self
+            .linker_script()
+            .is_some_and(|script| script.trim().is_empty() || script.contains(['"', '\\', '/']))
+        {
+            return Err(ResolveError::ManifestInvalid {
+                path: path.to_owned(),
+                message: String::from(
+                    "build.linker-script must be a file name, without a path or quotes",
+                ),
+            });
+        }
         let Some(toolchain) = self.rustup_toolchain() else {
             if self.build_std.is_empty()
                 && self.environment_file.is_none()

@@ -26,7 +26,29 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-capsule/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `led-strip` | RGB LED (WS2812, GPIO21) | [`light`](/plugins/vm-led-strip) |
+| `inertial-measurement` | Motion sensor (BMI270) | [`motion`](/plugins/vm-imu) |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `buttons` | Buttons A and B (GPIO42, GPIO0) | [`buttons`](/plugins/vm-buttons) |
+| `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `microphone` | Microphone (PDM) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
+| `infrared` | Infrared transmitter (GPIO4) | [`infrared`](/plugins/vm-infrared) |
+| `buzzer` | Passive buzzer (GPIO2) | [`buzzer`](/plugins/vm-buzzer) |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g13` | `GPIO13` |
+| `grove-g15` | `GPIO15` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g13", "up")
+print(pin:read())
+```

@@ -54,7 +54,235 @@ exposed-io:
 
 `peripherals.io` 声明构造期间使用的私有资源。`peripherals.devices` 选择语义实现。`exposed-io` 是开发板唯一可在运行时配置的 I/O 面。一个芯片原生令牌不能既是私有的外设接线，又是暴露 I/O。
 
+有些面板在主机写入的同一根数据线上应答读取。这样的 `spi-device` 把这根线写作 `mosi`，并设置 `three-wire: true`；它的读取随后从 `mosi` 返回。如果设备只能在比写入更慢的时钟下应答，用 `read-frequency-hz` 指定读取时钟：
+
+~~~yaml
+spi-device:
+  display-spi:
+    peripheral: SPI3
+    sck: GPIO17
+    mosi: GPIO21
+    three-wire: true
+    read-frequency-hz: 8000000
+    chip-select: GPIO15
+    frequency-hz: 40000000
+~~~
+
+实现有时驱动、有时读取的线是 `gpio` 绑定：开发板给出它的引脚，实现得到一个 `ConfigurableDigitalPin`，并在输出和输入之间切换它。Tab5 的显示实现在触摸控制器退出复位时把触摸中断线驱动为高电平，以此设定 GT911 的地址，然后把这根线交还给控制器。由实现设置偏置的输入同样是 `gpio` 绑定：`gpio-buttons` 把每个按键引脚设为输入，并使用开发板指定的上下拉。开发板没有给出的可选 `gpio` 或 `digital-input` 绑定以 `None` 交给实现。
+
+接在八位 Intel 8080 总线上的面板是一个 `parallel-output`：写选通线、数据/命令线和片选线，按位序排列的八根数据线，选通时钟，以及 DMA 暂存缓冲区，其大小就是一次片选有效期间发出的最长突发。平台把它作为 `ParallelOutput` 交给显示实现：
+
+~~~yaml
+parallel-output:
+  display-bus:
+    peripheral: LCD_CAM
+    dma: DMA_CH1
+    wr: GPIO11
+    dc: GPIO12
+    chip-select: GPIO14
+    data: [GPIO13, GPIO9, GPIO8, GPIO7, GPIO6, GPIO5, GPIO4, GPIO3]
+    frequency-hz: 10000000
+    dma-buffer-bytes: 4096
+~~~
+
+直接驱动的电子墨水屏源极驱动器使用同一种绑定，但不带 `dc`：每个字节都是数据，源极时钟接 `wr`，源极起始脉冲接 `chip-select`。它的显示实现把栅极和锁存线作为普通数字输出驱动，并让每一行都在一次突发之内发出。
+
+并行摄像头传感器是一个 `camera-capture`：摄像头控制器及其 DMA 通道、像素时钟、VSYNC、HREF、按位序排列的八根数据线、主时钟及其频率，以及容纳一帧的 DMA 存储。平台把它作为 `FrameReceiver` 交给摄像头实现，每次调用接收完整的一帧。自带振荡器的传感器模组不需要主时钟：开发板省略 `xclk` 和 `xclk-frequency-hz`。M5Stack CoreS3 的 GC0308，一帧 320x240 RGB565：
+
+~~~yaml
+camera-capture:
+  camera-data:
+    peripheral: LCD_CAM
+    dma: DMA_CH0
+    pclk: GPIO45
+    vsync: GPIO46
+    href: GPIO38
+    data: [GPIO39, GPIO40, GPIO41, GPIO42, GPIO15, GPIO16, GPIO48, GPIO47]
+    dma-buffer-bytes: 153600
+~~~
+
+microSD 卡是一个 `sdmmc-device`：SD 主机、卡所接的主机 `slot`（省略时为 0）、按顺序排列的时钟、命令和数据引脚、`bus-width`（1 或 4）、卡识别后运行的时钟（`frequency-hz`，省略时为 25 MHz），以及芯片用片上稳压器为该槽位引脚供电时，该稳压器的 `power-channel` 和 `power-millivolts`。每个平台列出它交给开发板的 SD 主机槽位及各自需要的供电（`platform.yml` 中的 `hal.sdmmc-slots`），`cargo board select` 会拒绝位于其他槽位、声明其他供电，或位于 Wi-Fi 协处理器所用槽位上的存储卡。ESP32-P4 的存储卡：
+
+~~~yaml
+sdmmc-device:
+  micro-sd:
+    peripheral: SDHOST
+    slot: 0
+    clk: GPIO43
+    cmd: GPIO44
+    data: [GPIO39, GPIO40, GPIO41, GPIO42]
+    bus-width: 4
+    power-channel: 4
+    power-millivolts: 3300
+    frequency-hz: 40000000
+~~~
+
+这个绑定由平台构建。在 ESP32-S3 上，开发板组合取得 SD 主机并构建卡的槽位。在 ESP32-P4 上，由于 Wi-Fi 协处理器的链路使用另一个槽位，SD 主机归平台所有：平台入口只构建一次主机，把槽位 0 与芯片外设一起交给开发板组合，存储卡实现收到的就是这个槽位。
+
+当多个设备共用一条总线（例如 LCD 和 microSD 卡）时，多个 `spi-device` 声明可以使用同一个 SPI 控制器。它们写明相同的 `sck`、`mosi` 和 `miso`，以及各自的 `chip-select` 和 `frequency-hz`；组合只构建一次总线，并交给每个实现一个会选中自身、应用自己时钟的设备。M5Stack Core2 的显示屏和存储卡：
+
+~~~yaml
+spi-device:
+  display-spi:
+    peripheral: SPI3
+    sck: GPIO18
+    mosi: GPIO23
+    miso: GPIO38
+    chip-select: GPIO5
+    frequency-hz: 40000000
+  card-spi:
+    peripheral: SPI3
+    sck: GPIO18
+    mosi: GPIO23
+    miso: GPIO38
+    chip-select: GPIO4
+    frequency-hz: 20000000
+~~~
+
+SPI 上的 microSD 卡（`spi-sd-fat-removable-storage`）还会修改其设备的时钟，并在释放片选的情况下输出时钟，这是 SD 规范在识别存储卡时的要求；平台的 SPI 设备类型通过 `SpiDeviceControl` 提供这些操作。
+
+`spi-bus` 是没有片选的 SPI 控制器：实现自己把设备的片选线作为 `digital-output` 来驱动。ESP 平台的总线还实现了 `SpiBusControl`，用于设置时钟和模式，并通过控制器的命令阶段输出不足 8 位的时钟。ATOM Display 的 `m5hdmi-display` 用它在同样的四根线上（TCK 接 SCK，TDI 接 MOSI，TDO 接 MISO，TMS 接片选线）通过 JTAG 加载 FPGA，然后再用 SPI 与之通信：
+
+~~~yaml
+spi-bus:
+  fpga-spi:
+    peripheral: SPI3
+    sck: GPIO5
+    mosi: GPIO19
+    miso: GPIO22
+    frequency-hz: 40000000
+~~~
+
+`spi-output` 是由 SPI 控制器输出的 LED 灯带数据线，它独占一个任何 `spi-device` 都没有使用的控制器。因此，除了 `spi-device` 使用的总线之外，开发板还需要为每个 `spi-output` 留出一个空闲的控制器。
+
+`rmt-output` 是遥控收发器（ESP RMT）的一个发送通道及其引脚，`rmt-input` 是一个接收通道。多个通道可以使用同一个收发器：组合只构建一次收发器，并把各自的通道以 `PulseOutput` 或 `PulseInput` 交给每个实现，它们自行输出或记录电平与时长组成的符号。因此，接在 `rmt-output` 上的 LED 灯带（`rmt-led-strip`）不占用 SPI 控制器，红外 LED 和接收器也使用这些通道的载波和毛刺滤波。每个平台列出可以发送和接收的通道（`platform.yml` 中的 `hal.rmt-channels`），`cargo board select` 会拒绝范围之外的通道。M5Stack StickS3 的红外发射器和接收器：
+
+~~~yaml
+rmt-output:
+  ir-transmit:
+    peripheral: RMT
+    channel: 0
+    pin: GPIO46
+rmt-input:
+  ir-receive:
+    peripheral: RMT
+    channel: 4
+    pin: GPIO42
+~~~
+
+`pwm-output` 是 PWM 控制器（ESP LEDC）的一个定时器、一个输出通道以及它们驱动的引脚。实现通过 `PwmFrequencyControl` 重新设置定时器频率，让无源蜂鸣器改变音高；占空比决定音量。控制器只构建一次并共享：开发板的 PWM 输出和运行时 PWM 池各自使用自己的定时器和通道，`cargo board select` 会拒绝使用池中定时器或通道的输出。M5Stack Dial 的蜂鸣器：
+
+~~~yaml
+pwm-output:
+  buzzer-tone:
+    peripheral: LEDC
+    timer: Timer1
+    channel: Channel1
+    pin: GPIO3
+~~~
+
+`analog-input` 是一个 ADC 通道：控制器和引脚。多个输入可以使用同一个控制器；组合会启用每个通道、只构建一次转换器，并把各自的通道交给每个实现，通道读取校准后的毫伏值（`AnalogVoltageInput`）。ESP32-S3-Korvo-2 的按键阶梯和电池：
+
+~~~yaml
+analog-input:
+  button-ladder:
+    peripheral: ADC1
+    pin: GPIO5
+  battery-sense:
+    peripheral: ADC1
+    pin: GPIO6
+~~~
+
+`pulse-counter` 是解码正交编码器的一个脉冲计数单元：控制器以及 A、B 两路信号的引脚，平台为这两个引脚启用内部上拉。该单元计数两路信号的每个边沿，B 领先 A 时递增，平台在软件中扩展其 16 位计数；实现收到一个 `QuadratureDecoder`。M5Stack Dial 的旋钮：
+
+~~~yaml
+pulse-counter:
+  knob:
+    peripheral: PCNT
+    a: GPIO41
+    b: GPIO40
+~~~
+
+`twai` 是芯片自带的经典 CAN 控制器（ESP 的 TWAI）以及收发器的引脚：`tx` 驱动收发器的 TXD 输入，`rx` 读取它的 RXD 输出。收发器不需要驱动程序。实现收到一个 `CanController`，在应用选定位速率之前它不会接入总线，因此开发板不会干扰位速率未知的总线。M5Stack StamPLC 的 CAN 接口：
+
+~~~yaml
+twai:
+  can-bus:
+    peripheral: TWAI0
+    tx: GPIO42
+    rx: GPIO43
+~~~
+
+`pdm-i2s-stream` 是同一个 I2S 控制器上的 PDM 麦克风和 I2S 功放，每次只工作在一个方向：`clk` 是麦克风的时钟，同时也是功放的字选择，`din` 是麦克风的数据，`bclk` 和 `dout` 是功放的线路。只有其中一种器件的产品省略另一种的线路。数据流以 `sample-rate-hz` 传输单声道 16 位 PCM；平台按 `dma-buffer-bytes` 分配 DMA 缓冲区。M5Stack Atom Echo：
+
+~~~yaml
+pdm-i2s-stream:
+  audio:
+    peripheral: I2S0
+    dma: DMA_I2S0
+    clk: GPIO33
+    din: GPIO23
+    bclk: GPIO19
+    dout: GPIO22
+    sample-rate-hz: 16000
+    dma-buffer-bytes: 4096
+~~~
+
+开发板可以声明除可移动存储外任何类型的多个设备，并把其中恰好一个标记为 `primary: true`：该类型中产品的主设备，例如正面的显示屏或扬声器的编解码器。只有一个设备的类型不需要标记。产品上由多颗芯片组成一个设备时，由一个组合这些芯片驱动的实现来呈现：M5Stack AirQ 的 SEN55 颗粒物传感器和 SCD40 CO2 传感器是一个 `environment-sensor` 设备，即 `scd4x-sen5x-environment-sensor`，它的测量量是两颗芯片的并集。
+
+~~~yaml
+peripherals:
+  devices:
+    front-buttons:
+      implementation: gpio-buttons
+      primary: true
+      bindings: { ... }
+    side-buttons:
+      implementation: gpio-buttons
+      bindings: { ... }
+~~~
+
+开发板最多只有一个 `removable-storage` 设备。获取它的是 System 而不是插件，不经过 `Instance`，并用一个生命周期任务把它挂载到 `/removable/<slot-id>`；`cargo board select` 会拒绝第二张存储卡。
+
 每个生成的语义槽位都是可选的。没有实时时钟的开发板就没有 `RealTimeClock` 值；有实时时钟的开发板则有 `Some(concrete_clock)`。缺席不需要伪造硬件，存在也不会暴露辅助芯片。
+
+## 同一类型的多个设备
+
+每种类型的 `<Kind>Peripheral` trait 通过 `Instance` 获取设备，`Instance` 是该设备在开发板同类设备中按名称排序的位置；trait 返回一个关联类型。生成器按设备数量选择这个类型：
+
+- 只有一个设备时，它就是该设备的具体实现类型，与这种类型只允许一个设备时完全一样。
+- 有多个设备时，它是一个 `Board<Kind>` 枚举，每个设备一个以设备名命名的变体；该类型 trait 的每个错误类型对应一个 `Board<Kind>Error` 枚举，同样每个设备一个变体。这个枚举按变体匹配并转发调用来实现该类型的 trait，所以分发保持静态，不涉及 trait 对象或内存分配。
+
+这些枚举来自 `peripherals/api` 中每种类型一个的宏，由 `boards/hal` 重新导出：`buzzer_set!`、`power_monitor_set!`、`display_set!` 等。它们的形式相同；只有 `display_set!` 写出两个错误类型，因为 `Display` 有控制错误和渲染错误：
+
+~~~rust
+barracuda_board_hal::buttons_set! {
+    pub enum BoardButtons, BoardButtonsError {
+        FrontButtons(FrontButtonsPeripheral),
+        SideButtons(SideButtonsPeripheral),
+    }
+}
+~~~
+
+插件通过它声明的槽位获取设备：`"primary"` 槽位接收主设备，`"*"` 槽位接收所有未被其他槽位取走的设备，主设备排在最前。面向开发板设备的 Lua 包使用一个 `"*"` 槽位，按开发板名称列出设备，脚本不指定名称时使用主设备，所以为只有一个设备的开发板写的脚本，在有多个设备的开发板上无需修改。
+
+## 初始化失败
+
+生成的开发板组合先构建每条共享总线和每个控制器，再初始化每个设备。初始化失败的设备会通过 `log` 以 error 级别记录，包含它在开发板中的名称、实现和错误，它的槽位保持为空：
+
+~~~text
+Board peripheral `<name>` (<implementation>) failed to initialize; the Board starts without it: <error>
+~~~
+
+开发板在没有这个设备的情况下启动，就像它不存在一样：插件的可选槽位什么也收不到，其他设备照常工作。无法构建的共享总线或控制器，例如 I2C 或 SPI 总线、RMT 收发器或 DMA 缓冲区，属于接线错误，挂在它上面的任何设备都无法绕过：它会以 `GeneratedBoardError` 让开发板初始化失败。
+
+如果插件的必需槽位因为设备初始化失败而为空，插件在 `register` 中返回 `PluginError::PeripheralUnavailable`。插件管理器记录这条错误，不加载这个插件以及所有依赖它的插件，并启动 System 的其余部分。
+
+## 按键事件
+
+`Buttons::read` 采样每个按键此刻是否按下，`Buttons::poll_event` 按先后顺序返回按键发生过的事件：`Pressed`（按下）、`Released`（松开）、`Click`（在长按时间之前松开的一次单击），以及 `LongPress`（按住达到长按时间时、按键仍按下时报告）。每个事件用按键在快照中的序号指明按键。读取状态不会消耗事件，取走事件也不会让下一次状态读取漏掉按下。
+
+采样按键电平的实现（`gpio-buttons`、`pi4ioe5v6408-buttons`、`powerhub-buttons`、`adc-ladder-buttons`、`capacitive-touch-buttons` 和 `m5pm1-buttons`）用 `peripherals/api` 中的 `ButtonTracker` 生成事件：轮询时若没有待取事件就采样一次。它沿用 M5Unified `Button_Class` 的规则：新电平保持消抖时间后才算数，若上一次采样早于消抖时间则立即算数。每个实现都有 `debounce-ms`（10 ms）和 `long-press-ms`（500 ms）参数，即 M5Unified 的默认值；`m5pm1-buttons` 只有 `long-press-ms`，因为 M5PM1 报告的是已稳定的电平，两次采样之间发生又结束的一次按下报告为 `Pressed`、`Released`、`Click`。`axp192-axp2101-buttons` 在 PMIC 锁存按下后一次性报告：短按为 `Pressed`、`Released`、`Click`，长按为 `Pressed`、`LongPress`、`Released`，长按时间由 PMIC 自己决定。每个实现最多保存 16 个事件，读取跟不上时丢弃最早的事件。
 
 ## 实现清单
 
@@ -76,11 +304,16 @@ exposed-io:
 在 M5Stack Tab5 上，位于 `0x43` 的 PI4IOE5V6408 就是这样被隐藏的：
 
 - 音频编解码器实现拥有扬声器功放的使能引脚；
-- 显示实现拥有面板复位引脚；
-- 触摸实现拥有触摸复位引脚；
+- 显示实现拥有面板和触摸复位引脚：它根据应答的触摸控制器识别面板，所以和 M5GFX 一样由它让两者退出复位；
 - 摄像头实现拥有传感器复位引脚。
 
-这四个实现都使用 `drivers/chips/pi4ioe5v6408`；没有一个向 System 暴露这个扩展芯片、它的引脚或一个通用的系统控制器外设。其他由 PI4 控制的信号同样必须由它们所使能的具体语义服务拥有。
+这三个实现都使用 `drivers/chips/pi4ioe5v6408`；没有一个向 System 暴露这个扩展芯片、它的引脚或一个通用的系统控制器外设。其他由 PI4 控制的信号同样必须由它们所使能的具体语义服务拥有。
+
+在 M5Stack CoreP4X 上，`corep4x-dsi-display` 以同样的方式隐藏位于 `0x4F` 的 M5IOE1 扩展芯片（面板电源、复位和 PWM 背光）和位于 `0x6E` 的 M5PM1 电源控制器（5 V 升压），分别通过 `drivers/chips/m5ioe1` 和 `drivers/chips/m5pm1`。Paper Mono 的 `paper-mono-display` 用同样两个驱动控制面板电源、复位和前光；`paper-color-display` 和 `paper-diy-display` 用 M5PM1 控制电子墨水屏电源。
+
+如果辅助芯片同时提供一个语义外设，就按寄存器共享，绝不让两个所有者拥有同一个寄存器。在 Core2、Tough、Station、StickC 和 CoreS3 上，`m5stack-pmic-display` 控制 AXP192 或 AXP2101 的稳压器，而 `axp192-axp2101-power-monitor` 通过自己的总线视图读取同一个 PMIC 的电池数据，只访问状态、ADC 和电量计寄存器。`axp192-axp2101-vibration` 在它们旁边只写 Core2 振动马达稳压器的电压字段和使能位，`m5ioe1-vibration` 只写 StopWatch 上 M5IOE1 的 PWM 通道及其引脚。`axp192-axp2101-buttons` 只设置电源键的两个中断使能位，只清除它的两个状态位；这些状态位写 1 清除，所以其他中断的状态保持不变。`m5pm1-power-monitor` 和 `pi4ioe5v6408-buttons` 同样只配置自己的 M5PM1 或扩展芯片引脚，其他引脚仍归使用它们的显示实现；`m5pm1-buttons` 只读取 M5PM1 的按键状态寄存器，只设置按键配置中的单击复位禁用位。同一颗 INA3221 各通道上的 `ina3221-power-monitor` 设备只读取各自的通道，从不写这颗芯片。
+
+M5Stack PowerHub 的 STM32G031 电源协处理器转发四个语义外设，因此四个实现以同样方式共享它：`powerhub-buttons` 只读取它的按键寄存器，`powerhub-led-strip` 只写 LED 电源、颜色和亮度寄存器，`powerhub-power-monitor` 只写计量使能并读取电池寄存器，`powerhub-rtc` 只访问时钟寄存器。四者都使用 `drivers/chips/m5powerhub`。
 
 ## 稳定的构造和运行时行为
 
@@ -95,5 +328,12 @@ exposed-io:
 ## 添加硬件
 
 添加一块复用现有实现的开发板，通常只需要 `board.yml` 接线和原生布局文件。在现有语义外设背后添加一颗新芯片时，按需添加一个芯片驱动、一个外设实现及其清单。添加一个真正全新的语义外设，则从它的 API trait 和可选的所有权槽位开始，然后再添加实现。
+
+新增一种类型是四处只增不改的修改，每处都紧挨着已有的同类内容：
+
+1. `peripherals/api`：语义 trait、带 `take_<kind>(instance)` 函数的 `<Kind>Peripheral` trait，以及 `src/sets.rs` 中用那里的共享辅助宏构建的 `<kind>_set!` 宏。这个宏转发每个 trait 方法（包括默认方法），并等待异步方法；每个关联错误类型对应声明一个集合错误类型。
+2. `boards/hal`：重新导出这个宏，并添加该类型的 `Unavailable<Kind>` 类型及其 `NoPeripherals` 实现；`core/system` 在交给插件的外设上加上 `<Kind>Peripheral` 约束，以及设备的 `Send` 约束和错误的 `Debug` 约束。
+3. `peripherals/config`：在 `PERIPHERAL_APIS` 中注册该类型，并在 `CLAIMABLE_KINDS` 中添加一个 `ClaimableKind` 条目，写明 trait、获取函数、关联类型、不可用类型、集合宏和集合错误后缀。生成器没有其他按类型区分的代码。
+4. 测试：在 `peripherals/api/tests/sets.rs` 中为这个宏添加一个双设备用例，并把该类型加入 `peripherals/config/tests/catalog.rs` 的 `CLAIMABLE_KINDS` 列表，这个测试检查每种已注册类型都能生成集合。
 
 这让开发板数量不会成倍增加 Rust 代码：可复用的芯片行为、语义适配、平台资源构造和产品接线各自位于一层。

@@ -26,7 +26,37 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-atom-s3r-ext/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `inertial-measurement` | Motion sensor (BMI270, with the BMM150 magnetometer on its auxiliary bus) | [`motion`](/plugins/vm-imu) |
+| `infrared` | Infrared transmitter (GPIO47) | [`infrared`](/plugins/vm-infrared) |
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g1` | `GPIO1` |
+| `grove-g2` | `GPIO2` |
+| `header-g3` | `GPIO3` |
+| `header-g4` | `GPIO4` |
+| `header-g9` | `GPIO9` |
+| `header-g10` | `GPIO10` |
+| `header-g11` | `GPIO11` |
+| `header-g12` | `GPIO12` |
+| `header-g13` | `GPIO13` |
+| `header-g17` | `GPIO17` |
+| `header-g21` | `GPIO21` |
+| `header-g40` | `GPIO40` |
+| `header-g42` | `GPIO42` |
+| `header-g46` | `GPIO46` |
+| `header-g48` | `GPIO48` |
+
+The `header-*` pins are on the 2.54 mm proto header.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g1", "up")
+print(pin:read())
+```

@@ -11,7 +11,7 @@ The M5Stack Basic is an ESP32 Board from M5Stack.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`screen`](/boards/profiles)
+- Profile: [`screen-connected`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-basic/partitions.csv`
 
 ## Build and run
@@ -29,3 +29,30 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `power-monitor` | Battery level (IP5306) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `buttons` | Buttons A, B, C (GPIO39, GPIO38, GPIO37) | [`buttons`](/plugins/vm-buttons) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
+
+The IP5306 reports the battery level in 25 % steps and whether it charges; it
+measures no voltage or current, so `measure` fails on this Board.
+
+The microSD card shares the display's SPI bus through its own chip select.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g36` | `GPIO36` |
+| `port-c-g16` | `GPIO16` |
+| `port-c-g17` | `GPIO17` |
+
+Port A is the internal I2C bus (`GPIO21` / `GPIO22`), so it is not exposed.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-b-g26", "up")
+print(pin:read())
+```

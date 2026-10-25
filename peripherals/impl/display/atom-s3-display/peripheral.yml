@@ -1,0 +1,33 @@
+id: atom-s3-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-atom-s3-display
+  crate: barracuda_atom_s3_display
+  factory: "::{{crate}}::AtomS3DisplayImplementation<{{binding.spi.type}}, {{binding.dc.type}}, {{binding.reset.type}}, {{binding.backlight.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::AtomS3DisplayBindings::new({{binding.spi.value}}, {{binding.dc.value}}, {{binding.reset.value}}, {{binding.backlight.value}}, {{hal.delay.value}}, ::{{crate}}::take_transfer_buffer())"
+  config-expression: "::{{crate}}::AtomS3DisplayConfig::new({{parameter.orientation}})"
+bindings:
+  # A three-wire SPI device: the controller is identified by reading its ID
+  # back on the data line.
+  spi:
+    kind: spi-device
+  dc:
+    kind: digital-output
+    initial: low
+  reset:
+    kind: digital-output
+    initial: high
+  backlight:
+    kind: digital-output
+    initial: low
+parameters:
+  orientation:
+    type: enum
+    values: [deg0, deg90, deg180, deg270]
+    rust-values:
+      deg0: "::barracuda_peripheral::display::DisplayOrientation::Deg0"
+      deg90: "::barracuda_peripheral::display::DisplayOrientation::Deg90"
+      deg180: "::barracuda_peripheral::display::DisplayOrientation::Deg180"
+      deg270: "::barracuda_peripheral::display::DisplayOrientation::Deg270"
+    default: deg0

@@ -29,3 +29,27 @@ cargo image deploy
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `buttons` | G0 按键（GPIO0） | [`buttons`](/zh/plugins/vm-buttons) |
+| `keyboard` | 56 键键盘（74HC138 矩阵） | [`keyboard`](/zh/plugins/vm-keyboard) |
+| `battery` | 电池电压（ADC 电阻分压） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `audio` | 音频（NS4168 功放、SPM1423 PDM 麦克风） | [`audio`](/zh/plugins/vm-audio) |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
+| `led-strip` | RGB LED（WS2812，GPIO21） | [`light`](/zh/plugins/vm-led-strip) |
+| `infrared` | 红外发射器（GPIO44） | [`infrared`](/zh/plugins/vm-infrared) |
+
+RGB LED 由 RMT 输出，因为两个 SPI 控制器分别用于 microSD 卡和显示屏。Cardputer v1.1 上该 LED 由显示屏背光 GPIO38 供电，因此只在背光点亮时发光。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `grove-g1` | `GPIO1` |
+| `grove-g2` | `GPIO2` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g1", "up")
+print(pin:read())
+```

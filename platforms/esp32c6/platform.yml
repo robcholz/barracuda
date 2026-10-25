@@ -14,8 +14,11 @@ build:
       rustup toolchain install 1.98.1
       cargo install espup
       espup install --stable-version 1.98.1 --targets esp32c6 --esp-riscv-gcc
+  # esp-hal's linkall.x over a memory map whose flash window is the 16 MiB
+  # the chip maps, not esp-hal's 4 MiB (ld/, on the build script's link path).
+  linker-script: barracuda-esp32c6.x
 hal:
-  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device]
+  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, analog-input, pulse-counter, power-hold, rmt-output, rmt-input, pwm-output]
   runtime-i2c-controllers: [I2C0]
   runtime-spi-controllers: [SPI2]
   runtime-uart-controllers: [UART1]
@@ -33,6 +36,10 @@ hal:
     - controller: LEDC
       timers: [Timer0]
       channels: [Channel0]
+  # RMT: channels 0-1 transmit and 2-3 receive (esp-hal `rmt`).
+  rmt-channels:
+    transmit: [0, 1]
+    receive: [2, 3]
 selection:
   board-chips:
     - esp32c6
@@ -49,9 +56,11 @@ application:
   launcher:
     program: espflash
     arguments: [flash, --monitor, "{application}"]
-  # The bootloader, partition table and app merged from 0x0. Its padding
-  # erases otadata, so a device that had switched to ota_1 boots ota_0 again,
-  # and it ends before kv_database, which keeps the device's settings.
+  # The bootloader, partition table and app merged from 0x0. The app goes to
+  # ota_0, the first app slot of every Board and the only one below 16 MiB of
+  # flash. Its padding erases otadata, so a device that had switched to ota_1
+  # boots ota_0 again, and it ends before kv_database, which keeps the
+  # device's settings.
   release:
     driver: command
     program: espflash

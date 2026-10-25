@@ -12,24 +12,35 @@ fn native_csv_supplies_the_complete_partition_table() {
         assert_eq!(BOARD_ESP32S3_PARTITION_TABLE.ota_slot_count(), 0);
         return;
     }
-    assert_eq!(BOARD_ESP32S3_PARTITION_TABLE.ota_slot_count(), 2);
-    assert_eq!(BOARD_ESP32S3_PARTITION_TABLE.regions().len(), 8);
-    assert!(BOARD_ESP32S3_PARTITION_TABLE.get("nvs").is_some());
-    assert!(BOARD_ESP32S3_PARTITION_TABLE.get("ota_0").is_some());
+    // One app slot on Boards with less than 16 MiB of flash, two on the
+    // others; the release image and `cargo run` write `ota_0`.
+    let slots = BOARD_ESP32S3_PARTITION_TABLE.ota_slot_count();
+    assert!(matches!(slots, 1 | 2), "{slots} app slots");
+    assert_eq!(BOARD_ESP32S3_PARTITION_TABLE.regions().len(), 6 + slots);
+    for name in ["nvs", "otadata", "phy_init", "ota_0"] {
+        assert!(
+            BOARD_ESP32S3_PARTITION_TABLE.get(name).is_some(),
+            "no `{name}`"
+        );
+    }
     assert_eq!(
-        BOARD_ESP32S3_PARTITION_TABLE
-            .get("kv_database")
-            .expect("KV database region")
-            .offset(),
-        0x82_0000
+        BOARD_ESP32S3_PARTITION_TABLE.get("ota_1").is_some(),
+        slots == 2
     );
-    assert_eq!(
-        BOARD_ESP32S3_PARTITION_TABLE
-            .get("system")
-            .expect("System region")
-            .offset(),
-        0x86_0000
-    );
+
+    // The data regions follow the last app slot, so the release image, which
+    // ends in `ota_0`, leaves them alone.
+    let last_slot = BOARD_ESP32S3_PARTITION_TABLE
+        .get(if slots == 2 { "ota_1" } else { "ota_0" })
+        .expect("last app slot");
+    let database = BOARD_ESP32S3_PARTITION_TABLE
+        .get("kv_database")
+        .expect("KV database region");
+    assert_eq!(database.offset(), last_slot.offset() + last_slot.size());
+    let system = BOARD_ESP32S3_PARTITION_TABLE
+        .get("system")
+        .expect("System region");
+    assert_eq!(system.offset(), database.offset() + database.size());
 
     let resources = BOARD_ESP32S3_PARTITION_TABLE
         .get("resources")

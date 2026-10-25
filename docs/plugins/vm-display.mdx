@@ -32,9 +32,10 @@ Lua API:
 
 - `display.available([name]) -> boolean`: whether the named display, or any
   display when no name is given, can still be opened
-- `display.list() -> { name, ... }`: the Board names of the Plugin's displays
+- `display.list() -> { name, ... }`: the Board names of the Plugin's displays,
+  the primary display first when the Plugin has it
 - `display.open([name]) -> handle`: opens the named display, or the first one
-  still available
+  still available in `list` order
 - `display.rgb565(red, green, blue) -> integer`: packs 8-bit channels into one
   RGB565 value
 - `handle:descriptor() -> width, height, pixel_format, technology`

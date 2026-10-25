@@ -14,22 +14,30 @@ build:
     espup installs the esp toolchain beside an Xtensa target. Install them with:
       cargo install espup
       espup install --toolchain-version 1.98.1.0 --targets esp32s3,esp32p4 --esp-riscv-gcc
+  # esp-hal's linkall.x over a memory map whose flash window is the 64 MiB
+  # the chip maps, not esp-hal's 4 MiB (ld/, on the build script's link path).
+  linker-script: barracuda-esp32p4.x
 hal:
-  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device]
+  bindings: [digital-input, digital-output, gpio, spi-device, spi-bus, spi-output, i2c-device, sdmmc-device, i2s-stream, dsi-host, ethernet-rmii, wifi-coprocessor-sdio, power-hold, rmt-output, rmt-input]
   runtime-i2c-controllers: [I2C0, I2C1]
   runtime-spi-controllers: [SPI2, SPI3]
   runtime-uart-controllers: [UART1]
-  runtime-adc-controllers:
-    - controller: ADC1
-      channels:
-        - { channel: ADC1_CH0, pin: GPIO16 }
-        - { channel: ADC1_CH1, pin: GPIO17 }
-        - { channel: ADC1_CH2, pin: GPIO18 }
-        - { channel: ADC1_CH3, pin: GPIO19 }
-        - { channel: ADC1_CH4, pin: GPIO20 }
-        - { channel: ADC1_CH5, pin: GPIO21 }
-        - { channel: ADC1_CH6, pin: GPIO22 }
-        - { channel: ADC1_CH7, pin: GPIO23 }
+  # No runtime ADC: the entropy source keeps SAR ADC1 sampling its noise
+  # channel under the digital controller, and esp-hal's ADC driver would
+  # reset the shared SAR ADC block and take its clock away when dropped.
+  # The Platform owns the one SD host. Slot 1 reaches any pin through the
+  # GPIO matrix and carries a Board's Wi-Fi co-processor link; slot 0 sits on
+  # the fixed IO_MUX pads GPIO39-44, which run from on-chip LDO VO4. esp-hal
+  # ties VO4 to the 3.3 V rail when it starts the SD host, and ESP-IDF runs SD
+  # cards at 3.3 V too (`SDMMC_HOST_DEFAULT` `io_voltage`), so a Board's card
+  # on slot 0 declares that supply.
+  sdmmc-slots:
+    - slot: 0
+      power: { channel: 4, millivolts: 3300 }
+  # RMT: channels 0-3 transmit and 4-7 receive (esp-hal `rmt`).
+  rmt-channels:
+    transmit: [0, 1, 2, 3]
+    receive: [4, 5, 6, 7]
 selection:
   board-chips:
     - esp32p4
@@ -46,9 +54,11 @@ application:
   launcher:
     program: espflash
     arguments: [flash, --monitor, "{application}"]
-  # The bootloader, partition table and app merged from 0x0. Its padding
-  # erases otadata, so a device that had switched to ota_1 boots ota_0 again,
-  # and it ends before kv_database, which keeps the device's settings.
+  # The bootloader, partition table and app merged from 0x0. The app goes to
+  # ota_0, the first app slot of every Board and the only one below 16 MiB of
+  # flash. Its padding erases otadata, so a device that had switched to ota_1
+  # boots ota_0 again, and it ends before kv_database, which keeps the
+  # device's settings.
   release:
     driver: command
     program: espflash

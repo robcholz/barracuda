@@ -29,3 +29,29 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `buttons` | G0 button (GPIO0) | [`buttons`](/plugins/vm-buttons) |
+| `keyboard` | 56-key keyboard (74HC138 matrix) | [`keyboard`](/plugins/vm-keyboard) |
+| `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `audio` | Audio (NS4168 amplifier, SPM1423 PDM microphone) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
+| `led-strip` | RGB LED (WS2812, GPIO21) | [`light`](/plugins/vm-led-strip) |
+| `infrared` | Infrared transmitter (GPIO44) | [`infrared`](/plugins/vm-infrared) |
+
+The RGB LED is clocked out of the RMT, as both SPI controllers serve the
+microSD card and the display. On Cardputer v1.1 the LED takes its supply from
+GPIO38, the display backlight, so it lights only while the backlight is on.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g1` | `GPIO1` |
+| `grove-g2` | `GPIO2` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g1", "up")
+print(pin:read())
+```

@@ -14,6 +14,7 @@ use barracuda_platform_config::{
 use barracuda_plugin::manifest::{parse as parse_plugin_manifest, ManifestError};
 use barracuda_vfs::{MountOptions, Vfs};
 use barracuda_vfs_fat::FatFs;
+use barracuda_vfs_littlefs::filesystem_block_count;
 use embedded_io::{ErrorType, SeekFrom};
 use embedded_io_async::{Read, Seek, Write};
 use esp_idf_part::{DataType, Flags, PartitionTable, SubType};
@@ -622,45 +623,13 @@ fn build_littlefs_entries(
     capacity: usize,
     entries: &[SourceEntry],
 ) -> Result<Vec<u8>, ImageBuildError> {
-    const BLOCK_SIZE: usize = 4096;
-
+    // The firmware mounts the partition with the same geometry.
     let block_count = capacity
-        .checked_div(BLOCK_SIZE)
-        .filter(|count| *count >= 2 && count.saturating_mul(BLOCK_SIZE) == capacity)
+        .checked_div(ImageStorage::BLOCK_SIZE)
+        .filter(|count| count.saturating_mul(ImageStorage::BLOCK_SIZE) == capacity)
+        .and_then(filesystem_block_count)
         .ok_or(ImageBuildError::InvalidCapacity(capacity))?;
-
-    macro_rules! build_geometry {
-        ($blocks:expr) => {{
-            build_littlefs_with_geometry::<$blocks>(capacity, entries)
-        }};
-    }
-
-    match block_count {
-        0..2 => Err(ImageBuildError::InvalidCapacity(capacity)),
-        2..4 => build_geometry!(2),
-        4..8 => build_geometry!(4),
-        8..16 => build_geometry!(8),
-        16..32 => build_geometry!(16),
-        32..64 => build_geometry!(32),
-        64..128 => build_geometry!(64),
-        128..256 => build_geometry!(128),
-        256..384 => build_geometry!(256),
-        384..512 => build_geometry!(384),
-        512..768 => build_geometry!(512),
-        768..1_024 => build_geometry!(768),
-        1_024..1_536 => build_geometry!(1_024),
-        1_536..2_048 => build_geometry!(1_536),
-        2_048..3_072 => build_geometry!(2_048),
-        3_072..4_096 => build_geometry!(3_072),
-        _ => build_geometry!(4_096),
-    }
-}
-
-fn build_littlefs_with_geometry<const BLOCK_COUNT: usize>(
-    capacity: usize,
-    entries: &[SourceEntry],
-) -> Result<Vec<u8>, ImageBuildError> {
-    let mut storage = ImageStorage::<BLOCK_COUNT>::new(capacity);
+    let mut storage = ImageStorage::new(capacity, block_count);
     Filesystem::format(&mut storage).map_err(|_error| ImageBuildError::Filesystem {
         path: String::from("/"),
     })?;
@@ -682,14 +651,16 @@ fn build_littlefs_with_geometry<const BLOCK_COUNT: usize>(
     Ok(storage.into_bytes())
 }
 
-struct ImageStorage<const BLOCK_COUNT: usize> {
+struct ImageStorage {
     bytes: Vec<u8>,
+    block_count: usize,
 }
 
-impl<const BLOCK_COUNT: usize> ImageStorage<BLOCK_COUNT> {
-    fn new(capacity: usize) -> Self {
+impl ImageStorage {
+    fn new(capacity: usize, block_count: usize) -> Self {
         Self {
             bytes: vec![0xff; capacity],
+            block_count,
         }
     }
 
@@ -706,14 +677,19 @@ impl<const BLOCK_COUNT: usize> ImageStorage<BLOCK_COUNT> {
     }
 }
 
-impl<const BLOCK_COUNT: usize> Storage for ImageStorage<BLOCK_COUNT> {
+impl Storage for ImageStorage {
     const READ_SIZE: usize = 1;
     const WRITE_SIZE: usize = 1;
     const BLOCK_SIZE: usize = 4096;
-    const BLOCK_COUNT: usize = BLOCK_COUNT;
+    /// Unused: the filesystem takes the count from [`Storage::block_count`].
+    const BLOCK_COUNT: usize = 0;
 
     type CACHE_SIZE = U128;
     type LOOKAHEAD_SIZE = U8;
+
+    fn block_count(&self) -> usize {
+        self.block_count
+    }
 
     fn read(&mut self, offset: usize, buffer: &mut [u8]) -> littlefs2::io::Result<usize> {
         let source = self

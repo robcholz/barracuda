@@ -28,4 +28,27 @@ cargo image deploy
 
 | 设备 | 说明 | Lua 包 |
 | --- | --- | --- |
+| `led-strip` | RGB LED（WS2812，GPIO21） | [`light`](/zh/plugins/vm-led-strip) |
 | `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `real-time-clock` | 实时时钟（BM8563） | — |
+| `buttons` | 按键 A（旋钮按下）和 B（GPIO42、GPIO0） | [`buttons`](/zh/plugins/vm-buttons) |
+| `rotary-encoder` | 旋钮编码器（A GPIO41、B GPIO40，脉冲计数器） | [`encoder`](/zh/plugins/vm-rotary-encoder) |
+| `battery` | 电池电压（ADC 电阻分压） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `buzzer` | 无源蜂鸣器（GPIO3） | [`buzzer`](/zh/plugins/vm-buzzer) |
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO15` |
+| `port-a-sda` | `GPIO13` |
+| `port-b-g1` | `GPIO1` |
+| `port-b-g2` | `GPIO2` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

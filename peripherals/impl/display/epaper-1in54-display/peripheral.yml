@@ -1,0 +1,23 @@
+id: epaper-1in54-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-epaper-1in54-display
+  crate: barracuda_epaper_1in54_display
+  factory: "::{{crate}}::Epaper1in54DisplayImplementation<{{binding.spi.type}}, {{binding.busy.type}}, {{binding.dc.type}}, {{binding.reset.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Epaper1in54Bindings::new({{binding.spi.value}}, {{binding.busy.value}}, {{binding.dc.value}}, {{binding.reset.value}}, {{hal.delay.value}})"
+  config-expression: "()"
+bindings:
+  spi:
+    kind: spi-device
+  # Read once after reset to tell the two panel controllers apart: the
+  # SSD1681's BUSY idles low, the JD79653A's BUSY_N idles high.
+  busy:
+    kind: digital-input
+  dc:
+    kind: digital-output
+    initial: low
+  reset:
+    kind: digital-output
+    initial: high
+parameters: {}

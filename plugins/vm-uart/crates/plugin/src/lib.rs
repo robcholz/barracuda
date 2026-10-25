@@ -11,8 +11,8 @@ use barracuda_board_hal::{
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{
-    Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, MetaMethod, Package, Result, UserData,
-    UserDataHandle, UserDataMethods,
+    Bytes, Error, Lua, LuaPackage, LuaPackageRegistry, LuaValue, MetaMethod, Package, Result,
+    UserData, UserDataHandle, UserDataMethods, Variadic,
 };
 use embedded_io_async::{Read, Write};
 use portable_atomic::{AtomicBool, Ordering};
@@ -96,30 +96,26 @@ where
                         && available.uart_available(tx.as_deref(), rx.as_deref())))
                 },
             )?;
-            package.register_with(
-                "open",
-                move |lua, args: (Option<String>, Option<String>, i64, i64, String, i64)| {
-                    Some((|| {
-                        ensure_active(&active)?;
-                        let (tx, rx, baud, data_bits, parity, stop_bits) = args;
-                        validate_pins(tx.as_deref(), rx.as_deref())?;
-                        let config = UartConfig {
-                            baud: positive_u32(baud)?,
-                            data_bits: parse_data_bits(data_bits)?,
-                            parity: parse_parity(&parity)?,
-                            stop_bits: parse_stop_bits(stop_bits)?,
-                        };
-                        let port = io
-                            .open_uart(UartRequest {
-                                tx: tx.as_deref(),
-                                rx: rx.as_deref(),
-                                config,
-                            })
-                            .map_err(|error| Error::runtime(error.to_string()))?;
-                        lua.create_userdata(UartHandle::new(port, Arc::clone(&active)))
-                    })())
-                },
-            )
+            package.register_with("open", move |lua, values: Variadic<LuaValue>| {
+                Some((|| {
+                    ensure_active(&active)?;
+                    let OpenArguments {
+                        tx,
+                        rx,
+                        driver_enable,
+                        config,
+                    } = OpenArguments::parse(values)?;
+                    let port = io
+                        .open_uart(UartRequest {
+                            tx: tx.as_deref(),
+                            rx: rx.as_deref(),
+                            driver_enable: driver_enable.as_deref(),
+                            config,
+                        })
+                        .map_err(|error| Error::runtime(error.to_string()))?;
+                    lua.create_userdata(UartHandle::new(port, Arc::clone(&active)))
+                })())
+            })
         })
     }
 }
@@ -246,6 +242,71 @@ where
         .map_err(io_error)
 }
 
+/// The arguments of `uart.open(tx, rx, baud, data_bits, parity, stop_bits
+/// [, de])`: the seventh, an RS485 transceiver's driver-enable pin, may be
+/// left out.
+struct OpenArguments {
+    tx: Option<String>,
+    rx: Option<String>,
+    driver_enable: Option<String>,
+    config: UartConfig,
+}
+
+impl OpenArguments {
+    fn parse(values: Variadic<LuaValue>) -> Result<Self> {
+        let values: alloc::vec::Vec<LuaValue> = values.into();
+        if !(6..=7).contains(&values.len()) {
+            return Err(Error::runtime(
+                "uart.open takes tx, rx, baud, data_bits, parity, stop_bits, and optionally de",
+            ));
+        }
+        let mut values = values.into_iter();
+        let mut next = || values.next().unwrap_or(LuaValue::Nil);
+        let tx = optional_pin(next())?;
+        let rx = optional_pin(next())?;
+        let baud = integer(next(), "baud")?;
+        let data_bits = integer(next(), "data bits")?;
+        let parity = match next() {
+            LuaValue::String(parity) => parity,
+            _ => return Err(Error::runtime("UART parity must be a string")),
+        };
+        let stop_bits = integer(next(), "stop bits")?;
+        let driver_enable = optional_pin(next())?;
+        validate_pins(tx.as_deref(), rx.as_deref())?;
+        if driver_enable.is_some() && (driver_enable == tx || driver_enable == rx) {
+            return Err(Error::runtime(
+                "UART driver-enable pin must differ from TX and RX",
+            ));
+        }
+        Ok(Self {
+            tx,
+            rx,
+            driver_enable,
+            config: UartConfig {
+                baud: positive_u32(baud)?,
+                data_bits: parse_data_bits(data_bits)?,
+                parity: parse_parity(&parity)?,
+                stop_bits: parse_stop_bits(stop_bits)?,
+            },
+        })
+    }
+}
+
+fn optional_pin(value: LuaValue) -> Result<Option<String>> {
+    match value {
+        LuaValue::Nil => Ok(None),
+        LuaValue::String(name) => Ok(Some(name)),
+        _ => Err(Error::runtime("a UART pin is a Board pin name or nil")),
+    }
+}
+
+fn integer(value: LuaValue, what: &str) -> Result<i64> {
+    match value {
+        LuaValue::Integer(value) => Ok(value),
+        _ => Err(Error::runtime(format!("UART {what} must be an integer"))),
+    }
+}
+
 fn validate_pins(tx: Option<&str>, rx: Option<&str>) -> Result<()> {
     if tx.is_none() && rx.is_none() {
         Err(Error::runtime("UART requires TX or RX"))
@@ -368,7 +429,10 @@ mod tests {
             &self,
             request: UartRequest<'_>,
         ) -> core::result::Result<Self::Port, Self::Error> {
-            if self.uart_available(request.tx, request.rx) && request.config.baud == 115_200 {
+            if self.uart_available(request.tx, request.rx)
+                && request.config.baud == 115_200
+                && matches!(request.driver_enable, None | Some("D3"))
+            {
                 Ok(TestPort)
             } else {
                 Err(OpenError)
@@ -382,6 +446,15 @@ mod tests {
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install UART package");
         let result: bool = futures_lite::future::block_on(lua.load("local uart = require('uart')\nlocal port <close> = uart.open('D1', 'D2', 115200, 8, 'none', 1)\nport:write('AT')\nlocal reply = port:read(16)\nreturn reply == 'OK' and port:is_open()").eval_async()).expect("use UART");
+        assert!(result);
+    }
+
+    #[test]
+    fn lua_opens_an_rs485_port_with_its_driver_enable_pin() {
+        let package = UartPackage::new(Arc::new(Provider));
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install UART package");
+        let result: bool = futures_lite::future::block_on(lua.load("local uart = require('uart')\nlocal port <close> = uart.open('D1', 'D2', 115200, 8, 'none', 1, 'D3')\nlocal bad, err = uart.open('D1', 'D2', 115200, 8, 'none', 1, 'D1')\nreturn port:is_open() and bad == nil and tostring(err):find('driver%-enable') ~= nil").eval_async()).expect("use RS485");
         assert!(result);
     }
 

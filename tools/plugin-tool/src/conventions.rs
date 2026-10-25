@@ -203,6 +203,14 @@ pub(crate) fn summary_problems(text: &str, manifest: &PluginManifest) -> Vec<Str
             listing(&declared.into_iter().collect::<Vec<_>>())
         ));
     }
+    let takes_wifi = code_spans(value("Context resources"))
+        .iter()
+        .any(|span| span == "wifi");
+    if takes_wifi != manifest.platform.wifi {
+        problems.push(String::from(
+            "Context resources name `wifi` exactly when plugin.toml sets `[platform] wifi = true`",
+        ));
+    }
     for (key, value) in &bullets[..SUMMARY.len()] {
         if value.trim().is_empty() {
             problems.push(format!("{key} is empty; write `none`"));
@@ -457,5 +465,21 @@ mod tests {
         assert_eq!(problems(&unsettled), ["Settings must name `slots`"]);
         assert!(problems(&missing)[0].starts_with("the summary must open with"));
         assert_eq!(problems(&blank), ["Tasks is empty; write `none`"]);
+    }
+
+    #[test]
+    fn a_summary_names_the_radio_exactly_when_the_plugin_takes_it() {
+        let radio = DOCUMENT.replace(
+            "- Context resources: `ip_stack`",
+            "- Context resources: `wifi`, `ip_stack`",
+        );
+        let takes = format!("{MANIFEST}\n[platform]\nwifi = true\n");
+        let expected = [
+            "Context resources name `wifi` exactly when plugin.toml sets `[platform] wifi = true`",
+        ];
+
+        assert!(summary_problems(&radio, &manifest(&takes)).is_empty());
+        assert_eq!(summary_problems(&radio, &manifest(MANIFEST)), expected);
+        assert_eq!(summary_problems(DOCUMENT, &manifest(&takes)), expected);
     }
 }

@@ -11,7 +11,7 @@ The M5Stack StickC Plus2 is an ESP32 Board from M5Stack.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen-connected`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-stickc-plus2/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,38 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-stickc-plus2/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | Display (MIPI DBI) | [`display`](/plugins/vm-display) |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `inertial-measurement` | Motion sensor (MPU6886) | [`motion`](/plugins/vm-imu) |
+| `buttons` | Buttons A, B, and power (GPIO37, GPIO39, GPIO35) | [`buttons`](/plugins/vm-buttons) |
+| `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `microphone` | Microphone (SPM1423 PDM) | [`audio`](/plugins/vm-audio) |
+| `infrared` | Infrared transmitter (GPIO19) | [`infrared`](/plugins/vm-infrared) |
+| `buzzer` | Passive buzzer (GPIO2) | [`buzzer`](/plugins/vm-buzzer) |
+
+The red LED shares GPIO19 with the infrared LED, so it lights with each
+infrared burst; it is not declared as an indicator.
+
+The Platform entry drives `GPIO4`, the battery power latch
+(`hardware.power-hold`), high before anything else is built, so the Board
+stays on without USB power once its power button is released.
+
+GPIO34 to GPIO39 have no internal pull-up; the buttons use the Board's own
+resistors.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g32` | `GPIO32` |
+| `grove-g33` | `GPIO33` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g32", "up")
+print(pin:read())
+```

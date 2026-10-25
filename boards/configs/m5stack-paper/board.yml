@@ -1,7 +1,125 @@
 name: m5stack-paper
+profile: screen-connected
 hardware:
   chip: esp32
+  # ESP32-D0WDQ6-V3.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: quad-spi
+    size-bytes: 8388608
+  # Main power latch (M5Unified POWER_HOLD for board_M5Paper, M5GFX
+  # `M5EPD_MAIN_PWR_PIN 2`).
+  power-hold: GPIO2
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5GFX board_M5Paper: the touch bus, SCL G22 / SDA G21 at 400 kHz.
+        peripheral: I2C1
+        scl: GPIO22
+        sda: GPIO21
+        frequency-hz: 400000
+    spi-device:
+      # IT8951E e-paper controller on HSPI's IOMUX pins (M5GFX board_M5Paper;
+      # Espressif m5stack_paper spi_master). The microSD card shares the bus
+      # with chip-select GPIO4. M5GFX initializes the IT8951 at 12 MHz and
+      # reads it at 2 MHz; 10 MHz keeps writes and reads within both.
+      epd-spi:
+        peripheral: SPI2
+        sck: GPIO14
+        mosi: GPIO12
+        miso: GPIO13
+        chip-select: GPIO15
+        frequency-hz: 10000000
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5Paper): the microSD card shares
+        # the e-paper controller's bus with its own chip select, GPIO4.
+        peripheral: SPI2
+        sck: GPIO14
+        mosi: GPIO12
+        miso: GPIO13
+        chip-select: GPIO4
+        frequency-hz: 20000000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` M5Paper: the battery on ADC1 GPIO35
+        # through a divider of two (`_adc_ratio = 2.0f`).
+        peripheral: ADC1
+        pin: GPIO35
+  devices:
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 2
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    display:
+      implementation: it8951-display
+      bindings:
+        spi: epd-spi
+        # IT8951 HRDY (M5GFX pin_busy).
+        ready: GPIO27
+        # E-paper rail enable; M5GFX pulses it as the controller reset.
+        panel-power: GPIO23
+      parameters:
+        width: 960
+        height: 540
+        # M5GFX offset_rotation 3: upright portrait, 540 x 960.
+        mounting: deg270
+    # GT911 (M5GFX board_M5Paper `Touch_GT911`, 0..539 x 0..959, which needs
+    # no rotation for the upright portrait display). Its address depends on
+    # the interrupt line (GPIO36) at power-on; the implementation tries 14h,
+    # then 5Dh, as M5GFX does, and polls.
+    touch:
+      implementation: gt911-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 20
+        width: 540
+        height: 960
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # SHT30 at 44h on the internal bus with the GT911, BM8563, and FM24C02
+    # (Espressif m5stack_paper board_peripherals.yaml).
+    environment-sensor:
+      implementation: sht3x-environment-sensor
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 68
+    # FM24C02, 256 bytes in 8-byte pages, at 50h on the internal bus
+    # (docs.m5stack.com M5Paper: "FM24C02 ... 2K-bit (256x8) EEPROM", internal
+    # I2C G21/G22; Espressif m5stack_paper board_peripherals.yaml: 0x50).
+    eeprom:
+      implementation: at24c-eeprom
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 80
+        density: 24c02
+    # The rocker's up, press, and down on GPIO37, GPIO38, GPIO39, active low
+    # with the Board's pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO37
+        button-2: GPIO38
+        button-3: GPIO39
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:
+    # M5Unified `_pin_table_port_bc`. The ports' 5 V supply is switched by GPIO5
+    # (M5Unified `M5Paper_EXT5V_ENABLE_PIN`).
+    port-a-scl: { pin: GPIO32 }
+    port-a-sda: { pin: GPIO25 }
+    port-b-g26: { pin: GPIO26 }
+    port-b-g33: { pin: GPIO33 }
+    port-c-g18: { pin: GPIO18 }
+    port-c-g19: { pin: GPIO19 }

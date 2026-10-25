@@ -11,7 +11,7 @@ M5Stack Tough 是 M5Stack 推出的 ESP32 开发板。
 - 芯片：ESP32
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen-connected`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-tough/partitions.csv`
 
 ## 构建和运行
@@ -26,4 +26,38 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-tough/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `touch` | 触摸控制器（CHSC6540） | — |
+| `real-time-clock` | 实时时钟（BM8563） | — |
+| `power-monitor` | 电量计（AXP192） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `audio` | 扬声器（NS4168 功放） | [`audio`](/zh/plugins/vm-audio) |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
+
+显示屏实现的 AXP192 复位脉冲会连同面板一起复位触摸控制器。
+
+电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。
+
+microSD 卡通过自己的片选与显示屏共用 SPI 总线。
+
+麦克风没有声明：M5Unified 在 GPIO34 上驱动 PDM 麦克风，而乐鑫的开发板文件描述的是那里的模拟麦克风。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO33` |
+| `port-a-sda` | `GPIO32` |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g36` | `GPIO36` |
+| `port-c-g13` | `GPIO13` |
+| `port-c-g14` | `GPIO14` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

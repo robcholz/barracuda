@@ -2,12 +2,21 @@ name: m5stack-din-meter
 profile: screen
 hardware:
   chip: esp32s3
+  # StampS3 (ESP32-S3FN8).
+  flash-size: 8mb
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
 peripherals:
   io:
+    i2c-device:
+      internal-i2c:
+        # M5Unified `_pin_table_i2c_ex_in` board_M5DinMeter: SCL G12 / SDA G11.
+        peripheral: I2C1
+        scl: GPIO12
+        sda: GPIO11
+        frequency-hz: 400000
     spi-device:
       display-spi:
         peripheral: SPI2
@@ -15,7 +24,53 @@ peripherals:
         mosi: GPIO5
         chip-select: GPIO7
         frequency-hz: 40000000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` (DinMeter, Cardputer, Cardputer-ADV):
+        # the battery on ADC1 GPIO10 through a divider of two.
+        peripheral: ADC1
+        pin: GPIO10
+    rmt-output:
+      rgb-led-data:
+        # StampS3 module WS2812B-2020 on GPIO21 (M5Unified `_pin_table_other0` (RGBLED)).
+        # Clocked out of RMT channel 0, so the LED takes no SPI controller
+        # from the runtime SPI pool the exposed pins use.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO21
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO3 (M5Unified `_begin_audio` board_M5DinMeter:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO3
+    pulse-counter:
+      knob:
+        # The knob's encoder: A GPIO41, B GPIO40 (M5Dial and M5DinMeter
+        # `DIAL_ENCODER_PIN_A`, `DIAL_ENCODER_PIN_B`), with the pull-ups and
+        # every-edge count of the PJRC Encoder library they ship.
+        peripheral: PCNT
+        a: GPIO41
+        b: GPIO40
   devices:
+    rotary-encoder:
+      implementation: quadrature-rotary-encoder
+      bindings: { counter: knob }
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 2
+    # The StampS3's RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
     display:
       implementation: mipi-dbi-display
       bindings: { backlight: GPIO9, dc: GPIO4, reset: GPIO8, spi: display-spi }
@@ -26,3 +81,27 @@ peripherals:
         offset-x: 52
         offset-y: 40
         invert-colors: true
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # Buttons A (the knob's press, GPIO42) and B (GPIO0), active low with
+    # the Board's pull-ups (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO42
+        button-2: GPIO0
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Port B: M5Unified
+    # `_pin_table_port_bc`.
+    port-a-scl: { pin: GPIO15 }
+    port-a-sda: { pin: GPIO13 }
+    port-b-g1: { pin: GPIO1 }
+    port-b-g2: { pin: GPIO2 }

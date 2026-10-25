@@ -1,7 +1,119 @@
 name: m5stack-capsule
 hardware:
   chip: esp32s3
+  # StampS3 (ESP32-S3FN8).
+  flash-size: 8mb
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # Internal bus SCL G10, SDA G8 on M5Unified's `In_I2C` controller
+        # (M5Unified `_pin_table_i2c_ex_in` board_M5Capsule; Espressif m5stack_capsule).
+        peripheral: I2C1
+        scl: GPIO10
+        sda: GPIO8
+        frequency-hz: 400000
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` Capsule: the battery on ADC1 GPIO6
+        # through a divider of two (`_adc_ratio = 2.0f`).
+        peripheral: ADC1
+        pin: GPIO6
+    pdm-i2s-stream:
+      microphone:
+        # M5Unified `_begin_audio` Capsule and Espressif's board files: the
+        # PDM microphone, clock GPIO40 and data GPIO41.
+        peripheral: I2S0
+        dma: DMA_CH1
+        clk: GPIO40
+        din: GPIO41
+        sample-rate-hz: 16000
+        dma-buffer-bytes: 4096
+    spi-device:
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5Capsule).
+        peripheral: SPI2
+        sck: GPIO14
+        mosi: GPIO12
+        miso: GPIO39
+        chip-select: GPIO11
+        frequency-hz: 20000000
+    rmt-output:
+      rgb-led-data:
+        # StampS3 module WS2812C on GPIO21 (M5Unified `_pin_table_other0` (RGBLED);
+        # EBM `m5stack_capsule`, GRB).
+        # Clocked out of RMT channel 0, so the LED takes no SPI controller
+        # from the runtime SPI pool the exposed pins use.
+        peripheral: RMT
+        channel: 0
+        pin: GPIO21
+      ir-transmit:
+        # IR LED on GPIO4, active high (Espressif `m5stack_capsule`:
+        # Sch_M5Capsule sheet 1, IR1 anode on G4), on RMT channel 1.
+        peripheral: RMT
+        channel: 1
+        pin: GPIO4
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO2 (M5Unified `_begin_audio` board_M5Capsule:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO2
+  devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    microphone:
+      implementation: pdm-i2s-audio-codec
+      bindings: { stream: microphone }
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense }
+      parameters:
+        divider-numerator: 2
+    # The StampS3's RGB LED, one LED, GRB order.
+    led-strip:
+      implementation: rmt-led-strip
+      bindings:
+        data: rgb-led-data
+      parameters:
+        led-count: 1
+        color-order: grb
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # Buttons A (GPIO42) and B (GPIO0), active low with the Board's pull-ups
+    # (M5Unified `M5Unified::update`).
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO42
+        button-2: GPIO0
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 69h: SDO pulled to VDDIO (Capsule schematic, sheet 2; Espressif
+        # m5stack_capsule).
+        address: 105
+    # The infrared LED, lit while its pin is high; no receiver.
+    infrared:
+      implementation: rmt-infrared
+      bindings: { transmit: ir-transmit }
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
+exposed-io:
+  pins:
+    # Grove port G13/G15 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g13: { pin: GPIO13 }
+    grove-g15: { pin: GPIO15 }

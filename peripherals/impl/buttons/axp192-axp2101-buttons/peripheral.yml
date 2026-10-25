@@ -1,0 +1,26 @@
+id: axp192-axp2101-buttons
+api-version: 1
+peripheral: buttons
+implementation:
+  package: barracuda-axp192-axp2101-buttons
+  crate: barracuda_axp192_axp2101_buttons
+  factory: "::{{crate}}::AxpPowerKeyImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "{{binding.i2c.value}}"
+  config-expression: "::{{crate}}::AxpPowerKeyConfig::new({{parameter.address}})"
+# The power key on the PWRON pin of an AXP192 or AXP2101 PMIC, identified at
+# start, as one button. The PMIC reports a key press only as a latched
+# short-press or long-press interrupt (M5Unified `Power_Class::getKeyState`),
+# so the button reads pressed once for each press, and its events report a
+# short press as pressed, released, and click and a long press as pressed,
+# long press, and released, once the PMIC has latched it. The implementation owns
+# only the key's two interrupt-enable bits and two status bits; the display,
+# battery monitor, vibration, and audio implementations keep their own
+# registers of the same PMIC.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 34h, the address of both PMICs.
+    default: 52

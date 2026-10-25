@@ -11,7 +11,7 @@ M5Stack Paper DIY 是 M5Stack 推出的 ESP32-S3 开发板。
 - 芯片：ESP32-S3
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32s3-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-paper-diy/partitions.csv`
 
 ## 构建和运行
@@ -26,4 +26,16 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-paper-diy/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | 电子墨水屏，4.7 英寸 540 x 960 竖屏，16 级灰度（ED047TC1，由 ESP32-S3 并行总线直接驱动；电源由 M5PM1 控制） | [`display`](/zh/plugins/vm-display) |
+| `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `buttons` | 按键 A 和 B（GPIO4、GPIO3） | [`buttons`](/zh/plugins/vm-buttons) |
+| `power-button` | 电源键（M5PM1） | [`buttons`](/zh/plugins/vm-buttons) |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
+
+这块屏幕没有控制器：Barracuda 在 CPU 上运行 M5GFX 的波形，并逐行输出每一帧，所以刷新完成之前显示屏一直被占用。
+
+M5PM1 只测量电池电压；是否在充电取自接在 M5PM1 引脚上的充电器状态线。
+
+电源键从 M5PM1 的按键状态读取，按住时读为按下。开发板关闭了 M5PM1 的单击复位，所以单击是一个应用按键：脚本和插件把它当作一次单击收到，开发板不再复位。双击仍会关机，长按仍会进入下载模式。M5PM1 会一直保留这个设置直到自身断电，复位和重新烧录都不会改变它；在该设备上设置 `single-click-reset: keep` 可恢复出厂的单击复位。`buttons` 是主 `buttons` 设备。

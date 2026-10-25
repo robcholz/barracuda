@@ -1,6 +1,13 @@
 name: unexpected-maker-tinypico
+profile: connected
 hardware:
   chip: esp32
+  # ESP32-PICO-D4 with 4 MB QSPI PSRAM.
+  flash-size: 4mb
+  external-memory:
+    technology: psram
+    interface: quad-spi
+    size-bytes: 4194304
 toolchain:
   target: xtensa-esp32-none-elf
 native-layout:
@@ -14,7 +21,22 @@ peripherals:
         sck: GPIO12
         mosi: GPIO2
         frequency-hz: 1000000
+    analog-input:
+      battery-sense:
+        # TinyPICO helper library: BAT_VOLTAGE is GPIO35 (ADC1 channel 7)
+        # behind 442 k over 160 k (`UPPER_DIVIDER`, `LOWER_DIVIDER`).
+        peripheral: ADC1
+        pin: GPIO35
   devices:
+    battery:
+      # BAT_CHARGE, GPIO34, reads low while the charger charges
+      # (`IsChargingBattery`).
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense, charging: GPIO34 }
+      parameters:
+        divider-numerator: 602
+        divider-denominator: 160
+        charging-level: low
     led-strip:
       implementation: apa102-led-strip
       bindings:

@@ -1,7 +1,114 @@
 name: esp32s3-box-3
+profile: screen
 hardware:
   chip: esp32s3
+  # ESP32-S3-WROOM-1-N16R16V.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 16777216
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # esp-bsp `esp-box-3.h`: the main bus, SCL G18 / SDA G8, of the touch
+        # controller, the IMU, and the audio codecs (ES8311 18h, ES7210 40h).
+        peripheral: I2C1
+        scl: GPIO18
+        sda: GPIO8
+        frequency-hz: 400000
+    i2s-stream:
+      audio-stream:
+        # esp-bsp `esp-box-3.h`: MCLK GPIO2, SCLK GPIO17, LCLK GPIO45, DOUT
+        # GPIO15 to the ES8311, DSIN GPIO16 from the ES7210.
+        peripheral: I2S0
+        dma: DMA_CH1
+        bclk: GPIO17
+        ws: GPIO45
+        dout: GPIO15
+        din: GPIO16
+        mclk: GPIO2
+        sample-rate-hz: 48000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+    spi-device:
+      display-spi:
+        # Espressif esp_boards `esp32_s3_box_3` board_peripherals.yaml
+        # (`spi_display`) and board_devices.yaml (`display_lcd`).
+        peripheral: SPI2
+        sck: GPIO7
+        mosi: GPIO6
+        chip-select: GPIO5
+        frequency-hz: 20000000
+  devices:
+    audio-codec:
+      # The codecs run from the 3.3 V rail; BSP_POWER_AMP_IO (GPIO46)
+      # enables the speaker amplifier.
+      implementation: es8311-es7210-audio-codec
+      bindings: { control: internal-i2c, stream: audio-stream, amplifier-enable: GPIO46 }
+    display:
+      implementation: mipi-dbi-display
+      bindings:
+        backlight: GPIO47
+        dc: GPIO4
+        # Shared with the touch controller's reset; the board drives it active-high.
+        reset: GPIO48
+        spi: display-spi
+      parameters:
+        # Espressif drives the ILI9342C through esp_lcd_ili9341 with the
+        # ILI9342C extended-command key (C8h FF 93 42), MADCTL BGR, and both
+        # axes mirrored.
+        controller: ili9342c
+        width: 320
+        height: 240
+        color-order: bgr
+        orientation: deg180
+        reset-active-high: true
+    # A GT911 (5Dh or 14h) or, on some units, a TT21100 (24h); Espressif's
+    # BSP (`bsp_touch_new`) probes in that order and mirrors the TT21100's X
+    # axis. Their reset is the display's GPIO48; the interrupt (GPIO3) is
+    # unused: the implementation polls.
+    touch:
+      implementation: gt911-tt21100-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        width: 320
+        height: 240
+        tt21100-mirror-x: true
+    # ICM-42607-P at 68h (esp-bsp `bsp_sensor_init`, `ICM42670_I2C_ADDRESS`).
+    inertial-measurement:
+      implementation: icm42607-imu
+      bindings: { i2c: internal-i2c }
+    # BOOT on GPIO0, active low, with the pull-up Espressif's esp_boards
+    # `esp32_s3_box_3` enables. The mute switch's status line (GPIO1) is
+    # not a button and is not declared.
+    buttons:
+      implementation: gpio-buttons
+      bindings:
+        button-1: GPIO0
+      parameters:
+        pull: up
+exposed-io:
+  pins:
+    # ESP32-S3-BOX-3-DOCK PMOD1 and PMOD2, labelled IO1-IO8 (esp-bsp esp-box-3.h
+    # `BSP_PMOD*`). PMOD1 IO2 and IO6 are the USB D+/D- lines and stay unexposed.
+    pmod1-io1: { pin: GPIO42 }
+    pmod1-io3: { pin: GPIO39 }
+    pmod1-io4: { pin: GPIO40 }
+    pmod1-io5: { pin: GPIO21 }
+    pmod1-io7: { pin: GPIO38 }
+    pmod1-io8: { pin: GPIO41 }
+    pmod2-io1: { pin: GPIO13 }
+    pmod2-io2: { pin: GPIO9 }
+    pmod2-io3: { pin: GPIO12 }
+    pmod2-io4: { pin: GPIO44 }
+    pmod2-io5: { pin: GPIO10 }
+    pmod2-io6: { pin: GPIO14 }
+    pmod2-io7: { pin: GPIO11 }
+    pmod2-io8: { pin: GPIO43 }

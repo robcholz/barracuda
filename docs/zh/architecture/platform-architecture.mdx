@@ -106,7 +106,9 @@ pub struct PlatformResources<Partitions, Wifi, Entropy> {
 
 `wifi` 是一个独立的通信机制，不属于 `ip_stack`。没有无线电的平台提供一个显式标明不受支持的实现，System 把这个机制交给唯一一个取走它并拥有其策略的插件。
 
-`entropy` 是平台的不可预测字节来源，适用于密码学用途：在主机平台上是操作系统的生成器，在设备上是由物理噪声驱动的真随机数生成器。没有熵源的平台提供 `UnavailableEntropy`，永远不提供更弱的生成器。System 把它的类型擦除到 `PluginContext::entropy` 中，每个需要随机性的插件都克隆它；无线电则擦除到 `PluginContext::wifi` 中。
+平台只为有插件取走无线电的固件构建无线电。这个插件在它的 `plugin.toml` 中声明 `[platform] wifi = true`；只要有启用的插件这样声明，生成的插件选择就会启用所选平台的 `wifi` Cargo 特性。没有这个特性时，有无线电的平台提供不受支持的实现，不启动无线电，也不链接任何无线电代码：在 ESP 芯片上，IP 协议栈因此没有链路，因为没有插件能加入网络；在 ESP32-P4 上，Wi-Fi 协处理器保持断电，而以太网仍然承载协议栈。没有无线电的平台不声明这个特性。
+
+`entropy` 是平台的不可预测字节来源，适用于密码学用途：在主机平台上是操作系统的生成器，在设备上是由物理噪声驱动的真随机数生成器。如果设备的噪声源不能与它共用的硬件同时运行，例如没有无线电的 ESP 芯片，其 SAR ADC 噪声源会占住 ADC，那么它只在启动时运行噪声源，并用它为一个 ChaCha20 生成器播种，这正是乐鑫为这种情况推荐的软件 DRBG；生成器在每次填充后重新生成密钥，所以它的状态不会泄露之前的输出。没有熵源的平台提供 `UnavailableEntropy`，永远不提供更弱的生成器。System 把它的类型擦除到 `PluginContext::entropy` 中，每个需要随机性的插件都克隆它；无线电则擦除到 `PluginContext::wifi` 中。
 
 这是架构上的指导，而不是冻结的 Rust 签名。不变量是分区始终是一个集合。业务角色永远不会成为 filesystem_partition、resources_partition 或 database_partition 这样的字段。IP 能力同样始终是 `ip_stack`，而不是 web_network 或 database_network。TLS 不是平台资源；拥有 HTTP 的插件在平台边界之上构建它（见“TLS 和 HTTP 客户端”）。
 
@@ -152,6 +154,8 @@ cargo build
 
 通用校验覆盖开发板 schema、引用的实现标识符、必需的接线字段，以及所选平台是否声明了所需的 HAL 绑定。只能移动的生成绑定防止同一个芯片令牌被消耗两次。平台提供者在构造功能句柄之前，校验运行时路由、电气模式、频率和控制器限制。
 
+平台机制和开发板外设都要用的芯片控制器归平台所有，开发板只拿到其中属于它的部分。ESP32-P4 只有一个 SD 主机，它的两个槽位共用一个传输引擎：平台的 Wi-Fi 协处理器链路使用槽位 1，开发板的 microSD 卡使用槽位 0。平台入口只构建一次主机，并把槽位 0 与芯片外设一起交给生成的开发板绑定，作为绑定宏的第二个参数，即平台移交参数；存储卡的 `sdmmc-device` 绑定只取得这个槽位，从不取得控制器。平台清单列出它交出的槽位及各自需要的供电（`hal.sdmmc-slots`），开发板校验会拒绝位于协处理器槽位上的存储卡，因此 `cargo board select` 会拒绝声明中同一槽位被占用两次的开发板。两个使用者通过厂商 HAL 自身先到先得、不分优先级的锁共享传输引擎，存储卡让每次传输都保持短小，使链路永远不会被饿死。
+
 ## 外设和暴露的 I/O
 
 开发板配置区分可选的已连接产品硬件，以及 Barracuda 有意提供给应用的物理资源：
@@ -171,7 +175,7 @@ peripherals:
       primary: true
       bindings: { ... }
     status-panel:
-      implementation: gdeh0154d67-display
+      implementation: epaper-1in54-display
       bindings: { ... }
 
 exposed-io:
@@ -184,7 +188,7 @@ exposed-io:
 
 具体的 schema 存放硬件事实、实现标识符、稳定的应用可见名称和芯片原生标识符。Rust crate 路径、平台类型、插件身份和应用策略不属于开发板矩阵。实现标识符选择已注册的组合代码；YAML 不指定 Rust 类型或 crate 路径。
 
-设备名称由开发板自己决定。开发板可以连接多个显示屏；其他每种外设类型最多只有一个设备。某种类型有多个设备时，恰好有一个被标记为 `primary: true`，这是关于产品主设备的硬件事实，而不是插件的选择。只有一个设备的类型不需要标记。
+设备名称由开发板自己决定。开发板可以连接除可移动存储外任何类型的多个设备；可移动存储由 System 作为一个槽位挂载。某种类型有多个设备时，恰好有一个被标记为 `primary: true`，这是关于产品主设备的硬件事实，而不是插件的选择。只有一个设备的类型不需要标记。
 
 开发板资源不包含第三种硬件类别：
 
@@ -195,7 +199,7 @@ BoardResources {
 }
 ~~~
 
-`BoardResources<Peripherals, ExposedIo>` 是公共的所有权封装。它的泛型字段为每块所选开发板保留具体的、静态组合的外设类型。每个生成的外设字段都是 `Option<T>`，因为没有哪种外设类型是必需的。每个外设 trait 都通过 `Instance` 获取设备，`Instance` 是该设备在开发板同类设备中按名称排序的位置；插件永远不自己构建 `Instance`，而是使用构建过程根据它们声明的槽位解析出的常量。多个显示屏作为一个生成的 `BoardDisplay` 枚举返回，它覆盖开发板的各个显示屏实现，由 `display_set!` 构建，因此分发保持静态。唯一的暴露 I/O 值拥有所有运行时物理资源。System 把它放在 `PluginContext` 中一个共享的 `Arc` 之后；使用暴露硬件的插件克隆这个所有者，而不是各自独立的协议集合。平台拥有的控制器池属于这个所有者，但不是应用可见的名称。
+`BoardResources<Peripherals, ExposedIo>` 是公共的所有权封装。它的泛型字段为每块所选开发板保留具体的、静态组合的外设类型。每个生成的外设字段都是 `Option<T>`，因为没有哪种外设类型是必需的。每个外设 trait 都通过 `Instance` 获取设备，`Instance` 是该设备在开发板同类设备中按名称排序的位置；插件永远不自己构建 `Instance`，而是使用构建过程根据它们声明的槽位解析出的常量。某种类型只有一个设备时，以它的具体类型返回；有多个设备时，作为一个生成的 `Board<Kind>` 枚举返回，例如 `BoardDisplay` 或 `BoardPowerMonitor`，它覆盖开发板中该类型的各个实现，由该类型的集合宏（`display_set!`、`power_monitor_set!` 等）构建，因此分发保持静态。初始化失败的设备会被记录并保持为 `None`，开发板在没有它的情况下启动；只有无法构建的共享总线或控制器才会让开发板初始化失败。唯一的暴露 I/O 值拥有所有运行时物理资源。System 把它放在 `PluginContext` 中一个共享的 `Arc` 之后；使用暴露硬件的插件克隆这个所有者，而不是各自独立的协议集合。平台拥有的控制器池属于这个所有者，但不是应用可见的名称。
 
 控制器、通道、定时器、DMA 和缓冲区的清单属于平台清单，而不是 `exposed-io`。必须一起获取的资源族被声明为类型化的控制器组：
 
@@ -236,7 +240,7 @@ Barracuda 不替换上游 HAL trait 已经定义的操作。`ConfigurableDigital
 
 应用指定的是暴露的引脚和功能参数，而不是芯片的控制器实例。例如，`i2c.open(scl, sda, frequency)` 请求提供者选择一个兼容的空闲控制器。这样就把控制器分配和外设预留留在平台组合中，并为控制器编号不同的开发板提供相同的应用 API。
 
-可复用的外设实现直接导入 `embedded-hal`、`embedded-hal-async` 和成熟的领域生态 trait。只有当生态中没有合适的契约时，Barracuda 才定义一个窄范围的绑定。目前的例子是并行摄像头帧接收和 PCM 流；它们与外设 API 放在一起，而不是构成第二个通用 HAL。所选构建让具体的存储和分发保持静态分配；使用者不会在运行时查找平台、开发板或外设实现，异步 HAL trait 也不会被转换为 `dyn` trait 对象。
+可复用的外设实现直接导入 `embedded-hal`、`embedded-hal-async` 和成熟的领域生态 trait。只有当生态中没有合适的契约时，Barracuda 才定义一个窄范围的绑定。目前的例子是并行摄像头帧接收、PCM 流，以及同时为 MIPI DBI 面板控制器和直接驱动的电子墨水屏源极驱动器输出数据的 8 位 Intel 8080 式并行输出；它们与外设 API 放在一起，而不是构成第二个通用 HAL。在 `embedded-hal` 之外，Board HAL 还增加了几个：`AnalogVoltageInput`，以毫伏读取的校准 ADC 通道；`PulseOutput` 和 `PulseInput`，为 LED 灯带和红外输出或记录电平与时长符号的脉冲序列通道；`PwmFrequencyControl`，为蜂鸣器重新设置 PWM 输出的频率；`CanController`，带可等待收发的片上 CAN 控制器，这是 `embedded-can` 所缺少的；`SpiDeviceControl`，让 SPI 模式的 SD 卡可以修改其设备的时钟，并在释放片选的情况下输出时钟；以及 `SpiBusControl`，设置 SPI 总线的时钟和模式，并输出不足 8 位的时钟，使通过控制器驱动的 JTAG 端口能够逐步推进其状态机。所选构建让具体的存储和分发保持静态分配；使用者不会在运行时查找平台、开发板或外设实现，异步 HAL trait 也不会被转换为 `dyn` trait 对象。
 
 `embedded-hal` 没有对在输入和输出模式之间切换 GPIO 做标准化。因此，每个暴露给 VM 的数字句柄除了上游的操作 trait 之外，还实现小巧的开发板 HAL 配置契约。协议的复用功能由对应的提供者建立，而不是由数字 API 建立。每个平台的 `hal` 模块拥有厂商的引脚复用和控制器构造。
 
@@ -442,6 +446,8 @@ Wi-Fi 控制、BLE、USB、蜂窝网络控制以及未来的通信机制都是�
 
 平台拥有保持其 IP 服务存活所需的执行工作。System 和插件接收可用的 IP 协议栈句柄，而不是它的 runner 或平台特定的设置对象。
 
+有多条链路的开发板（例如有线以太网加 Wi-Fi 站点）仍然只产生一个 `ip_stack`。平台在 `barracuda_platform::FailoverNetworkDriver` 上运行它：首选链路连通时流量走首选链路，否则走备用链路。每次切换都会报告一次链路断开，让协议栈重新运行 DHCP。选择链路是平台的工作；System 和插件看不到协议栈当前走哪条链路。
+
 ## 日志和追踪
 
 平台、HAL、System、核心和插件中的普通诊断都使用 `log` 门面。库和子系统 crate 只发出记录；它们不选择输出设备，不初始化全局 logger，也不依赖仅限主机的日志实现。
@@ -587,7 +593,7 @@ Platform adaptation + peripheral implementations + Board matrix -> Board HAL ---
 Platform services -> { IP, entropy, partitions } ------------------------+-> System -> Plugins
 ~~~
 
-平台 crate 不拥有外设实现或开发板组合。它们拥有的是自己的厂商 HAL 令牌词汇，以及 GPIO、I2C、SPI、摄像头、I2S 和延时的构造函数。由 DMA 支撑的媒体资源是静态组合的：`camera-capture` 和 `i2s-stream` 声明用 `dma-buffer-bytes` 确定存储大小，所选平台在具体开发板的调用处分配它。语义化适配留在 `peripherals/impl` 下；可复用的寄存器和协议行为属于 `drivers/chips`。与开发板相关的 crate 留在 `boards/` 下；所选 Target 的组合根留在单个平台实现之外。
+平台 crate 不拥有外设实现或开发板组合。它们拥有的是自己的厂商 HAL 令牌词汇，以及 GPIO、I2C、SPI、摄像头、并行输出、I2S 和延时的构造函数。由 DMA 支撑的媒体资源是静态组合的：`camera-capture`、`parallel-output`、`i2s-stream` 和 `pdm-i2s-stream` 声明用 `dma-buffer-bytes` 确定存储大小，所选平台在具体开发板的调用处分配它。语义化适配留在 `peripherals/impl` 下；可复用的寄存器和协议行为属于 `drivers/chips`。与开发板相关的 crate 留在 `boards/` 下；所选 Target 的组合根留在单个平台实现之外。
 
 生成的组合调用所选平台的 `hal` 模块，并把得到的 `embedded-hal` 资源交给由其清单选择的外设实现。复用现有实现的新开发板只需要开发板 YAML。新的实现添加它的 crate 和 `peripheral.yml`；它可以复用现有的芯片驱动，并且不需要在中央渲染器中添加分支。
 

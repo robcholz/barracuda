@@ -1,0 +1,34 @@
+id: powerhub-buttons
+api-version: 1
+peripheral: buttons
+implementation:
+  package: barracuda-powerhub-buttons
+  crate: barracuda_powerhub_buttons
+  factory: "::{{crate}}::PowerHubButtonsImplementation<{{binding.i2c.type}}, {{binding.button-a.type}}>"
+  bindings-expression: "::{{crate}}::PowerHubButtonsBindings::new({{binding.i2c.value}}, {{binding.button-a.value}})"
+  config-expression: "::{{crate}}::PowerHubButtonsConfig::new({{parameter.address}}, {{parameter.debounce-ms}}, {{parameter.long-press-ms}})"
+# The M5Stack PowerHub's two user buttons, as M5Unified reads them: button A
+# on an ESP32-S3 pin, active low with the Board's pull-up, and button B
+# behind the power co-processor, bit 0 of its register A0h, low while
+# pressed. The implementation reads only that register of the co-processor.
+bindings:
+  i2c:
+    kind: i2c-device
+  button-a:
+    kind: gpio
+parameters:
+  # The co-processor's address (M5Unified `powerhub_i2c_addr`, 50h).
+  address:
+    type: integer
+    default: 80
+  # How long a new level must hold before a press or release counts. 10 ms
+  # is M5Unified's `Button_Class` default.
+  debounce-ms:
+    type: integer
+    default: 10
+  # How long a press lasts before it is a long press, reported while the
+  # button is still down; a shorter press is a click. 500 ms is M5Unified's
+  # `Button_Class` hold time.
+  long-press-ms:
+    type: integer
+    default: 500

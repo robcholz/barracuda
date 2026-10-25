@@ -11,7 +11,7 @@ M5Stack Paper Mono 是 M5Stack 推出的 ESP32-S3 开发板。
 - 芯片：ESP32-S3
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32s3-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-paper-mono/partitions.csv`
 
 ## 构建和运行
@@ -26,4 +26,19 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-paper-mono/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | 电子墨水屏，3.97 英寸 480 x 800，4 级灰度，带前光（SSD1677） | [`display`](/zh/plugins/vm-display) |
+| `inertial-measurement` | 运动传感器（BMI270） | [`motion`](/zh/plugins/vm-imu) |
+| `real-time-clock` | 实时时钟（RX8130CE） | — |
+| `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `buttons` | 按键 A 和 B（GPIO2、GPIO3） | [`buttons`](/zh/plugins/vm-buttons) |
+| `power-button` | 电源键（M5PM1） | [`buttons`](/zh/plugins/vm-buttons) |
+| `buzzer` | 无源蜂鸣器（GPIO42） | [`buzzer`](/zh/plugins/vm-buzzer) |
+| `nfc-reader` | NFC 读卡器（ST25R3916，`50h`，供电由 M5IOE1 G4 控制） | [`nfc`](/zh/plugins/vm-nfc) |
+
+M5PM1 只测量电池电压。这块开发板没有把充电器的状态线接到 M5PM1，所以只要有 VIN 输入且电池低于 4.1 V，电池就显示为正在充电。
+
+读卡器的供电由 M5IOE1 G4 控制；读卡器在启动时打开它，并像 M5Stack 的 UIFlow 那样等待一秒，因此这块开发板的启动会晚大约一秒。PaperMono-Lite 没有读卡器，不是这块开发板。
+
+电源键从 M5PM1 的按键状态读取，按住时读为按下。开发板关闭了 M5PM1 的单击复位，所以单击是一个应用按键：脚本和插件把它当作一次单击收到，开发板不再复位。双击仍会关机，长按仍会进入下载模式。M5PM1 会一直保留这个设置直到自身断电，复位和重新烧录都不会改变它；在该设备上设置 `single-click-reset: keep` 可恢复出厂的单击复位。`buttons` 是主 `buttons` 设备。

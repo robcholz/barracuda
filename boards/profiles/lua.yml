@@ -4,18 +4,31 @@ extends: minimal
 enable:
   - analog
   - audio
+  - buttons
+  - buzzer
   - camera
+  - can
+  - digital-io
   - display
+  - eeprom
+  - environment-sensor
   - gpio
   - i2c
   - i2s
   - imu
+  - infrared
+  - keyboard
   - led-strip
+  - lora
   - message-queue
+  - nfc
   - power-monitor
   - pwm
+  - rotary-encoder
+  - secure-element
   - spi
   - uart
+  - vibration
   - vm
   - vm-filesystem
   - vm-systeminfo

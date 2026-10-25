@@ -1,0 +1,19 @@
+id: quadrature-rotary-encoder
+api-version: 1
+peripheral: rotary-encoder
+implementation:
+  package: barracuda-quadrature-rotary-encoder
+  crate: barracuda_quadrature_rotary_encoder
+  factory: "::{{crate}}::QuadratureRotaryEncoderImplementation<{{binding.counter.type}}>"
+  bindings-expression: "{{binding.counter.value}}"
+  config-expression: "::{{crate}}::QuadratureRotaryEncoderConfig::new({{parameter.reverse}})"
+# An incremental encoder whose A and B signals a Platform pulse counter
+# decodes, counting every edge of both.
+bindings:
+  counter:
+    kind: pulse-counter
+parameters:
+  # Counts up while A leads B instead of while B leads A.
+  reverse:
+    type: boolean
+    default: false

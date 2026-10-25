@@ -1,6 +1,6 @@
 id = "power"
 depends-on = []
-description = "Owns the Board's power monitor and publishes its readings."
+description = "Owns the Board's power monitors and publishes their readings."
 
 [peripherals.power-monitor]
-device = { fill = "primary", optional = true }
+devices = "*"

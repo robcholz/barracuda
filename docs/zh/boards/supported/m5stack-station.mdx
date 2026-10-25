@@ -11,7 +11,7 @@ M5Stack Station 是 M5Stack 推出的 ESP32 开发板。
 - 芯片：ESP32
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen-connected`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-station/partitions.csv`
 
 ## 构建和运行
@@ -26,4 +26,48 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-station/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `led-strip` | 7 个串联的 RGB LED（SK6812，GPIO4） | [`light`](/zh/plugins/vm-led-strip) |
+| `display` | 显示屏（MIPI DBI） | [`display`](/zh/plugins/vm-display) |
+| `real-time-clock` | 实时时钟（BM8563） | — |
+| `power-monitor` | 电量计（AXP192） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `port-a1-power` | Port A1 的 5 V 输出（INA3221 `40h` CH1，10 mΩ 分流电阻） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `port-a2-power` | Port A2 的 5 V 输出（INA3221 `40h` CH2，10 mΩ 分流电阻） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `port-b1-power` | Port B1 的 5 V 输出（INA3221 `40h` CH3，10 mΩ 分流电阻） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `port-b2-power` | Port B2 的 5 V 输出（INA3221 `41h` CH1，10 mΩ 分流电阻） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `port-c1-power` | Port C1 的 5 V 输出（INA3221 `41h` CH2，10 mΩ 分流电阻） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `port-c2-power` | Port C2 的 5 V 输出（INA3221 `41h` CH3，10 mΩ 分流电阻） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `buttons` | 按键 A、B、C（GPIO37、GPIO38、GPIO39） | [`buttons`](/zh/plugins/vm-buttons) |
+| `power-button` | 电源键（AXP192） | [`buttons`](/zh/plugins/vm-buttons) |
+
+电量计与显示屏共用 PMIC：电量计只读取 PMIC 的测量寄存器，稳压器仍归显示屏使用。
+
+每个 Grove 端口的 5 V 输出经过一个 10 mΩ 分流电阻接到一个 INA3221 通道，流入端口的电流读为正。电池的 `power-monitor` 是主电源监测设备：系统界面的电量读取它，脚本不指定监测设备时 `power_monitor` Lua 包也读取它。脚本按名称打开端口的监测设备，例如 `power_monitor.open("port-a1-power")`。
+
+电源键通过 PMIC 读取：按键松开时 PMIC 锁存一次短按，按住达到长按时间时锁存一次长按；每次按下，按键在一次采样中读为按下。短按在事件中报告为单击，长按报告为长按。它只设置和清除 PMIC 中电源键自己的中断位。`buttons` 是主 `buttons` 设备。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO33` |
+| `port-a-sda` | `GPIO32` |
+| `port-b1-g25` | `GPIO25` |
+| `port-b1-g35` | `GPIO35` |
+| `port-b2-g26` | `GPIO26` |
+| `port-b2-g36` | `GPIO36` |
+| `port-c1-g13` | `GPIO13` |
+| `port-c1-g14` | `GPIO14` |
+| `port-c2-g16` | `GPIO16` |
+| `port-c2-g17` | `GPIO17` |
+
+Port A1 和 A2 是同一条总线。
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

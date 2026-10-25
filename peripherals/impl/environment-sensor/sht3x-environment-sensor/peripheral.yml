@@ -1,0 +1,18 @@
+id: sht3x-environment-sensor
+api-version: 1
+peripheral: environment-sensor
+implementation:
+  package: barracuda-sht3x-environment-sensor
+  crate: barracuda_sht3x_environment_sensor
+  factory: "::{{crate}}::Sht3xEnvironmentSensorImplementation<{{binding.i2c.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Sht3xBindings::new({{binding.i2c.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Sht3xConfig::new({{parameter.address}})"
+# A Sensirion SHT30, SHT31, or SHT35: temperature and relative humidity.
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  address:
+    type: integer
+    # 44h with the ADDR pin low; 45h with it high.
+    default: 68

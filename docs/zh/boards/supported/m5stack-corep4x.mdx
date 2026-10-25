@@ -11,7 +11,7 @@ M5Stack CoreP4X 是 M5Stack 推出的 ESP32-P4 开发板。
 - 芯片：ESP32-P4
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`riscv32imafc-unknown-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-corep4x/partitions.csv`
 
 ## 构建和运行
@@ -26,7 +26,38 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-corep4x/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | 2.64 英寸 480x480 MIPI DSI 显示屏（ST7102） | [`display`](/zh/plugins/vm-display) |
+| `touch` | 触摸控制器（CST3530） | — |
+| `real-time-clock` | 实时时钟（RX8130CE） | — |
+| `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `power-button` | 电源键（M5PM1） | [`buttons`](/zh/plugins/vm-buttons) |
+| `audio-codec` | 音频编解码器（ES8311 和 ES7210） | [`audio`](/zh/plugins/vm-audio) |
+| `micro-sd` | microSD 卡槽（FAT，SPI） | — |
+
+显示屏实现通过 `4Fh` 处的 M5IOE1 扩展芯片为面板上电、释放复位并调节背光亮度，并打开 `6Eh` 处 M5PM1 的 5 V 升压；这两颗芯片本身都不是设备。它还会释放触摸控制器的复位（M5IOE1 G8）。BMI270 和 BMM150 运动传感器尚未声明。
+
+IP101GRI 以太网 PHY 也尚未声明：CoreP4X 上它的 RMII 引脚没有公开，ESP32-P4 平台也还没有驱动 ESP32-C6 Wi-Fi 协处理器，所以这块开发板上的 IP 协议栈没有链路。
+
+M5PM1 只测量电池电压。这块开发板没有把充电器的状态线接到 M5PM1，所以只要有 VIN 输入且电池低于 4.1 V，电池就显示为正在充电。
+
+电源键从 M5PM1 的按键状态读取，按住时读为按下。开发板关闭了 M5PM1 的单击复位，所以单击是一个应用按键：脚本和插件把它当作一次单击收到，开发板不再复位。双击仍会关机，长按仍会进入下载模式。M5PM1 会一直保留这个设置直到自身断电，复位和重新烧录都不会改变它；在该设备上设置 `single-click-reset: keep` 可恢复出厂的单击复位。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO16` |
+| `port-a-sda` | `GPIO18` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```
 
 ## 插件设置
 

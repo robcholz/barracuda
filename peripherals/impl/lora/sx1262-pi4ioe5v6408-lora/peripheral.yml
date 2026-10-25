@@ -1,0 +1,71 @@
+id: sx1262-pi4ioe5v6408-lora
+api-version: 1
+peripheral: lora
+implementation:
+  package: barracuda-sx1262-pi4ioe5v6408-lora
+  crate: barracuda_sx1262_pi4ioe5v6408_lora
+  factory: "::{{crate}}::Sx1262LoraImplementation<{{binding.spi.type}}, {{binding.busy.type}}, {{binding.dio1.type}}, {{binding.expander.type}}>"
+  bindings-expression: "::{{crate}}::Sx1262LoraBindings::new({{binding.spi.value}}, {{binding.busy.value}}, {{binding.dio1.value}}, {{binding.expander.value}})"
+  config-expression: "::{{crate}}::Sx1262LoraConfig::new({{parameter.expander-address}}, {{parameter.reset-pin}}, {{parameter.rf-switch-pin}}, {{parameter.lna-pin}}, {{parameter.tcxo-voltage}}, {{parameter.tcxo-startup-ms}}, {{parameter.dio2-rf-switch}}, {{parameter.min-frequency-hz}}, {{parameter.max-frequency-hz}})"
+# A Semtech SX1262 LoRa transceiver on an SPI device, with its BUSY and DIO1
+# lines on SoC pins and its reset, and optionally the enables of an RF switch
+# and an LNA, on outputs of a PI4IOE5V6408 expander. The implementation
+# configures only its own expander pins.
+bindings:
+  spi:
+    kind: spi-device
+  busy:
+    kind: digital-input
+  dio1:
+    kind: digital-input
+  expander:
+    kind: i2c-device
+parameters:
+  expander-address:
+    type: integer
+    # 43h: ADDR strapped low.
+    default: 67
+  reset-pin:
+    type: enum
+    values: [p0, p1, p2, p3, p4, p5, p6, p7]
+    rust-values: { p0: "0", p1: "1", p2: "2", p3: "3", p4: "4", p5: "5", p6: "6", p7: "7" }
+    required: true
+  rf-switch-pin:
+    type: enum
+    values: [none, p0, p1, p2, p3, p4, p5, p6, p7]
+    rust-values: { none: "None", p0: "Some(0)", p1: "Some(1)", p2: "Some(2)", p3: "Some(3)", p4: "Some(4)", p5: "Some(5)", p6: "Some(6)", p7: "Some(7)" }
+    default: none
+  lna-pin:
+    type: enum
+    values: [none, p0, p1, p2, p3, p4, p5, p6, p7]
+    rust-values: { none: "None", p0: "Some(0)", p1: "Some(1)", p2: "Some(2)", p3: "Some(3)", p4: "Some(4)", p5: "Some(5)", p6: "Some(6)", p7: "Some(7)" }
+    default: none
+  # The supply DIO3 gives the reference oscillator, when it is a TCXO.
+  tcxo-voltage:
+    type: enum
+    values: [none, 1.6v, 1.7v, 1.8v, 2.2v, 2.4v, 2.7v, 3.0v, 3.3v]
+    rust-values:
+      none: "None"
+      1.6v: "Some(::barracuda_sx1262_pi4ioe5v6408_lora::TcxoVoltage::V1_6)"
+      1.7v: "Some(::barracuda_sx1262_pi4ioe5v6408_lora::TcxoVoltage::V1_7)"
+      1.8v: "Some(::barracuda_sx1262_pi4ioe5v6408_lora::TcxoVoltage::V1_8)"
+      2.2v: "Some(::barracuda_sx1262_pi4ioe5v6408_lora::TcxoVoltage::V2_2)"
+      2.4v: "Some(::barracuda_sx1262_pi4ioe5v6408_lora::TcxoVoltage::V2_4)"
+      2.7v: "Some(::barracuda_sx1262_pi4ioe5v6408_lora::TcxoVoltage::V2_7)"
+      3.0v: "Some(::barracuda_sx1262_pi4ioe5v6408_lora::TcxoVoltage::V3_0)"
+      3.3v: "Some(::barracuda_sx1262_pi4ioe5v6408_lora::TcxoVoltage::V3_3)"
+    default: none
+  tcxo-startup-ms:
+    type: integer
+    default: 5
+  # Whether DIO2 drives the antenna switch between transmit and receive.
+  dio2-rf-switch:
+    type: boolean
+    default: false
+  # The band the product's RF front end passes.
+  min-frequency-hz:
+    type: integer
+    default: 150000000
+  max-frequency-hz:
+    type: integer
+    default: 960000000

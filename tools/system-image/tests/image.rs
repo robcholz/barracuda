@@ -148,13 +148,7 @@ impl embedded_storage::nor_flash::NorFlash for MemoryFlash {
 }
 
 fn mounted_littlefs(bytes: Vec<u8>) -> Vfs {
-    let storage = PartitionStorage::<
-        MemoryFlash,
-        generic_array::typenum::U128,
-        generic_array::typenum::U8,
-        128,
-    >::new(MemoryFlash(bytes))
-    .expect("LittleFS storage geometry");
+    let storage = PartitionStorage::new(MemoryFlash(bytes)).expect("LittleFS storage geometry");
     let littlefs = LittleFs::mount(storage).expect("mount generated LittleFS image");
     futures_lite::future::block_on(async {
         let vfs = Vfs::new();

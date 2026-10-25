@@ -1,6 +1,9 @@
 name: m5stack-stamp-s3-mini
 hardware:
   chip: esp32s3
+  # M5Unified identifies StampS3Mini by its ESP32-S3-PICO package: 8 MB flash.
+  # The package carries either 2 MB quad or 8 MB octal PSRAM; which one is unconfirmed.
+  flash-size: 8mb
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:

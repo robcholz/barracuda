@@ -11,7 +11,7 @@ The M5Stack ATOM Matrix is an ESP32 Board from M5Stack.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`connected`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-atom-matrix/partitions.csv`
 
 ## Build and run
@@ -29,3 +29,24 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 | Device | What it is | Lua package |
 | --- | --- | --- |
 | `led-strip` | LED strip (WS2812) | [`light`](/plugins/vm-led-strip) |
+| `inertial-measurement` | Motion sensor (MPU6886, or BMI270 on later units) | [`motion`](/plugins/vm-imu) |
+| `buttons` | Button (GPIO39) | [`buttons`](/plugins/vm-buttons) |
+| `infrared` | Infrared transmitter (GPIO12) | [`infrared`](/plugins/vm-infrared) |
+
+The motion sensor implementation reads the MPU6886 identity and falls back to
+the BMI270, as M5Unified does; both are mounted with X and Z inverted.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `grove-g26` | `GPIO26` |
+| `grove-g32` | `GPIO32` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("grove-g26", "up")
+print(pin:read())
+```

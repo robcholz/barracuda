@@ -11,7 +11,7 @@ The M5Stack Paper is an ESP32 Board from M5Stack.
 - Chip: ESP32
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `xtensa-esp32-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen-connected`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-paper/partitions.csv`
 
 ## Build and run
@@ -26,7 +26,38 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-paper/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | E-paper display, 4.7-inch 540 x 960 portrait, 16 gray levels (IT8951E controller) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (GT911) | — |
+| `environment-sensor` | Temperature and humidity sensor (SHT30) | [`environment`](/plugins/vm-environment-sensor) |
+| `real-time-clock` | Real-time clock (BM8563) | — |
+| `eeprom` | 256-byte EEPROM (FM24C02, `50h`) | [`eeprom`](/plugins/vm-eeprom) |
+| `buttons` | Rocker up, press, down (GPIO37, GPIO38, GPIO39) | [`buttons`](/plugins/vm-buttons) |
+| `battery` | Battery voltage (ADC resistor divider) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
+
+The Platform entry drives `GPIO2`, the main power latch (`hardware.power-hold`), high before anything else is built, so the Board stays on without USB power once its power button is released.
+
+The microSD card shares the e-paper controller's SPI bus through its own chip select.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO32` |
+| `port-a-sda` | `GPIO25` |
+| `port-b-g26` | `GPIO26` |
+| `port-b-g33` | `GPIO33` |
+| `port-c-g18` | `GPIO18` |
+| `port-c-g19` | `GPIO19` |
+
+`GPIO5` switches the ports' 5 V supply and is not exposed.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

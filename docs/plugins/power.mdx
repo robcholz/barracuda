@@ -1,16 +1,16 @@
 ---
 title: "Power Plugin"
 sidebarTitle: "Power"
-description: "Read the Board's power monitor and battery charge through the `Power` capability."
+description: "Read the Board's power monitors and battery charge through the `Power` capability."
 ---
 
-Owns the Board's primary power monitor and publishes its readings and the
+Owns the Board's power monitors and publishes their readings and the
 battery's charge to other Plugins as `Power`.
 
 - Plugin ID: `power`
 - Dependencies: none
 - Settings: none
-- Context resources: peripheral slot `power-monitor.device` (`primary`, optional)
+- Context resources: peripheral slot `power-monitor.devices` (`*`)
 - Provided capabilities: `Power`
 - Required capabilities: none
 - Workflow: none
@@ -20,16 +20,28 @@ battery's charge to other Plugins as `Power`.
 - Tasks: none
 - Storage: none
 
-This Plugin takes the Board's primary `PowerMonitor` exactly once and keeps
-it behind a lock. `Power` is cheap to clone, and every clone reads the same
-monitor, so the system UI's battery and a Lua handle read it side by side:
+This Plugin takes every `PowerMonitor` of the Board that no other Plugin
+claims, the primary one first, exactly once, and keeps each behind its own
+lock. The primary monitor is the product's main one, normally the battery's
+fuel gauge. `Power` is cheap to clone, and every clone reads the same
+monitors, so the system UI's battery and Lua handles read them side by side:
 
 - `Power::is_present()`: whether the Board has a power monitor.
-- `Power::measure()`: one coherent sample (`PowerMeasurement`), or
-  `PowerError` without a monitor or when the reading fails.
+- `Power::measure()`: one coherent sample (`PowerMeasurement`) from the
+  primary monitor, or `PowerError` without a monitor or when the reading
+  fails.
 - `Power::battery()`: the battery's charge (`BatteryState` with `percent`
-  and `charging`) from a monitor that is a battery fuel gauge, such as the
-  BQ27220; `None` from others or when the reading fails.
+  and `charging`) from the primary monitor when it is a battery fuel gauge,
+  such as the BQ27220; `None` from others or when the reading fails.
+- `Power::names()`: the Board names of the monitors, the primary one first.
+- `Power::monitor(name)`: the monitor with that Board name, or the primary
+  one for `None`, as a `Monitor` with `name()`, `measure()`, and `battery()`;
+  `None` when the Board has no such monitor.
+
+Readers that want the battery use `measure` and `battery`, which always read
+the primary monitor, so a Board that adds monitors, such as the M5Stack
+Station's six Grove-port INA3221 channels beside its AXP192 battery gauge,
+changes nothing for them.
 
 I2C ownership, chip initialization, calibration, and conversion to integer
 SI subunits stay in the selected implementation and generated Board HAL.

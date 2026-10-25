@@ -1,0 +1,42 @@
+id: ssd1306-spi-display
+api-version: 1
+peripheral: display
+implementation:
+  package: barracuda-ssd1306-spi-display
+  crate: barracuda_ssd1306_spi_display
+  factory: "::{{crate}}::Ssd1306DisplayImplementation<{{binding.spi.type}}, {{binding.dc.type}}, {{binding.reset.type}}, {{hal.delay.type}}>"
+  bindings-expression: "::{{crate}}::Ssd1306DisplayBindings::new({{binding.spi.value}}, {{binding.dc.value}}, {{binding.reset.value}}, {{hal.delay.value}})"
+  config-expression: "::{{crate}}::Ssd1306DisplayConfig::new({{parameter.width}}, {{parameter.height}}, {{parameter.column-offset}}, {{parameter.com-pins}}, {{parameter.orientation}})"
+bindings:
+  spi:
+    kind: spi-device
+  dc:
+    kind: digital-output
+    initial: low
+  reset:
+    kind: digital-output
+    initial: high
+parameters:
+  width:
+    type: integer
+    required: true
+  height:
+    type: integer
+    required: true
+  # First GDDRAM column of a glass narrower than 128 pixels.
+  column-offset:
+    type: integer
+    default: 0
+  # SSD1306 `DAh` COM pins configuration byte: 2 sequential, 18 alternative.
+  com-pins:
+    type: integer
+    default: 18
+  orientation:
+    type: enum
+    values: [deg0, deg90, deg180, deg270]
+    rust-values:
+      deg0: "::barracuda_peripheral::display::DisplayOrientation::Deg0"
+      deg90: "::barracuda_peripheral::display::DisplayOrientation::Deg90"
+      deg180: "::barracuda_peripheral::display::DisplayOrientation::Deg180"
+      deg270: "::barracuda_peripheral::display::DisplayOrientation::Deg270"
+    default: deg0

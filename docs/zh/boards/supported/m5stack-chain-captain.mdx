@@ -11,7 +11,7 @@ M5Stack Chain Captain 是 M5Stack 推出的 ESP32-S3 开发板。
 - 芯片：ESP32-S3
 - 平台：[ESP32](/zh/platforms/esp32)
 - Rust 目标：`xtensa-esp32s3-none-elf`
-- Profile：[`headless`](/zh/boards/profiles)（默认）
+- Profile：[`screen`](/zh/boards/profiles)
 - Flash 布局：`boards/configs/m5stack-chain-captain/partitions.csv`
 
 ## 构建和运行
@@ -26,4 +26,29 @@ cargo image deploy
 
 ## 外设
 
-这块开发板目前还没有声明外设。网络、Agent 和门户可以在它上面运行；把它的设备添加到 `boards/configs/m5stack-chain-captain/board.yml` 中即可驱动它们。参见[外设组合](/zh/boards/peripherals)。
+| 设备 | 说明 | Lua 包 |
+| --- | --- | --- |
+| `display` | 显示屏（JD9853） | [`display`](/zh/plugins/vm-display) |
+| `real-time-clock` | 实时时钟（RX8130CE） | — |
+| `power-monitor` | 电量计（M5PM1） | [`power_monitor`](/zh/plugins/vm-power-monitor) |
+| `buttons` | 按键 A、B、C（GPIO1、GPIO4、GPIO5） | [`buttons`](/zh/plugins/vm-buttons) |
+| `audio-codec` | 音频编解码器（ES8311） | [`audio`](/zh/plugins/vm-audio) |
+
+M5PM1 只测量电池电压。这块开发板没有把充电器的状态线接到 M5PM1，所以只要有 VIN 输入且电池低于 4.1 V，电池就显示为正在充电。
+
+## 可用引脚
+
+Lua 脚本按名称打开这些引脚。
+
+| 名称 | 引脚 |
+| --- | --- |
+| `port-a-scl` | `GPIO6` |
+| `port-a-sda` | `GPIO7` |
+| `port-b-g17` | `GPIO17` |
+| `port-b-g18` | `GPIO18` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```

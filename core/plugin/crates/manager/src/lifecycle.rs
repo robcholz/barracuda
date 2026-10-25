@@ -125,6 +125,16 @@ pub enum PluginError {
     /// Plugin-specific initialization failed.
     #[error("Plugin initialization failed: {0}")]
     Registration(#[source] Box<dyn Error>),
+    /// A required peripheral slot is empty because its Board device failed
+    /// to initialize. [`PluginManager::register_all`] leaves the Plugin and
+    /// the Plugins that depend on it out and registers the others.
+    #[error("required peripheral slot `{kind}.{slot}` has no device; it failed to initialize")]
+    PeripheralUnavailable {
+        /// Peripheral kind of the slot, as in `plugin.toml`.
+        kind: &'static str,
+        /// Slot name, as in `plugin.toml`.
+        slot: &'static str,
+    },
 }
 
 impl PluginError {
@@ -727,10 +737,15 @@ where
 
     /// Registers the complete queued Plugin graph in dependency order.
     ///
+    /// A Plugin whose registration fails with
+    /// [`PluginError::PeripheralUnavailable`] is logged and left out, with
+    /// every queued Plugin that depends on it, directly or not; the rest of
+    /// the graph registers.
+    ///
     /// # Errors
     ///
     /// Returns an error when a dependency is absent, the graph contains a
-    /// cycle, or one Plugin registration fails.
+    /// cycle, or one Plugin registration fails for any other reason.
     pub fn register_all(&mut self) -> Result<(), PluginRegisterError> {
         for plugin in self.pending.values() {
             for dependency in plugin.dependencies() {
@@ -746,7 +761,22 @@ where
                 }
             }
         }
+        let mut left_out = BTreeSet::<PluginId>::new();
         while !self.pending.is_empty() {
+            let stranded = self.pending.iter().find_map(|(id, plugin)| {
+                plugin
+                    .dependencies()
+                    .iter()
+                    .filter_map(|dependency| PluginId::try_from(*dependency).ok())
+                    .find(|dependency| left_out.contains(dependency))
+                    .map(|dependency| (id.clone(), dependency))
+            });
+            if let Some((id, dependency)) = stranded {
+                self.pending.remove(&id);
+                log::error!("Plugin {id} is left out: its dependency {dependency} is left out");
+                left_out.insert(id);
+                continue;
+            }
             let ready = self
                 .pending
                 .iter()
@@ -767,7 +797,15 @@ where
                 .pending
                 .remove(&id)
                 .ok_or_else(|| PluginRegisterError::DependencyCycle(Vec::new()))?;
-            self.register_managed(plugin)?;
+            match self.register_managed(plugin) {
+                Err(PluginRegisterError::Registration(PluginError::PeripheralUnavailable {
+                    ..
+                })) => {
+                    log::error!("Plugin {id} is left out: a device it requires is absent");
+                    left_out.insert(id);
+                }
+                result => result?,
+            }
         }
         Ok(())
     }

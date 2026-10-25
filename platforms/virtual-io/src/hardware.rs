@@ -16,7 +16,9 @@ use crate::{
     spi::{Frame, SpiDevice, VirtualSpiBus, VirtualSpiError},
 };
 
-/// Number of recorded events kept; older events are dropped first.
+/// Number of recorded events kept. A full log drops the oldest event of the
+/// kind it holds most of, so a display's stream of SPI and GPIO events does
+/// not push out the rare I2C transactions of the same run.
 pub const EVENT_CAPACITY: usize = 4096;
 
 /// Highest seven-bit I2C address.
@@ -237,6 +239,20 @@ pub enum EventDetail {
     },
 }
 
+/// Number of [`EventDetail`] kinds.
+const EVENT_KINDS: usize = 4;
+
+impl EventDetail {
+    const fn kind_index(&self) -> usize {
+        match self {
+            Self::Gpio { .. } => 0,
+            Self::I2c { .. } => 1,
+            Self::Spi { .. } => 2,
+            Self::Device { .. } => 3,
+        }
+    }
+}
+
 /// One phase of a recorded I2C transaction, as lowercase hex bytes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -387,6 +403,8 @@ struct Hardware {
     faults: Vec<FaultRule>,
     next_fault: u64,
     events: VecDeque<Event>,
+    /// Recorded events per kind, indexed by [`EventDetail::kind_index`].
+    event_kinds: [usize; EVENT_KINDS],
     next_seq: u64,
     violations: Vec<RecordedViolation>,
 }
@@ -432,6 +450,7 @@ impl VirtualHardware {
             faults: Vec::new(),
             next_fault: 1,
             events: VecDeque::new(),
+            event_kinds: [0; EVENT_KINDS],
             next_seq: 1,
             violations: Vec::new(),
         };
@@ -965,6 +984,7 @@ impl VirtualHardware {
         }
         hardware.faults.clear();
         hardware.events.clear();
+        hardware.event_kinds = [0; EVENT_KINDS];
         hardware.violations.clear();
     }
 
@@ -1186,13 +1206,31 @@ impl Hardware {
         let seq = self.next_seq;
         self.next_seq += 1;
         if self.events.len() == EVENT_CAPACITY {
-            let _oldest = self.events.pop_front();
+            self.drop_oldest_of_commonest_kind();
         }
+        self.event_kinds[detail.kind_index()] += 1;
         self.events.push_back(Event {
             seq,
             at_us: micros(now),
             detail,
         });
+    }
+
+    fn drop_oldest_of_commonest_kind(&mut self) {
+        let mut commonest = 0;
+        for kind in 1..EVENT_KINDS {
+            if self.event_kinds[kind] > self.event_kinds[commonest] {
+                commonest = kind;
+            }
+        }
+        if let Some(index) = self
+            .events
+            .iter()
+            .position(|event| event.detail.kind_index() == commonest)
+        {
+            let _oldest = self.events.remove(index);
+            self.event_kinds[commonest] -= 1;
+        }
     }
 
     fn record_notes(
@@ -1414,6 +1452,35 @@ mod tests {
                 source: "system",
             }
         );
+    }
+
+    #[test]
+    fn a_stream_of_one_kind_does_not_push_out_the_others() {
+        let hardware = hardware();
+        hardware
+            .attach("I2C0", 0x50, Box::new(RegisterDevice::new()))
+            .expect("attach");
+        let mut bus = hardware.i2c_bus("I2C0").expect("bus");
+        bus.write(0x50, &[0x02, 0xaa]).expect("write");
+        hardware.configure_pin(
+            0,
+            PinMode::Output,
+            PinPull::None,
+            PinDrive::PushPull,
+            Some(false),
+        );
+        for toggle in 0..EVENT_CAPACITY * 2 {
+            hardware.set_output(0, toggle % 2 == 0);
+        }
+        let events = hardware.events(0);
+        assert_eq!(events.len(), EVENT_CAPACITY);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event.detail, EventDetail::I2c { address: 0x50, .. })),
+            "the I2C write survives the GPIO stream"
+        );
+        assert!(events.windows(2).all(|pair| pair[0].seq < pair[1].seq));
     }
 
     #[test]

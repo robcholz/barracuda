@@ -1,0 +1,81 @@
+---
+title: "Buttons Plugin"
+sidebarTitle: "Buttons"
+description: "Read the Board's buttons and wait for presses, clicks, and long presses in Lua with the `buttons` package."
+---
+
+Installs the `buttons` Lua package over the Board's buttons, the primary
+device by default.
+
+- Plugin ID: `buttons`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `buttons.devices` (`*`)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `buttons`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes every `Buttons` device of the Board that no other Plugin
+claims, the primary one first, and installs the `buttons` Lua package. Pin
+sampling, debouncing, the long-press time, and PMIC registers stay with the
+selected implementation, which turns them into button events.
+
+Lua API:
+
+- `buttons.list() -> { name, ... }`: the Board names of the button devices,
+  the primary one first
+- `buttons.available([name]) -> boolean`: whether the named device, or the
+  primary one, exists and no other call holds it
+- `buttons.count([name]) -> integer`: how many buttons the device has
+- `buttons.read([name]) -> { pressed, ... }`: whether each button is down
+  now, button 1 first
+- `buttons.poll([name]) -> button, event`, or nothing when no button changed
+- `buttons.wait([timeout_ms[, name]]) -> button, event`, or nothing when no
+  button changed before the timeout; without a timeout it waits for the next
+  event. It checks every 10 ms.
+
+`name` is a Board device name from `list`; without it a call uses the primary
+device, so a script written for a Board with one button device runs unchanged
+on a Board with several. To name a device for `wait` without a timeout, pass
+`nil` as the timeout.
+
+Buttons are numbered from 1 in the order the Board documents them. `event` is
+one of:
+
+| Event | When |
+| --- | --- |
+| `"pressed"` | the button went down |
+| `"released"` | the button came up |
+| `"click"` | right after `"released"`, for a press shorter than the long-press time |
+| `"long_press"` | the button has been down for the long-press time; it comes before `"released"`, and no `"click"` follows |
+
+GPIO, expander, ADC-ladder, and capacitive-touch buttons debounce for 10 ms
+and treat 500 ms as a long press unless the Board sets other values; their
+events come from the samples `poll` and `wait` take, so a press shorter than
+the time between two calls can go unseen. A PMIC power key reports each press
+the PMIC latched, all its events at once after the press. Each device keeps
+up to 16 events for a script that calls less often and then drops the oldest.
+
+A failed read, an unknown device name, or a device another call is waiting on
+returns `nil, error`.
+
+```lua
+local buttons = require("buttons")
+while true do
+  local button, event = buttons.wait(5000)
+  if button then
+    print("button " .. button .. " " .. event)
+  end
+end
+```
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 1. Boards without buttons still install
+the package; `available` returns false and the other calls return
+`nil, error`. Plugin revocation stops every later call. The Plugin performs
+no background sampling and owns no long-running tasks.

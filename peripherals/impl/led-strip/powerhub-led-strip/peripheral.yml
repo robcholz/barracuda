@@ -1,0 +1,26 @@
+id: powerhub-led-strip
+api-version: 1
+peripheral: led-strip
+implementation:
+  package: barracuda-powerhub-led-strip
+  crate: barracuda_powerhub_led_strip
+  factory: "::{{crate}}::PowerHubLedStripImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "{{binding.i2c.value}}"
+  config-expression: "::{{crate}}::PowerHubLedStripConfig::new({{parameter.address}}, {{parameter.brightness}})"
+# The M5Stack PowerHub's eight WS2812C LEDs, which its power co-processor
+# drives (M5Unified `LED_PowerHub_Class`). The implementation writes only the
+# LED supply enable (00h), the colors (60h-7Fh), and the brightness
+# (80h-87h).
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  # The co-processor's address (M5Unified `powerhub_i2c_addr`, 50h).
+  address:
+    type: integer
+    default: 80
+  # The co-processor's brightness, 0 to 255, applied to every LED. 63 is
+  # M5Unified's default.
+  brightness:
+    type: integer
+    default: 63

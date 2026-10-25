@@ -11,7 +11,7 @@ The M5Stack Tab5 is an ESP32-P4 Board from M5Stack.
 - Chip: ESP32-P4
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `riscv32imafc-unknown-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-tab5/partitions.csv`
 
 ## Build and run
@@ -26,10 +26,103 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-tab5/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `audio-codec` | Audio codec (ES8388 speaker DAC, ES7210 microphone ADC) | [`audio`](/plugins/vm-audio) |
+| `display` | 720x1280 MIPI DSI display (ILI9881C, ST7123, or ST7121, detected at start) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (GT911 or the panel's ST712x) | — |
+| `real-time-clock` | Real-time clock (RX8130CE) | — |
+| `inertial-measurement` | Motion sensor (BMI270) | [`motion`](/plugins/vm-imu) |
+| `power-monitor` | Power monitor (INA226) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `micro-sd` | microSD card slot (FAT) | — |
+
+The display implementation resets the panel and the touch controller through
+the PI4IOE5V6408 expander at `43h`, which is not a device of its own. As M5GFX
+does, it holds the touch interrupt line (GPIO23) high meanwhile, so a GT911
+answers at `14h`, and then identifies the panel by the touch controller that
+answers.
+The audio codec implementation switches the speaker amplifier on through the
+same expander. The SC202CS camera is not declared: the ESP32-P4 Platform has
+no MIPI CSI binding.
+
+## microSD card
+
+The microSD slot is on slot 0 of the ESP32-P4's SD host, on that slot's fixed
+pads. The Wi-Fi co-processor uses slot 1 of the same host. The
+[ESP32-P4 Platform](/platforms/esp32) owns the SD host and hands slot 0 to the
+`micro-sd` device. It runs the card on four lines at 40 MHz and powers its I/O
+from the chip's LDO VO4 at 3.3 V. A FAT card appears at `/removable/micro-sd`.
+The slot has no card-detect line, so a removed or swapped card is noticed the
+next time the slot is read, within about a second.
+
+| Signal | Pin |
+| --- | --- |
+| SD CLK / CMD | `GPIO43` / `GPIO44` |
+| SD D0 / D1 / D2 / D3 | `GPIO39` / `GPIO40` / `GPIO41` / `GPIO42` |
+| Card detect | none |
+| I/O supply | on-chip LDO VO4, 3.3 V |
+
+The card and Wi-Fi take turns on the SD host's one transfer engine, in the
+order they ask for it. One card transfer moves at most 4 KiB, so Wi-Fi waits
+at most about 0.2 ms for the card, however large the file.
+
+The card has not been tried on a device yet.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO54` |
+| `port-a-sda` | `GPIO53` |
+| `port-b-g17` | `GPIO17` |
+| `port-b-g52` | `GPIO52` |
+| `port-c-g6` | `GPIO6` |
+| `port-c-g7` | `GPIO7` |
+| `rs485-rx` | `GPIO21` |
+| `rs485-tx` | `GPIO20` |
+| `rs485-dir` | `GPIO34` |
+
+`rs485-tx`, `rs485-rx`, and `rs485-dir` are the UART and direction pins of the
+on-board RS485 transceiver. Open them as one RS485 port, with `rs485-dir` as
+the driver-enable pin, and the port drives the bus only while it writes:
+`uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")`.
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```
+
+## Wi-Fi
+
+The Wi-Fi radio is the ESP32-C6 co-processor, declared under
+`hardware.wifi-coprocessor` in `board.yml`. It runs M5Stack's factory
+ESP-Hosted-MCU firmware. The [ESP32-P4 Platform](/platforms/esp32) does the
+following at startup:
+
+1. Switches on the co-processor's power through output 0 of the PI4IOE5V6408
+   expander at `44h`.
+2. Resets the co-processor.
+3. Talks to it over SDIO at 40 MHz.
+
+The IP stack runs on its Wi-Fi station, and the
+[Wi-Fi Plugin](/plugins/wifi) opens its setup hotspot on the co-processor.
+When a network gives the device an address, the console logs
+`Wi-Fi is up at <address>`.
+
+| Signal | Pin |
+| --- | --- |
+| SDIO CLK / CMD | `GPIO12` / `GPIO13` |
+| SDIO D0 / D1 / D2 / D3 | `GPIO11` / `GPIO10` / `GPIO9` / `GPIO8` |
+| Co-processor reset | `GPIO15` |
+| Co-processor power | PI4IOE5V6408 `44h` output 0 on `I2C0` (`GPIO32` / `GPIO31`) |
+
+The factory firmware version has not been checked against this host on a
+device. If the co-processor does not start, or runs firmware the Platform
+cannot drive, the console logs `Wi-Fi is unavailable: <reason>`. The Board
+then has no network link and no setup hotspot.
 
 ## Plugin settings
 

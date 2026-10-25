@@ -1,7 +1,118 @@
 name: m5stack-paper-s3
+profile: screen
 hardware:
   chip: esp32s3
+  # ESP32-S3R8 with 16 MB flash.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: octal-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # Internal bus SCL G42, SDA G41 at 400 kHz, shared by touch, clock and IMU
+        # (M5GFX board_M5PaperS3; M5Unified; Espressif m5stack_papers3).
+        peripheral: I2C1
+        scl: GPIO42
+        sda: GPIO41
+        frequency-hz: 400000
+    parallel-output:
+      epd-bus:
+        # M5GFX board_M5PaperS3 Bus_EPD: the ED047TC1 source data DB0..DB7 on
+        # LCD_CAM in i8080 mode at 16 MHz, CL (pin_cl) as the write strobe and
+        # SPH/XSTL (pin_sph) as the active-low chip select; there is no
+        # data/command line. One line is 240 data bytes plus M5GFX's 8 bytes
+        # of padding.
+        peripheral: LCD_CAM
+        # DMA_CH0 stays with the runtime I2S pool.
+        dma: DMA_CH1
+        wr: GPIO16
+        chip-select: GPIO13
+        data: [GPIO6, GPIO14, GPIO7, GPIO12, GPIO9, GPIO11, GPIO8, GPIO10]
+        frequency-hz: 16000000
+        dma-buffer-bytes: 256
+    analog-input:
+      battery-sense:
+        # M5Unified `Power_Class::begin` PaperS3: the battery on ADC1 GPIO3
+        # through a divider of two; the charger's CHG_STAT (GPIO4) reads low
+        # while it charges (`M5PaperS3_CHG_STAT_PIN`, `isCharging`).
+        peripheral: ADC1
+        pin: GPIO3
+    spi-device:
+      card-spi:
+        # M5Unified `_pin_table_sd` (board_M5PaperS3, board_M5PaperDIY).
+        peripheral: SPI2
+        sck: GPIO39
+        mosi: GPIO38
+        miso: GPIO40
+        chip-select: GPIO47
+        frequency-hz: 20000000
+    pwm-output:
+      buzzer-tone:
+        # Passive buzzer on GPIO21 (M5Unified `_begin_audio` board_M5PaperS3:
+        # `spk_cfg.buzzer = true`).
+        peripheral: LEDC
+        timer: Timer1
+        channel: Channel1
+        pin: GPIO21
+  devices:
+    micro-sd:
+      implementation: spi-sd-fat-removable-storage
+      bindings: { spi: card-spi }
+    battery:
+      implementation: adc-battery-power-monitor
+      bindings: { sense: battery-sense, charging: GPIO4 }
+      parameters:
+        divider-numerator: 2
+        charging-level: low
+    display:
+      implementation: ed047tc1-display
+      bindings:
+        bus: epd-bus
+        # M5GFX Bus_EPD: SPV (gate start), CKV (gate clock), LE/XLE (source
+        # latch), OE/XOE (source output enable), PWR (panel supply).
+        spv: GPIO17
+        ckv: GPIO18
+        le: GPIO15
+        oe: GPIO45
+        pwr: GPIO46
+      parameters:
+        # M5GFX offset_rotation 3: upright portrait, 540 x 960.
+        mounting: deg270
+    # GT911 (M5GFX board_M5PaperS3 `Touch_GT911`, 0..539 x 0..959, which
+    # needs no rotation for the upright portrait display). The
+    # implementation tries 14h, then 5Dh, as M5GFX does; the interrupt
+    # (GPIO48) is unused: it polls.
+    touch:
+      implementation: gt911-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 20
+        width: 540
+        height: 960
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 68h (Espressif m5stack_papers3; M5Stack PaperS3 pin map).
+        address: 104
+    # The passive buzzer; its timer and channel leave the runtime PWM pool
+    # its own (Timer0, Channel0).
+    buzzer:
+      implementation: pwm-buzzer
+      bindings: { output: buzzer-tone }
+exposed-io:
+  pins:
+    # Grove port G1/G2 (M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA)).
+    grove-g1: { pin: GPIO1 }
+    grove-g2: { pin: GPIO2 }

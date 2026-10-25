@@ -1,0 +1,21 @@
+id: powerhub-power-monitor
+api-version: 1
+peripheral: power-monitor
+implementation:
+  package: barracuda-powerhub-power-monitor
+  crate: barracuda_powerhub_power_monitor
+  factory: "::{{crate}}::PowerHubPowerMonitorImplementation<{{binding.i2c.type}}>"
+  bindings-expression: "{{binding.i2c.value}}"
+  config-expression: "::{{crate}}::PowerHubPowerMonitorConfig::new({{parameter.address}})"
+# The M5Stack PowerHub's battery input (a 2S NP-F pack on the PowerHub Kit),
+# measured by the INA226 behind the power co-processor and read through it
+# (M5Unified `Power_Class`). The implementation writes only the metering
+# enable (05h) and reads the battery registers (30h-33h).
+bindings:
+  i2c:
+    kind: i2c-device
+parameters:
+  # The co-processor's address (M5Unified `powerhub_i2c_addr`, 50h).
+  address:
+    type: integer
+    default: 80

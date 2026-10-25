@@ -1,0 +1,63 @@
+---
+title: "NFC Plugin"
+sidebarTitle: "NFC"
+description: "Read NFC cards and tags from Lua with the `nfc` package."
+---
+
+Installs the `nfc` Lua package over the Board's NFC card readers, the primary
+one by default.
+
+- Plugin ID: `nfc`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `nfc-reader.devices` (`*`)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `nfc`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes every `NfcReader` of the Board that no other Plugin claims,
+the primary one first, and installs the `nfc` Lua package. It consumes the semantic peripheral and never
+reaches the reader chip, its bus, or a supply switch behind it.
+
+Lua API:
+
+- `nfc.list() -> { name, ... }`: the Board names of the readers, the primary
+  one first
+- `nfc.available([name]) -> boolean`
+- `nfc.poll([name]) -> card | nil` looks for an ISO/IEC 14443-A card once and
+  selects it; `card` is `\{uid = "04a1b2c3", atqa = 68, sak = 0\}`, the UID in
+  lowercase hexadecimal (four, seven, or ten bytes)
+- `nfc.wait([timeout_ms[, name]]) -> card` polls every 100 ms until a card answers;
+  after `timeout_ms` it returns `nil, "timeout"`
+- `nfc.read(page[, name]) -> bytes` reads 16 bytes, the four pages from `page`, of
+  the card the last poll selected, with the `READ` command NFC Forum Type 2
+  tags (NTAG, MIFARE Ultralight) answer
+
+`name` is a Board device name from `list`; without it a call uses the primary
+reader, so a script written for one reader runs unchanged on a Board with
+several. To name a reader without the optional values before it, pass `nil` for
+them.
+
+A card that is gone, an unknown name, a MIFARE Classic card (which answers `READ` only after
+authentication), a `read` before a successful poll, or a call while another
+is running returns `nil, error`. Several cards in the field at once are
+reported as an error, not resolved.
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2. Boards without a card reader still
+install the package; `available` returns false and every other call returns
+`nil, error`. Plugin revocation prevents every further call.
+
+```lua
+local nfc = require("nfc")
+local card = nfc.wait(10000)
+if card then
+  print(card.uid)
+  local header = nfc.read(0)
+end
+```

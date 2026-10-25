@@ -8,6 +8,11 @@ description = "ESP32-C3 Platform implementation for Barracuda"
 default = ["runtime-pwm"]
 runtime-i2s = []
 runtime-pwm = []
+# The Wi-Fi radio and the IP stacks over it. The Plugin selection enables it
+# when an enabled Plugin takes the Platform's Wi-Fi. Without it the Platform
+# supplies `UnavailableWifiDevice`, an IP stack whose link is always down, and
+# entropy from a generator seeded from SAR ADC noise at start-up.
+wifi = ["dep:esp-radio", "esp-rtos/esp-radio"]
 
 [dependencies]
 barracuda-board.workspace = true
@@ -33,9 +38,11 @@ esp-backtrace = { version = "0.20.0", features = ["esp32c3", "panic-handler", "p
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32c3"] }
 esp-hal = { version = "1.2.0", default-features = false, features = ["critical-section", "esp32c3", "exception-handler", "rt", "unstable"] }
 esp-println = { version = "0.18.0", default-features = false, features = ["esp32c3", "jtag-serial", "log-04"] }
-esp-radio = { version = "1.0.0-beta.1", default-features = false, features = ["esp-alloc", "esp32c3", "log-04", "wifi"] }
-esp-rtos = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "esp32c3"] }
+esp-radio = { version = "1.0.0-beta.1", default-features = false, features = ["esp-alloc", "esp32c3", "log-04", "wifi"], optional = true }
+esp-rtos = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp32c3"] }
 esp-storage = { version = "0.10.0", default-features = false, features = ["esp32c3", "embedded-storage"] }
+rand_chacha = { version = "0.9", default-features = false }
+rand_core = { version = "0.9", default-features = false }
 static_cell.workspace = true
 nb = "1"
 

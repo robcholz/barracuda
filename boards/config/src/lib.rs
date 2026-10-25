@@ -247,6 +247,31 @@ impl BoardDefinition {
         {
             return Err(ConfigError::ZeroExternalMemory);
         }
+        if let Some(ethernet) = &self.hardware.ethernet {
+            ethernet.validate()?;
+        }
+        if let Some(coprocessor) = &self.hardware.wifi_coprocessor {
+            coprocessor.validate()?;
+            // The co-processor's SDIO link holds its slot of the chip's SD
+            // host for the life of the firmware; a card cannot share it.
+            let slot = coprocessor.sdio.slot;
+            if let Some((name, _)) = self
+                .peripherals
+                .io
+                .sdmmc_devices
+                .iter()
+                .find(|(_, device)| device.slot == slot)
+            {
+                return Err(ConfigError::SdmmcSlotInUse {
+                    resource: name.clone(),
+                    slot,
+                    user: String::from("the Wi-Fi co-processor"),
+                });
+            }
+        }
+        if let Some(pin) = &self.hardware.power_hold {
+            validate_identifier("power-hold", "pin", pin)?;
+        }
         if let Some(toolchain) = &self.toolchain {
             if toolchain.target.trim().is_empty() {
                 return Err(ConfigError::EmptyToolchainTarget);
@@ -341,10 +366,26 @@ pub struct PeripheralIoDefinition {
     i2c_devices: BTreeMap<String, I2cDefinition>,
     #[serde(default, rename = "camera-capture")]
     camera_captures: BTreeMap<String, CameraCaptureDefinition>,
+    #[serde(default, rename = "parallel-output")]
+    parallel_outputs: BTreeMap<String, ParallelOutputDefinition>,
     #[serde(default, rename = "i2s-stream")]
     i2s_streams: BTreeMap<String, I2sStreamDefinition>,
     #[serde(default, rename = "capacitive-touch")]
     capacitive_touch: BTreeMap<String, CapacitiveTouchDefinition>,
+    #[serde(default, rename = "analog-input")]
+    analog_inputs: BTreeMap<String, AnalogInputDefinition>,
+    #[serde(default, rename = "pdm-i2s-stream")]
+    pdm_i2s_streams: BTreeMap<String, PdmI2sStreamDefinition>,
+    #[serde(default, rename = "pulse-counter")]
+    pulse_counters: BTreeMap<String, PulseCounterDefinition>,
+    #[serde(default, rename = "rmt-output")]
+    rmt_outputs: BTreeMap<String, RmtChannelDefinition>,
+    #[serde(default, rename = "rmt-input")]
+    rmt_inputs: BTreeMap<String, RmtChannelDefinition>,
+    #[serde(default, rename = "pwm-output")]
+    pwm_outputs: BTreeMap<String, PwmOutputDefinition>,
+    #[serde(default)]
+    twai: BTreeMap<String, TwaiDefinition>,
 }
 
 impl PeripheralIoDefinition {
@@ -360,8 +401,16 @@ impl PeripheralIoDefinition {
             && self.quad_spi_devices.is_empty()
             && self.i2c_devices.is_empty()
             && self.camera_captures.is_empty()
+            && self.parallel_outputs.is_empty()
             && self.i2s_streams.is_empty()
             && self.capacitive_touch.is_empty()
+            && self.analog_inputs.is_empty()
+            && self.pdm_i2s_streams.is_empty()
+            && self.pulse_counters.is_empty()
+            && self.rmt_outputs.is_empty()
+            && self.rmt_inputs.is_empty()
+            && self.pwm_outputs.is_empty()
+            && self.twai.is_empty()
     }
 
     /// Finds one MIPI DSI host reserved by a display implementation.
@@ -380,6 +429,13 @@ impl PeripheralIoDefinition {
     #[must_use]
     pub fn sdmmc_device(&self, name: &str) -> Option<&SdmmcDeviceDefinition> {
         self.sdmmc_devices.get(name)
+    }
+
+    /// Iterates every declared SDMMC device in stable Board-name order.
+    pub fn sdmmc_devices(&self) -> impl Iterator<Item = (&str, &SdmmcDeviceDefinition)> {
+        self.sdmmc_devices
+            .iter()
+            .map(|(name, device)| (name.as_str(), device))
     }
 
     /// Finds one SPI bus reserved by a peripheral implementation.
@@ -418,6 +474,13 @@ impl PeripheralIoDefinition {
         self.camera_captures.get(name)
     }
 
+    /// Finds one eight-bit parallel output reserved by a peripheral
+    /// implementation.
+    #[must_use]
+    pub fn parallel_output(&self, name: &str) -> Option<&ParallelOutputDefinition> {
+        self.parallel_outputs.get(name)
+    }
+
     /// Finds one I2S stream reserved by a peripheral implementation.
     #[must_use]
     pub fn i2s_stream(&self, name: &str) -> Option<&I2sStreamDefinition> {
@@ -428,6 +491,91 @@ impl PeripheralIoDefinition {
     #[must_use]
     pub fn capacitive_touch(&self, name: &str) -> Option<&CapacitiveTouchDefinition> {
         self.capacitive_touch.get(name)
+    }
+
+    /// Finds one analog input channel reserved by a peripheral implementation.
+    #[must_use]
+    pub fn analog_input(&self, name: &str) -> Option<&AnalogInputDefinition> {
+        self.analog_inputs.get(name)
+    }
+
+    /// Iterates every declared analog input in stable Board-name order.
+    pub fn analog_inputs(&self) -> impl Iterator<Item = (&str, &AnalogInputDefinition)> {
+        self.analog_inputs
+            .iter()
+            .map(|(name, input)| (name.as_str(), input))
+    }
+
+    /// Finds one PDM microphone and I2S amplifier stream reserved by a
+    /// peripheral implementation.
+    #[must_use]
+    pub fn pdm_i2s_stream(&self, name: &str) -> Option<&PdmI2sStreamDefinition> {
+        self.pdm_i2s_streams.get(name)
+    }
+
+    /// Finds one quadrature pulse counter reserved by a peripheral
+    /// implementation.
+    #[must_use]
+    pub fn pulse_counter(&self, name: &str) -> Option<&PulseCounterDefinition> {
+        self.pulse_counters.get(name)
+    }
+
+    /// Finds one CAN controller reserved by a peripheral implementation.
+    #[must_use]
+    pub fn twai(&self, name: &str) -> Option<&TwaiDefinition> {
+        self.twai.get(name)
+    }
+
+    /// Finds one pulse-train output channel reserved by a peripheral
+    /// implementation.
+    #[must_use]
+    pub fn rmt_output(&self, name: &str) -> Option<&RmtChannelDefinition> {
+        self.rmt_outputs.get(name)
+    }
+
+    /// Iterates every declared pulse-train output in stable Board-name order.
+    pub fn rmt_outputs(&self) -> impl Iterator<Item = (&str, &RmtChannelDefinition)> {
+        self.rmt_outputs
+            .iter()
+            .map(|(name, channel)| (name.as_str(), channel))
+    }
+
+    /// Finds one pulse-train input channel reserved by a peripheral
+    /// implementation.
+    #[must_use]
+    pub fn rmt_input(&self, name: &str) -> Option<&RmtChannelDefinition> {
+        self.rmt_inputs.get(name)
+    }
+
+    /// Iterates every declared pulse-train input in stable Board-name order.
+    pub fn rmt_inputs(&self) -> impl Iterator<Item = (&str, &RmtChannelDefinition)> {
+        self.rmt_inputs
+            .iter()
+            .map(|(name, channel)| (name.as_str(), channel))
+    }
+
+    /// Finds one retunable PWM output reserved by a peripheral implementation.
+    #[must_use]
+    pub fn pwm_output(&self, name: &str) -> Option<&PwmOutputDefinition> {
+        self.pwm_outputs.get(name)
+    }
+
+    /// Iterates every declared PWM output in stable Board-name order.
+    pub fn pwm_outputs(&self) -> impl Iterator<Item = (&str, &PwmOutputDefinition)> {
+        self.pwm_outputs
+            .iter()
+            .map(|(name, output)| (name.as_str(), output))
+    }
+
+    /// Returns how many `spi-device` declarations share the SPI controller
+    /// `peripheral`. Devices on one controller share its clock and data
+    /// lines, each with its own chip select and clock rate.
+    #[must_use]
+    pub fn spi_devices_on(&self, peripheral: &str) -> usize {
+        self.spi_devices
+            .values()
+            .filter(|device| device.peripheral == peripheral)
+            .count()
     }
 
     /// Returns whether a fixed built-in declaration consumes this controller.
@@ -468,6 +616,10 @@ impl PeripheralIoDefinition {
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
             || self
+                .parallel_outputs
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
                 .i2s_streams
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
@@ -475,18 +627,47 @@ impl PeripheralIoDefinition {
                 .capacitive_touch
                 .values()
                 .any(|binding| binding.peripheral == peripheral)
+            || self
+                .analog_inputs
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .pdm_i2s_streams
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .pulse_counters
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .twai
+                .values()
+                .any(|binding| binding.peripheral == peripheral)
+            || self
+                .rmt_outputs
+                .values()
+                .chain(self.rmt_inputs.values())
+                .any(|binding| binding.peripheral == peripheral)
     }
 
     /// Returns whether a fixed built-in declaration consumes this DMA channel.
     ///
     /// Platform-owned runtime DMA pools use this to remove channels already
-    /// moved into camera or I2S peripheral bindings.
+    /// moved into camera, parallel-output, or I2S peripheral bindings.
     #[must_use]
     pub fn uses_dma(&self, dma: &str) -> bool {
         self.camera_captures
             .values()
             .any(|binding| binding.dma == dma)
+            || self
+                .parallel_outputs
+                .values()
+                .any(|binding| binding.dma == dma)
             || self.i2s_streams.values().any(|binding| binding.dma == dma)
+            || self
+                .pdm_i2s_streams
+                .values()
+                .any(|binding| binding.dma == dma)
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -501,6 +682,18 @@ impl PeripheralIoDefinition {
         for (name, device) in &self.sdmmc_devices {
             validate_resource_name("internal sdmmc-device", name)?;
             device.validate(name)?;
+            // One slot of an SD host carries one card.
+            if let Some((other, _)) = self.sdmmc_devices.iter().find(|(other, candidate)| {
+                *other < name
+                    && candidate.peripheral == device.peripheral
+                    && candidate.slot == device.slot
+            }) {
+                return Err(ConfigError::SdmmcSlotInUse {
+                    resource: name.clone(),
+                    slot: device.slot,
+                    user: format!("sdmmc-device `{other}`"),
+                });
+            }
         }
         for (name, spi) in &self.spi_buses {
             validate_resource_name("internal spi-bus", name)?;
@@ -532,7 +725,36 @@ impl PeripheralIoDefinition {
                 validate_identifier(name, "miso", miso)?;
             }
             validate_spi_data_pin(name, spi.mosi.as_deref(), spi.miso.as_deref())?;
+            if spi.three_wire && (spi.mosi.is_none() || spi.miso.is_some()) {
+                return Err(ConfigError::InvalidThreeWireSpi {
+                    resource: name.clone(),
+                });
+            }
+            if let Some(read_frequency_hz) = spi.read_frequency_hz {
+                if !spi.three_wire {
+                    return Err(ConfigError::InvalidThreeWireSpi {
+                        resource: name.clone(),
+                    });
+                }
+                validate_frequency(name, read_frequency_hz)?;
+            }
             validate_frequency(name, spi.frequency_hz)?;
+            // Devices on one controller share its clock and data lines; each
+            // keeps its own chip select and clock rate.
+            if let Some((other, _)) = self.spi_devices.iter().find(|(other, candidate)| {
+                *other != name
+                    && candidate.peripheral == spi.peripheral
+                    && (candidate.sck != spi.sck
+                        || candidate.mosi != spi.mosi
+                        || candidate.miso != spi.miso
+                        || candidate.three_wire
+                        || spi.three_wire)
+            }) {
+                return Err(ConfigError::InconsistentSharedSpi {
+                    resource: name.clone(),
+                    other: other.clone(),
+                });
+            }
         }
         for (name, spi) in &self.quad_spi_devices {
             validate_resource_name("internal quad-spi-device", name)?;
@@ -546,6 +768,10 @@ impl PeripheralIoDefinition {
             validate_resource_name("internal camera-capture", name)?;
             camera.validate(name)?;
         }
+        for (name, output) in &self.parallel_outputs {
+            validate_resource_name("internal parallel-output", name)?;
+            output.validate(name)?;
+        }
         for (name, stream) in &self.i2s_streams {
             validate_resource_name("internal i2s-stream", name)?;
             stream.validate(name)?;
@@ -554,7 +780,144 @@ impl PeripheralIoDefinition {
             validate_resource_name("internal capacitive-touch", name)?;
             touch.validate(name)?;
         }
+        for (name, input) in &self.analog_inputs {
+            validate_resource_name("internal analog-input", name)?;
+            validate_identifier(name, "peripheral", &input.peripheral)?;
+            validate_identifier(name, "pin", &input.pin)?;
+        }
+        for (name, stream) in &self.pdm_i2s_streams {
+            validate_resource_name("internal pdm-i2s-stream", name)?;
+            stream.validate(name)?;
+        }
+        for (name, counter) in &self.pulse_counters {
+            validate_resource_name("internal pulse-counter", name)?;
+            validate_identifier(name, "peripheral", &counter.peripheral)?;
+            validate_identifier(name, "a", &counter.a)?;
+            validate_identifier(name, "b", &counter.b)?;
+        }
+        for (name, controller) in &self.twai {
+            validate_resource_name("internal twai", name)?;
+            validate_identifier(name, "peripheral", &controller.peripheral)?;
+            validate_identifier(name, "tx", &controller.tx)?;
+            validate_identifier(name, "rx", &controller.rx)?;
+        }
+        for (section, channels) in [
+            ("internal rmt-output", &self.rmt_outputs),
+            ("internal rmt-input", &self.rmt_inputs),
+        ] {
+            for (name, channel) in channels {
+                validate_resource_name(section, name)?;
+                validate_identifier(name, "peripheral", &channel.peripheral)?;
+                validate_identifier(name, "pin", &channel.pin)?;
+            }
+        }
+        // One channel of a transceiver serves one direction of one device.
+        let rmt_channels = self
+            .rmt_outputs
+            .iter()
+            .chain(self.rmt_inputs.iter())
+            .collect::<Vec<_>>();
+        for (index, (name, channel)) in rmt_channels.iter().enumerate() {
+            if let Some((other, _)) = rmt_channels[..index].iter().find(|(_, candidate)| {
+                candidate.peripheral == channel.peripheral && candidate.channel == channel.channel
+            }) {
+                return Err(ConfigError::RmtChannelInUse {
+                    resource: (*name).clone(),
+                    channel: channel.channel,
+                    other: (*other).clone(),
+                });
+            }
+        }
+        for (name, output) in &self.pwm_outputs {
+            validate_resource_name("internal pwm-output", name)?;
+            validate_identifier(name, "peripheral", &output.peripheral)?;
+            validate_identifier(name, "timer", &output.timer)?;
+            validate_identifier(name, "channel", &output.channel)?;
+            validate_identifier(name, "pin", &output.pin)?;
+            // Each output retunes its own timer, so outputs share neither.
+            if let Some((other, _)) = self.pwm_outputs.iter().find(|(other, candidate)| {
+                *other < name
+                    && candidate.peripheral == output.peripheral
+                    && (candidate.timer == output.timer || candidate.channel == output.channel)
+            }) {
+                return Err(ConfigError::PwmOutputShared {
+                    resource: name.clone(),
+                    other: other.clone(),
+                });
+            }
+        }
         Ok(())
+    }
+}
+
+/// One channel of a remote-control transceiver (the ESP RMT) and its pin.
+///
+/// Several channels may name one transceiver; the composition builds it once
+/// and hands each implementation its channel.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RmtChannelDefinition {
+    peripheral: String,
+    channel: u8,
+    pin: String,
+}
+
+impl RmtChannelDefinition {
+    /// Returns the chip-native transceiver.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the transceiver channel.
+    #[must_use]
+    pub const fn channel(&self) -> u8 {
+        self.channel
+    }
+
+    /// Returns the pin the channel drives or samples.
+    #[must_use]
+    pub fn pin(&self) -> &str {
+        &self.pin
+    }
+}
+
+/// One timer and output channel of a PWM controller (the ESP LEDC) and the
+/// pin it drives. The implementation retunes the timer, so a buzzer can
+/// change pitch; the controller's other timers and channels stay with the
+/// runtime PWM pool.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PwmOutputDefinition {
+    peripheral: String,
+    timer: String,
+    channel: String,
+    pin: String,
+}
+
+impl PwmOutputDefinition {
+    /// Returns the chip-native PWM controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the controller timer the output owns.
+    #[must_use]
+    pub fn timer(&self) -> &str {
+        &self.timer
+    }
+
+    /// Returns the controller output channel the output owns.
+    #[must_use]
+    pub fn channel(&self) -> &str {
+        &self.channel
+    }
+
+    /// Returns the pin the channel drives.
+    #[must_use]
+    pub fn pin(&self) -> &str {
+        &self.pin
     }
 }
 
@@ -645,12 +1008,17 @@ impl MipiCsiDefinition {
 }
 
 /// One MIPI DSI host and its fixed Board power/backlight resources.
+///
+/// `backlight` is the panel backlight pin when the chip drives it directly. A
+/// panel whose backlight sits behind another chip, such as an I/O expander,
+/// omits it, and its display implementation drives that chip.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct DsiHostDefinition {
     peripheral: String,
     dma: String,
-    backlight: String,
+    #[serde(default)]
+    backlight: Option<String>,
     #[serde(rename = "data-lanes")]
     data_lanes: u8,
     #[serde(rename = "phy-power-channel")]
@@ -672,10 +1040,10 @@ impl DsiHostDefinition {
         &self.dma
     }
 
-    /// Returns the panel backlight PWM pin.
+    /// Returns the panel backlight pin, when the chip drives it directly.
     #[must_use]
-    pub fn backlight(&self) -> &str {
-        &self.backlight
+    pub fn backlight(&self) -> Option<&str> {
+        self.backlight.as_deref()
     }
 
     /// Returns the physical MIPI DSI data-lane count.
@@ -699,7 +1067,9 @@ impl DsiHostDefinition {
     fn validate(&self, name: &str) -> Result<(), ConfigError> {
         validate_identifier(name, "peripheral", &self.peripheral)?;
         validate_identifier(name, "dma", &self.dma)?;
-        validate_identifier(name, "backlight", &self.backlight)?;
+        if let Some(backlight) = &self.backlight {
+            validate_identifier(name, "backlight", backlight)?;
+        }
         if self.data_lanes == 0
             || self.data_lanes > 4
             || self.phy_power_channel == 0
@@ -714,10 +1084,16 @@ impl DsiHostDefinition {
 }
 
 /// One fixed-width SDMMC card slot and optional on-chip power supply.
+///
+/// `slot` names the slot of the chip's SD host the card is wired to; it
+/// defaults to 0. The selected Platform lists the slots it hands to a Board
+/// and the supply each needs (`hal.sdmmc-slots` in `platform.yml`).
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SdmmcDeviceDefinition {
     peripheral: String,
+    #[serde(default)]
+    slot: u8,
     clk: String,
     cmd: String,
     data: Vec<String>,
@@ -727,13 +1103,25 @@ pub struct SdmmcDeviceDefinition {
     power_channel: Option<u8>,
     #[serde(rename = "power-millivolts")]
     power_millivolts: Option<u16>,
+    #[serde(default, rename = "frequency-hz")]
+    frequency_hz: Option<u32>,
 }
+
+/// The SD card clock a Board that names none runs its card at: the top of
+/// the default bus speed mode.
+pub const DEFAULT_SDMMC_FREQUENCY_HZ: u32 = 25_000_000;
 
 impl SdmmcDeviceDefinition {
     /// Returns the chip-native SDMMC controller singleton.
     #[must_use]
     pub fn peripheral(&self) -> &str {
         &self.peripheral
+    }
+
+    /// Returns the slot of the SD host the card is wired to.
+    #[must_use]
+    pub const fn slot(&self) -> u8 {
+        self.slot
     }
 
     /// Returns the SD clock pin.
@@ -772,6 +1160,14 @@ impl SdmmcDeviceDefinition {
         self.power_millivolts
     }
 
+    /// Returns the card clock once the card is identified: the Board's
+    /// `frequency-hz`, or [`DEFAULT_SDMMC_FREQUENCY_HZ`]. Above 25 MHz the
+    /// card is switched to high speed, and stays at 25 MHz if it refuses.
+    #[must_use]
+    pub fn frequency_hz(&self) -> u32 {
+        self.frequency_hz.unwrap_or(DEFAULT_SDMMC_FREQUENCY_HZ)
+    }
+
     fn validate(&self, name: &str) -> Result<(), ConfigError> {
         validate_identifier(name, "peripheral", &self.peripheral)?;
         validate_identifier(name, "clk", &self.clk)?;
@@ -784,12 +1180,108 @@ impl SdmmcDeviceDefinition {
             (None, None) => true,
             _ => false,
         };
-        if !matches!(self.bus_width, 1 | 4)
+        // SD high speed tops out at 50 MHz.
+        if self.slot > 1
+            || !(1..=50_000_000).contains(&self.frequency_hz())
+            || !matches!(self.bus_width, 1 | 4)
             || usize::from(self.bus_width) != self.data.len()
             || !power_valid
             || (self.bus_width == 4 && self.power_channel.is_none())
         {
             return Err(ConfigError::InvalidSdmmcDevice {
+                resource: name.to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// One eight-bit Intel 8080-style parallel output and its fixed Board wiring:
+/// a write strobe, an active-low chip select asserted for each burst, eight
+/// data lines, and an optional data/command line.
+///
+/// A MIPI DBI panel controller wires all of them and tells commands from
+/// data by `dc`. A directly driven e-paper source driver takes only data: its
+/// source clock is `wr`, its source start pulse is `chip-select`, and `dc` is
+/// left out.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ParallelOutputDefinition {
+    peripheral: String,
+    dma: String,
+    wr: String,
+    #[serde(default)]
+    dc: Option<String>,
+    #[serde(rename = "chip-select")]
+    chip_select: String,
+    data: [String; 8],
+    #[serde(rename = "frequency-hz")]
+    frequency_hz: u32,
+    #[serde(rename = "dma-buffer-bytes")]
+    dma_buffer_bytes: usize,
+}
+
+impl ParallelOutputDefinition {
+    /// Returns the chip-native parallel-output controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+    /// Returns the chip-native DMA channel.
+    #[must_use]
+    pub fn dma(&self) -> &str {
+        &self.dma
+    }
+    /// Returns the write-strobe pin.
+    #[must_use]
+    pub fn wr(&self) -> &str {
+        &self.wr
+    }
+    /// Returns the data/command pin, when the Board wires one.
+    #[must_use]
+    pub fn dc(&self) -> Option<&str> {
+        self.dc.as_deref()
+    }
+    /// Returns the active-low chip-select pin, asserted for each burst.
+    #[must_use]
+    pub fn chip_select(&self) -> &str {
+        &self.chip_select
+    }
+    /// Returns the eight data pins in least-significant-bit order.
+    #[must_use]
+    pub fn data(&self) -> &[String; 8] {
+        &self.data
+    }
+    /// Returns the write-strobe frequency.
+    #[must_use]
+    pub const fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+    /// Returns the statically allocated DMA buffer capacity, the longest
+    /// burst clocked out under one chip-select assertion.
+    #[must_use]
+    pub const fn dma_buffer_bytes(&self) -> usize {
+        self.dma_buffer_bytes
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        for (field, value) in [
+            ("peripheral", self.peripheral.as_str()),
+            ("dma", self.dma.as_str()),
+            ("wr", self.wr.as_str()),
+            ("chip-select", self.chip_select.as_str()),
+        ] {
+            validate_identifier(name, field, value)?;
+        }
+        if let Some(dc) = &self.dc {
+            validate_identifier(name, "dc", dc)?;
+        }
+        for pin in &self.data {
+            validate_identifier(name, "data", pin)?;
+        }
+        validate_frequency(name, self.frequency_hz)?;
+        if self.dma_buffer_bytes == 0 {
+            return Err(ConfigError::ZeroDmaBuffer {
                 resource: name.to_owned(),
             });
         }
@@ -803,13 +1295,17 @@ impl SdmmcDeviceDefinition {
 pub struct CameraCaptureDefinition {
     peripheral: String,
     dma: String,
-    xclk: String,
+    /// The master clock the chip drives; absent when the sensor module has
+    /// its own oscillator.
+    #[serde(default)]
+    xclk: Option<String>,
     pclk: String,
     vsync: String,
     href: String,
     data: [String; 8],
-    #[serde(rename = "xclk-frequency-hz")]
-    xclk_frequency_hz: u32,
+    /// The master-clock frequency; given exactly when `xclk` is.
+    #[serde(default, rename = "xclk-frequency-hz")]
+    xclk_frequency_hz: Option<u32>,
     #[serde(rename = "dma-buffer-bytes")]
     dma_buffer_bytes: usize,
 }
@@ -825,10 +1321,11 @@ impl CameraCaptureDefinition {
     pub fn dma(&self) -> &str {
         &self.dma
     }
-    /// Returns the sensor master-clock pin.
+    /// Returns the sensor master-clock pin, or `None` when the sensor module
+    /// has its own oscillator.
     #[must_use]
-    pub fn xclk(&self) -> &str {
-        &self.xclk
+    pub fn xclk(&self) -> Option<&str> {
+        self.xclk.as_deref()
     }
     /// Returns the sensor pixel-clock pin.
     #[must_use]
@@ -850,9 +1347,10 @@ impl CameraCaptureDefinition {
     pub fn data(&self) -> &[String; 8] {
         &self.data
     }
-    /// Returns the sensor master-clock frequency.
+    /// Returns the sensor master-clock frequency, present exactly when
+    /// [`Self::xclk`] is.
     #[must_use]
-    pub const fn xclk_frequency_hz(&self) -> u32 {
+    pub const fn xclk_frequency_hz(&self) -> Option<u32> {
         self.xclk_frequency_hz
     }
     /// Returns the statically allocated DMA frame-buffer capacity.
@@ -865,7 +1363,6 @@ impl CameraCaptureDefinition {
         for (field, value) in [
             ("peripheral", self.peripheral.as_str()),
             ("dma", self.dma.as_str()),
-            ("xclk", self.xclk.as_str()),
             ("pclk", self.pclk.as_str()),
             ("vsync", self.vsync.as_str()),
             ("href", self.href.as_str()),
@@ -875,7 +1372,18 @@ impl CameraCaptureDefinition {
         for pin in &self.data {
             validate_identifier(name, "data", pin)?;
         }
-        validate_frequency(name, self.xclk_frequency_hz)?;
+        match (&self.xclk, self.xclk_frequency_hz) {
+            (Some(xclk), Some(frequency_hz)) => {
+                validate_identifier(name, "xclk", xclk)?;
+                validate_frequency(name, frequency_hz)?;
+            }
+            (None, None) => {}
+            _ => {
+                return Err(ConfigError::InvalidCameraClock {
+                    resource: name.to_owned(),
+                });
+            }
+        }
         if self.dma_buffer_bytes == 0 {
             return Err(ConfigError::ZeroDmaBuffer {
                 resource: name.to_owned(),
@@ -983,6 +1491,193 @@ impl I2sStreamDefinition {
                 resource: name.to_owned(),
             });
         }
+        if self.dma_buffer_bytes == 0 {
+            return Err(ConfigError::ZeroDmaBuffer {
+                resource: name.to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// One analog input pin sampled by a SoC ADC controller.
+///
+/// Several inputs may name one controller; the Board composition builds the
+/// converter once and hands each implementation its own channel.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AnalogInputDefinition {
+    peripheral: String,
+    pin: String,
+}
+
+impl AnalogInputDefinition {
+    /// Returns the chip-native ADC controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the analog-capable pin the controller samples.
+    #[must_use]
+    pub fn pin(&self) -> &str {
+        &self.pin
+    }
+}
+
+/// One on-chip CAN controller (the ESP TWAI) and the pins of its
+/// transceiver: `tx` drives the transceiver's TXD input, `rx` reads its RXD
+/// output.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TwaiDefinition {
+    peripheral: String,
+    tx: String,
+    rx: String,
+}
+
+impl TwaiDefinition {
+    /// Returns the chip-native CAN controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the pin driving the transceiver's TXD input.
+    #[must_use]
+    pub fn tx(&self) -> &str {
+        &self.tx
+    }
+
+    /// Returns the pin reading the transceiver's RXD output.
+    #[must_use]
+    pub fn rx(&self) -> &str {
+        &self.rx
+    }
+}
+
+/// One pulse-counter unit decoding a quadrature encoder's two signals.
+///
+/// The Platform counts every edge of both signals, up while `b` leads `a` and
+/// down while `a` leads `b`, and biases both pins with its internal pull-up.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PulseCounterDefinition {
+    peripheral: String,
+    a: String,
+    b: String,
+}
+
+impl PulseCounterDefinition {
+    /// Returns the chip-native pulse-counter controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the pin carrying the encoder's A signal.
+    #[must_use]
+    pub fn a(&self) -> &str {
+        &self.a
+    }
+
+    /// Returns the pin carrying the encoder's B signal.
+    #[must_use]
+    pub fn b(&self) -> &str {
+        &self.b
+    }
+}
+
+/// One I2S controller that records from a PDM microphone and plays to an I2S
+/// amplifier, one direction at a time.
+///
+/// M5Stack products wire the microphone's clock and the amplifier's word
+/// select to one pin, so the controller switches between PDM receive and
+/// standard I2S transmit for each transfer. Either side may be absent: a
+/// microphone-only product leaves out `bclk` and `dout`, an amplifier-only
+/// one leaves out `din`.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PdmI2sStreamDefinition {
+    peripheral: String,
+    dma: String,
+    clk: String,
+    #[serde(default)]
+    din: Option<String>,
+    #[serde(default)]
+    bclk: Option<String>,
+    #[serde(default)]
+    dout: Option<String>,
+    #[serde(rename = "sample-rate-hz")]
+    sample_rate_hz: u32,
+    #[serde(rename = "dma-buffer-bytes")]
+    dma_buffer_bytes: usize,
+}
+
+impl PdmI2sStreamDefinition {
+    /// Returns the chip-native I2S controller.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+    /// Returns the chip-native DMA channel.
+    #[must_use]
+    pub fn dma(&self) -> &str {
+        &self.dma
+    }
+    /// Returns the microphone clock pin, also the amplifier's word select.
+    #[must_use]
+    pub fn clk(&self) -> &str {
+        &self.clk
+    }
+    /// Returns the microphone data pin, when a microphone is fitted.
+    #[must_use]
+    pub fn din(&self) -> Option<&str> {
+        self.din.as_deref()
+    }
+    /// Returns the amplifier bit-clock pin, when an amplifier is fitted.
+    #[must_use]
+    pub fn bclk(&self) -> Option<&str> {
+        self.bclk.as_deref()
+    }
+    /// Returns the amplifier data pin, when an amplifier is fitted.
+    #[must_use]
+    pub fn dout(&self) -> Option<&str> {
+        self.dout.as_deref()
+    }
+    /// Returns the PCM sample rate of both directions.
+    #[must_use]
+    pub const fn sample_rate_hz(&self) -> u32 {
+        self.sample_rate_hz
+    }
+    /// Returns each statically allocated DMA buffer's capacity.
+    #[must_use]
+    pub const fn dma_buffer_bytes(&self) -> usize {
+        self.dma_buffer_bytes
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ConfigError> {
+        for (field, value) in [
+            ("peripheral", Some(self.peripheral.as_str())),
+            ("dma", Some(self.dma.as_str())),
+            ("clk", Some(self.clk.as_str())),
+            ("din", self.din.as_deref()),
+            ("bclk", self.bclk.as_deref()),
+            ("dout", self.dout.as_deref()),
+        ] {
+            if let Some(value) = value {
+                validate_identifier(name, field, value)?;
+            }
+        }
+        // The amplifier needs both of its lines, and the stream at least one
+        // direction.
+        if self.bclk.is_some() != self.dout.is_some() || (self.din.is_none() && self.dout.is_none())
+        {
+            return Err(ConfigError::InvalidPdmI2sStream {
+                resource: name.to_owned(),
+            });
+        }
+        validate_frequency(name, self.sample_rate_hz)?;
         if self.dma_buffer_bytes == 0 {
             return Err(ConfigError::ZeroDmaBuffer {
                 resource: name.to_owned(),
@@ -1139,6 +1834,10 @@ pub struct SpiDeviceDefinition {
     mosi: Option<String>,
     #[serde(default)]
     miso: Option<String>,
+    #[serde(default, rename = "three-wire")]
+    three_wire: bool,
+    #[serde(default, rename = "read-frequency-hz")]
+    read_frequency_hz: Option<u32>,
     #[serde(rename = "chip-select")]
     chip_select: String,
     #[serde(rename = "frequency-hz")]
@@ -1229,6 +1928,20 @@ impl SpiDeviceDefinition {
     #[must_use]
     pub fn chip_select(&self) -> &str {
         &self.chip_select
+    }
+
+    /// Returns whether `mosi` is one bidirectional data line (three-wire SPI)
+    /// on which the device also answers reads.
+    #[must_use]
+    pub const fn three_wire(&self) -> bool {
+        self.three_wire
+    }
+
+    /// Returns the clock used for reads on a three-wire device, which
+    /// defaults to the write clock.
+    #[must_use]
+    pub fn read_frequency_hz(&self) -> u32 {
+        self.read_frequency_hz.unwrap_or(self.frequency_hz)
     }
 
     /// Returns the initial bus frequency for this device.
@@ -1408,9 +2121,24 @@ pub struct HardwareDefinition {
     flash_size: Option<String>,
     #[serde(default, rename = "external-memory")]
     external_memory: Option<ExternalMemoryDefinition>,
+    #[serde(default)]
+    ethernet: Option<EthernetDefinition>,
+    #[serde(default, rename = "wifi-coprocessor")]
+    wifi_coprocessor: Option<WifiCoprocessorDefinition>,
+    #[serde(default, rename = "power-hold")]
+    power_hold: Option<String>,
 }
 
 impl HardwareDefinition {
+    /// Returns the chip pin that latches the Board's battery power on, when
+    /// the Board has one: the Platform entry drives it high before anything
+    /// else, or the Board switches itself off when its power button is
+    /// released.
+    #[must_use]
+    pub fn power_hold(&self) -> Option<&str> {
+        self.power_hold.as_deref()
+    }
+
     /// Returns the canonical HAL chip name.
     #[must_use]
     pub fn chip(&self) -> &str {
@@ -1429,6 +2157,496 @@ impl HardwareDefinition {
     pub const fn external_memory(&self) -> Option<&ExternalMemoryDefinition> {
         self.external_memory.as_ref()
     }
+
+    /// Returns the wired Ethernet PHY attached to the chip's MAC, when the
+    /// Board has one.
+    #[must_use]
+    pub const fn ethernet(&self) -> Option<&EthernetDefinition> {
+        self.ethernet.as_ref()
+    }
+
+    /// Returns the Wi-Fi co-processor wired to the chip, when the Board has
+    /// one.
+    #[must_use]
+    pub const fn wifi_coprocessor(&self) -> Option<&WifiCoprocessorDefinition> {
+        self.wifi_coprocessor.as_ref()
+    }
+}
+
+/// Wired Ethernet: the chip's Ethernet MAC connected to an external PHY.
+///
+/// Every field is a hardware fact read from the Board schematic. The selected
+/// Platform owns the MAC, builds its IP link on it, and rejects a Board whose
+/// interface it cannot drive.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct EthernetDefinition {
+    phy: EthernetPhyDefinition,
+    rmii: RmiiDefinition,
+}
+
+impl EthernetDefinition {
+    /// Returns the PHY chip and its management address.
+    #[must_use]
+    pub const fn phy(&self) -> &EthernetPhyDefinition {
+        &self.phy
+    }
+
+    /// Returns the RMII wiring between the MAC and the PHY.
+    #[must_use]
+    pub const fn rmii(&self) -> &RmiiDefinition {
+        &self.rmii
+    }
+
+    /// Iterates every chip pin the Ethernet wiring uses, with its signal name.
+    pub fn pins(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        let rmii = &self.rmii;
+        [
+            (
+                "reference-clock input",
+                Some(rmii.reference_clock.input.as_str()),
+            ),
+            (
+                "reference-clock output",
+                rmii.reference_clock.output.as_deref(),
+            ),
+            ("mdc", Some(rmii.mdc.as_str())),
+            ("mdio", Some(rmii.mdio.as_str())),
+            ("tx-en", Some(rmii.tx_en.as_str())),
+            ("txd0", Some(rmii.txd0.as_str())),
+            ("txd1", Some(rmii.txd1.as_str())),
+            ("crs-dv", Some(rmii.crs_dv.as_str())),
+            ("rxd0", Some(rmii.rxd0.as_str())),
+            ("rxd1", Some(rmii.rxd1.as_str())),
+            ("phy reset", self.phy.reset.as_deref()),
+        ]
+        .into_iter()
+        .filter_map(|(field, pin)| pin.map(|pin| (field, pin)))
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        let resource = "ethernet";
+        validate_identifier(resource, "phy model", &self.phy.model)?;
+        if self.phy.address > 31 {
+            return Err(ConfigError::InvalidEthernet {
+                reason: "the PHY address must be a Clause 22 address from 0 to 31",
+            });
+        }
+        let clock = &self.rmii.reference_clock;
+        match (clock.source, clock.output.is_some()) {
+            (RmiiReferenceClockSource::External, false)
+            | (RmiiReferenceClockSource::Internal, true) => {}
+            (RmiiReferenceClockSource::External, true) => {
+                return Err(ConfigError::InvalidEthernet {
+                    reason: "an external reference clock has no chip output pin",
+                });
+            }
+            (RmiiReferenceClockSource::Internal, false) => {
+                return Err(ConfigError::InvalidEthernet {
+                    reason: "an internal reference clock needs the chip pin that drives it out",
+                });
+            }
+        }
+        let mut pins = Vec::new();
+        for (field, pin) in self.pins() {
+            validate_identifier(resource, field, pin)?;
+            if pins.contains(&pin) {
+                return Err(ConfigError::InvalidEthernet {
+                    reason: "one chip pin is wired to two Ethernet signals",
+                });
+            }
+            pins.push(pin);
+        }
+        Ok(())
+    }
+}
+
+/// The Ethernet PHY chip on a Board.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct EthernetPhyDefinition {
+    model: String,
+    address: u8,
+    #[serde(default)]
+    reset: Option<String>,
+}
+
+impl EthernetPhyDefinition {
+    /// Returns the PHY part, such as `ip101gri`. It documents the hardware; a
+    /// Platform that drives every PHY through IEEE 802.3 Clause 22 registers
+    /// does not need it.
+    #[must_use]
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    /// Returns the PHY's Clause 22 management address, set by its strap pins.
+    #[must_use]
+    pub const fn address(&self) -> u8 {
+        self.address
+    }
+
+    /// Returns the chip pin wired to the PHY's active-low reset, when one is.
+    #[must_use]
+    pub fn reset(&self) -> Option<&str> {
+        self.reset.as_deref()
+    }
+}
+
+/// RMII wiring between the chip's MAC and the PHY, by chip-native pin names.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RmiiDefinition {
+    #[serde(rename = "reference-clock")]
+    reference_clock: RmiiReferenceClockDefinition,
+    mdc: String,
+    mdio: String,
+    #[serde(rename = "tx-en")]
+    tx_en: String,
+    txd0: String,
+    txd1: String,
+    #[serde(rename = "crs-dv")]
+    crs_dv: String,
+    rxd0: String,
+    rxd1: String,
+}
+
+impl RmiiDefinition {
+    /// Returns where the 50 MHz reference clock comes from.
+    #[must_use]
+    pub const fn reference_clock(&self) -> &RmiiReferenceClockDefinition {
+        &self.reference_clock
+    }
+
+    /// Returns the management clock pin.
+    #[must_use]
+    pub fn mdc(&self) -> &str {
+        &self.mdc
+    }
+
+    /// Returns the management data pin.
+    #[must_use]
+    pub fn mdio(&self) -> &str {
+        &self.mdio
+    }
+
+    /// Returns the transmit-enable pin.
+    #[must_use]
+    pub fn tx_en(&self) -> &str {
+        &self.tx_en
+    }
+
+    /// Returns the first transmit data pin.
+    #[must_use]
+    pub fn txd0(&self) -> &str {
+        &self.txd0
+    }
+
+    /// Returns the second transmit data pin.
+    #[must_use]
+    pub fn txd1(&self) -> &str {
+        &self.txd1
+    }
+
+    /// Returns the carrier-sense/receive-data-valid pin.
+    #[must_use]
+    pub fn crs_dv(&self) -> &str {
+        &self.crs_dv
+    }
+
+    /// Returns the first receive data pin.
+    #[must_use]
+    pub fn rxd0(&self) -> &str {
+        &self.rxd0
+    }
+
+    /// Returns the second receive data pin.
+    #[must_use]
+    pub fn rxd1(&self) -> &str {
+        &self.rxd1
+    }
+}
+
+/// The RMII 50 MHz reference clock and the chip pins it uses.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RmiiReferenceClockDefinition {
+    source: RmiiReferenceClockSource,
+    input: String,
+    #[serde(default)]
+    output: Option<String>,
+}
+
+impl RmiiReferenceClockDefinition {
+    /// Returns which side generates the clock.
+    #[must_use]
+    pub const fn source(&self) -> RmiiReferenceClockSource {
+        self.source
+    }
+
+    /// Returns the chip pin the clock enters the MAC on.
+    #[must_use]
+    pub fn input(&self) -> &str {
+        &self.input
+    }
+
+    /// Returns the chip pin that drives an internal clock out, looped back on
+    /// the Board into `input`; `None` for an external clock.
+    #[must_use]
+    pub fn output(&self) -> Option<&str> {
+        self.output.as_deref()
+    }
+}
+
+/// Who generates the RMII reference clock.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RmiiReferenceClockSource {
+    /// The PHY or an oscillator on the Board drives it into the chip.
+    External,
+    /// The chip generates it and drives it out; the Board loops it back in.
+    Internal,
+}
+
+/// A Wi-Fi radio on a separate co-processor chip, wired to this chip over
+/// SDIO.
+///
+/// Every field is a hardware fact read from the Board schematic and the
+/// firmware the co-processor ships with. The selected Platform drives the
+/// co-processor as a network link and rejects a Board whose wiring or
+/// firmware it cannot drive.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct WifiCoprocessorDefinition {
+    chip: String,
+    firmware: WifiCoprocessorFirmware,
+    sdio: CoprocessorSdioDefinition,
+    reset: String,
+    #[serde(default, rename = "power-enable")]
+    power_enable: Option<CoprocessorPowerEnableDefinition>,
+}
+
+impl WifiCoprocessorDefinition {
+    /// Returns the co-processor chip, such as `esp32c6`.
+    #[must_use]
+    pub fn chip(&self) -> &str {
+        &self.chip
+    }
+
+    /// Returns the protocol the co-processor's firmware speaks.
+    #[must_use]
+    pub const fn firmware(&self) -> WifiCoprocessorFirmware {
+        self.firmware
+    }
+
+    /// Returns the SDIO wiring between this chip and the co-processor.
+    #[must_use]
+    pub const fn sdio(&self) -> &CoprocessorSdioDefinition {
+        &self.sdio
+    }
+
+    /// Returns the chip pin wired to the co-processor's active-low enable.
+    #[must_use]
+    pub fn reset(&self) -> &str {
+        &self.reset
+    }
+
+    /// Returns the switch that powers the co-processor, when the Board has
+    /// one.
+    #[must_use]
+    pub const fn power_enable(&self) -> Option<&CoprocessorPowerEnableDefinition> {
+        self.power_enable.as_ref()
+    }
+
+    /// Iterates every chip pin the co-processor wiring uses, with its signal
+    /// name.
+    pub fn pins(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        let sdio = &self.sdio;
+        let power = self.power_enable.as_ref();
+        [
+            ("sdio clk", Some(sdio.clk.as_str())),
+            ("sdio cmd", Some(sdio.cmd.as_str())),
+            ("sdio d0", Some(sdio.d0.as_str())),
+            ("sdio d1", Some(sdio.d1.as_str())),
+            ("sdio d2", Some(sdio.d2.as_str())),
+            ("sdio d3", Some(sdio.d3.as_str())),
+            ("reset", Some(self.reset.as_str())),
+            (
+                "power-enable scl",
+                power.map(|power| power.i2c.scl.as_str()),
+            ),
+            (
+                "power-enable sda",
+                power.map(|power| power.i2c.sda.as_str()),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(field, pin)| pin.map(|pin| (field, pin)))
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        let resource = "wifi-coprocessor";
+        validate_identifier(resource, "chip", &self.chip)?;
+        if self.sdio.slot > 1 {
+            return Err(ConfigError::InvalidWifiCoprocessor {
+                reason: "the SDIO slot must be 0 or 1",
+            });
+        }
+        // SDIO high-speed mode tops out at 50 MHz.
+        if self.sdio.frequency_hz == 0 || self.sdio.frequency_hz > 50_000_000 {
+            return Err(ConfigError::InvalidWifiCoprocessor {
+                reason: "the SDIO clock must be between 1 Hz and 50 MHz",
+            });
+        }
+        if let Some(power) = &self.power_enable {
+            validate_identifier(
+                resource,
+                "power-enable i2c peripheral",
+                &power.i2c.peripheral,
+            )?;
+            if power.address > 0x7f {
+                return Err(ConfigError::InvalidWifiCoprocessor {
+                    reason: "the power-enable expander address must be a 7-bit I2C address",
+                });
+            }
+            if power.pin > 7 {
+                return Err(ConfigError::InvalidWifiCoprocessor {
+                    reason: "the power-enable expander pin must be 0 through 7",
+                });
+            }
+        }
+        let mut pins = Vec::new();
+        for (field, pin) in self.pins() {
+            validate_identifier(resource, field, pin)?;
+            if pins.contains(&pin) {
+                return Err(ConfigError::InvalidWifiCoprocessor {
+                    reason: "one chip pin is wired to two co-processor signals",
+                });
+            }
+            pins.push(pin);
+        }
+        Ok(())
+    }
+}
+
+/// The protocol a Wi-Fi co-processor's firmware speaks.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum WifiCoprocessorFirmware {
+    /// Espressif's ESP-Hosted-MCU slave firmware.
+    EspHostedMcu,
+}
+
+/// The 4-bit SDIO bus between the chip's SD host and the co-processor.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CoprocessorSdioDefinition {
+    slot: u8,
+    clk: String,
+    cmd: String,
+    d0: String,
+    d1: String,
+    d2: String,
+    d3: String,
+    #[serde(rename = "frequency-hz")]
+    frequency_hz: u32,
+}
+
+impl CoprocessorSdioDefinition {
+    /// Returns the chip's SD host slot the bus is wired to.
+    #[must_use]
+    pub const fn slot(&self) -> u8 {
+        self.slot
+    }
+
+    /// Returns the clock pin.
+    #[must_use]
+    pub fn clk(&self) -> &str {
+        &self.clk
+    }
+
+    /// Returns the command pin.
+    #[must_use]
+    pub fn cmd(&self) -> &str {
+        &self.cmd
+    }
+
+    /// Returns the four data pins, D0 first.
+    #[must_use]
+    pub fn data(&self) -> [&str; 4] {
+        [&self.d0, &self.d1, &self.d2, &self.d3]
+    }
+
+    /// Returns the bus clock once the card is set up.
+    #[must_use]
+    pub const fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+}
+
+/// An I/O-expander output that switches the co-processor's supply.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CoprocessorPowerEnableDefinition {
+    expander: CoprocessorPowerExpander,
+    i2c: CoprocessorPowerBusDefinition,
+    address: u8,
+    pin: u8,
+}
+
+impl CoprocessorPowerEnableDefinition {
+    /// Returns the expander part.
+    #[must_use]
+    pub const fn expander(&self) -> CoprocessorPowerExpander {
+        self.expander
+    }
+
+    /// Returns the chip's I2C controller the expander is on.
+    #[must_use]
+    pub fn i2c_peripheral(&self) -> &str {
+        &self.i2c.peripheral
+    }
+
+    /// Returns the I2C clock pin.
+    #[must_use]
+    pub fn scl(&self) -> &str {
+        &self.i2c.scl
+    }
+
+    /// Returns the I2C data pin.
+    #[must_use]
+    pub fn sda(&self) -> &str {
+        &self.i2c.sda
+    }
+
+    /// Returns the expander's 7-bit I2C address.
+    #[must_use]
+    pub const fn address(&self) -> u8 {
+        self.address
+    }
+
+    /// Returns the expander output driven high to power the co-processor.
+    #[must_use]
+    pub const fn pin(&self) -> u8 {
+        self.pin
+    }
+}
+
+/// I/O expanders a co-processor's power switch may hang off.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CoprocessorPowerExpander {
+    /// Diodes PI4IOE5V6408 eight-bit I2C expander.
+    Pi4ioe5v6408,
+}
+
+/// The I2C bus an expander is on, by chip-native names.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct CoprocessorPowerBusDefinition {
+    peripheral: String,
+    scl: String,
+    sda: String,
 }
 
 /// Directly addressable external memory installed on a Board.
@@ -1477,6 +2695,8 @@ pub enum ExternalMemoryInterfaceDefinition {
     QuadSpi,
     /// Eight-data-line SPI.
     OctalSpi,
+    /// Sixteen-data-line DDR bus, as in the ESP32-P4's in-package PSRAM.
+    Hex,
 }
 
 /// Toolchain policy a Board carries so selection can configure Cargo's target.
@@ -1559,17 +2779,47 @@ pub enum ConfigError {
         /// Board-level SPI resource name.
         resource: String,
     },
+    /// A three-wire SPI device must name its one bidirectional line as `mosi`.
+    #[error(
+        "Board SPI resource `{resource}` must declare `three-wire` with its shared data line as `mosi`, no `miso`, and `read-frequency-hz` only when three-wire"
+    )]
+    InvalidThreeWireSpi {
+        /// Board-level SPI resource name.
+        resource: String,
+    },
     /// A DSI host declared no lanes, no PHY supply, or an unsupported lane count.
     #[error("Board DSI host `{resource}` has an invalid lane or PHY-power configuration")]
     InvalidDsiHost {
         /// Board-level DSI host resource name.
         resource: String,
     },
+    /// The Board's wired Ethernet declaration is inconsistent.
+    #[error("Board Ethernet is invalid: {reason}")]
+    InvalidEthernet {
+        /// What is wrong with the declaration.
+        reason: &'static str,
+    },
+    /// The Board's Wi-Fi co-processor declaration is inconsistent.
+    #[error("Board Wi-Fi co-processor is invalid: {reason}")]
+    InvalidWifiCoprocessor {
+        /// What is wrong with the declaration.
+        reason: &'static str,
+    },
     /// An SDMMC slot has an unsupported width or no power supply.
     #[error("Board SDMMC device `{resource}` has an invalid bus or power configuration")]
     InvalidSdmmcDevice {
         /// Board-level SDMMC resource name.
         resource: String,
+    },
+    /// An SDMMC device claims an SD host slot something else is wired to.
+    #[error("Board SDMMC device `{resource}` claims SD host slot {slot}, which {user} uses")]
+    SdmmcSlotInUse {
+        /// Board-level SDMMC resource name.
+        resource: String,
+        /// The SD host slot both claim.
+        slot: u8,
+        /// What already holds the slot.
+        user: String,
     },
     /// A MIPI CSI host references an undeclared shared I2C bus.
     #[error("Board MIPI CSI host `{resource}` references unknown I2C bus `{i2c}`")]
@@ -1585,11 +2835,57 @@ pub enum ConfigError {
         /// Board-level I2S resource name.
         resource: String,
     },
+    /// SPI devices on one controller disagree on the shared bus lines.
+    #[error(
+        "Board SPI devices `{resource}` and `{other}` share a controller, so they must name the same `sck`, `mosi`, and `miso` and neither may be three-wire"
+    )]
+    InconsistentSharedSpi {
+        /// Board-level SPI resource name.
+        resource: String,
+        /// The other device on the same controller.
+        other: String,
+    },
+    /// A PDM microphone and I2S amplifier stream has no direction or half an
+    /// amplifier.
+    #[error(
+        "Board PDM-I2S stream `{resource}` must declare `din`, or `bclk` with `dout`, or all three"
+    )]
+    InvalidPdmI2sStream {
+        /// Board-level stream resource name.
+        resource: String,
+    },
+    /// A camera receiver names a master clock without its frequency, or the
+    /// reverse.
+    #[error(
+        "Board camera-capture `{resource}` must declare `xclk` and `xclk-frequency-hz` together"
+    )]
+    InvalidCameraClock {
+        /// Board-level camera resource name.
+        resource: String,
+    },
     /// A DMA-backed media resource requested no storage.
     #[error("Board DMA resource `{resource}` buffer must be greater than zero bytes")]
     ZeroDmaBuffer {
         /// Board-level camera or I2S resource name.
         resource: String,
+    },
+    /// Two pulse-train resources name one transceiver channel.
+    #[error("Board RMT resource `{resource}` claims channel {channel}, which `{other}` uses")]
+    RmtChannelInUse {
+        /// Board-level resource name.
+        resource: String,
+        /// The doubly claimed channel.
+        channel: u8,
+        /// The resource that claimed it first.
+        other: String,
+    },
+    /// Two PWM outputs name one timer or channel of a controller.
+    #[error("Board PWM output `{resource}` shares a timer or channel with `{other}`")]
+    PwmOutputShared {
+        /// Board-level resource name.
+        resource: String,
+        /// The other output.
+        other: String,
     },
 }
 
@@ -1692,6 +2988,9 @@ pub fn render_rust(board: &BoardDefinition) -> String {
             }
             ExternalMemoryInterfaceDefinition::OctalSpi => {
                 "::barracuda_board::ExternalMemoryInterface::OctalSpi"
+            }
+            ExternalMemoryInterfaceDefinition::Hex => {
+                "::barracuda_board::ExternalMemoryInterface::Hex"
             }
         };
         format!(

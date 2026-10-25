@@ -1,0 +1,6 @@
+id = "nfc"
+depends-on = ["vm"]
+description = "Registers the built-in NFC card-reader Lua package."
+
+[peripherals.nfc-reader]
+devices = "*"

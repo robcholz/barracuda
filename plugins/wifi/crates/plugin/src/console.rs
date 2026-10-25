@@ -63,6 +63,7 @@ const fn reason_code(kind: WifiControlErrorKind) -> &'static str {
         WifiControlErrorKind::InvalidConfiguration => "invalid_configuration",
         WifiControlErrorKind::Storage => "storage",
         WifiControlErrorKind::Device => "connection_failed",
+        WifiControlErrorKind::Unsupported => "unsupported",
     }
 }
 

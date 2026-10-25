@@ -11,7 +11,7 @@ The M5Stack CoreP4X is an ESP32-P4 Board from M5Stack.
 - Chip: ESP32-P4
 - Platform: [ESP32](/platforms/esp32)
 - Rust target: `riscv32imafc-unknown-none-elf`
-- Profile: [`headless`](/boards/profiles) (the default)
+- Profile: [`screen`](/boards/profiles)
 - Flash layout: `boards/configs/m5stack-corep4x/partitions.csv`
 
 ## Build and run
@@ -26,10 +26,52 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-corep4x/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `display` | 2.64-inch 480x480 MIPI DSI display (ST7102) | [`display`](/plugins/vm-display) |
+| `touch` | Touch controller (CST3530) | — |
+| `real-time-clock` | Real-time clock (RX8130CE) | — |
+| `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `power-button` | Power button (M5PM1 power key) | [`buttons`](/plugins/vm-buttons) |
+| `audio-codec` | Audio codec (ES8311 and ES7210) | [`audio`](/plugins/vm-audio) |
+| `micro-sd` | microSD card slot (FAT, SPI) | — |
+
+The display implementation powers the panel, releases its reset, and dims its
+backlight through the M5IOE1 expander at `4Fh`, and turns on the 5 V boost of
+the M5PM1 at `6Eh`; neither chip is a device of its own. It also releases the
+touch controller's reset, M5IOE1 G8. The BMI270 and BMM150 motion sensors
+are not declared yet.
+
+The IP101GRI Ethernet PHY is not declared either: its RMII pins on the
+CoreP4X are not published, and the ESP32-P4 Platform does not drive the
+ESP32-C6 Wi-Fi co-processor yet, so the IP stack has no link on this Board.
+
+The M5PM1 measures the battery voltage only. This Board does not route the
+charger's status to it, so the battery reads as charging while VIN is present
+and the cell is below 4.1 V.
+
+The power button is read from the M5PM1's button status and reads pressed while
+the key is down. The Board turns off the M5PM1's single-click reset, so a single click is an
+application button: scripts and Plugins receive it as a click instead of the
+Board resetting. A double click still turns the Board off, and a long press
+still enters download mode. The M5PM1 keeps this setting until it loses power,
+across resets and reflashing; `single-click-reset: keep` on the device brings
+back the factory single-click reset.
+
+## Exposed pins
+
+Lua scripts open these pins by name.
+
+| Name | Pin |
+| --- | --- |
+| `port-a-scl` | `GPIO16` |
+| `port-a-sda` | `GPIO18` |
+
+```lua
+local gpio = require("gpio")
+local pin = gpio.open_input("port-a-scl", "up")
+print(pin:read())
+```
 
 ## Plugin settings
 

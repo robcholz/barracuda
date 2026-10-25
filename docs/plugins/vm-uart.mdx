@@ -26,7 +26,7 @@ controller allocation and pin routing remain inside the Platform provider.
 Lua API:
 
 - `uart.available(tx, rx) -> boolean`
-- `uart.open(tx, rx, baud, data_bits, parity, stop_bits) -> handle`
+- `uart.open(tx, rx, baud, data_bits, parity, stop_bits[, de]) -> handle`
 - `handle:read(max_length) -> bytes`
 - `handle:write(bytes)`
 - `handle:flush()`
@@ -37,3 +37,16 @@ Lua API:
 parity is `"none"`, `"even"`, or `"odd"`; stop bits are `1` or `2`.
 Opening atomically consumes every selected physical pin from the same owner
 used by the other exposed protocols.
+
+For an RS485 transceiver, `de` names the pin that enables its driver (often
+labelled DIR or DE/RE). The port then raises it for each write, waits until
+the last stop bit has left the UART, and lowers it again, so the transceiver
+listens at all other times; `de` needs a `tx` pin. Boards with an RS485 port
+expose its three pins, such as `rs485-tx`, `rs485-rx`, and `rs485-dir`:
+
+```lua
+local uart = require("uart")
+local bus <close> = uart.open("rs485-tx", "rs485-rx", 9600, 8, "none", 1, "rs485-dir")
+bus:write("\x01\x03\x00\x00\x00\x01\x84\x0a")
+local reply = bus:read(7)
+```

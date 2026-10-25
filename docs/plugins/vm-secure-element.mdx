@@ -1,0 +1,65 @@
+---
+title: "Secure Element Plugin"
+sidebarTitle: "Secure Element"
+description: "Sign with keys the Board's secure element keeps, and read its serial number and random bytes, from Lua with the `secure_element` package."
+---
+
+Installs the `secure_element` Lua package over the Board's secure elements,
+the primary one by default.
+
+- Plugin ID: `secure-element`
+- Dependencies: `vm`
+- Settings: none
+- Context resources: peripheral slot `secure-element.devices` (`*`)
+- Provided capabilities: none
+- Required capabilities: `LuaPackageRegistry` from `vm`
+- Workflow: none
+- Agent Tools: none
+- Lua packages: `secure_element`
+- Web: none
+- Tasks: none
+- Storage: none
+
+This Plugin takes every `SecureElement` of the Board that no other Plugin
+claims, the primary one first, and installs the `secure_element` Lua package. A secure element holds private
+keys it never reveals; scripts ask it to sign and to compute public keys, and
+read its factory serial number and its random generator.
+
+Lua API:
+
+- `secure_element.list() -> { name, ... }`: the Board names of the elements,
+  the primary one first
+- `secure_element.available([name]) -> boolean`
+- `secure_element.serial_number([name]) -> binary string`, the element's
+  factory-unique serial number (nine bytes on an ATECC608)
+- `secure_element.random(length[, name]) -> binary string` of 1 through 1024 random
+  bytes from the element's generator
+- `secure_element.public_key(slot[, name]) -> binary string`, the P-256 public key of
+  the private key in `slot`: X then Y, 32 bytes each, big-endian
+- `secure_element.sign(slot, digest[, name]) -> binary string`, the P-256 ECDSA
+  signature of a 32-byte digest, such as a SHA-256 hash, with the private key
+  in `slot`: R then S, 32 bytes each, big-endian
+
+`name` is a Board device name from `list`; without it a call uses the primary
+element, so a script written for one element runs unchanged on a Board with
+several. To name a element without the optional values before it, pass `nil` for
+them.
+
+Which slots hold private keys is fixed when the element is provisioned. A
+Microchip Trust&GO ATECC608 (TNGTLS), as on the M5Stack Core2 for AWS, holds
+its device key in slot 0. A slot without a P-256 private key, a digest that is
+not 32 bytes, an unknown name, or a call while another is running returns `nil, error`.
+
+The random bytes come from the element, not from the Board's entropy source,
+which this Plugin does not change.
+
+While the Board has the device, the package declares a stable interface
+(`PackageInterface::Stable`), version 2. Boards without a secure element
+still install the package; `available` returns false and every other call
+returns `nil, error`. Plugin revocation prevents every further call.
+
+```lua
+local se = require("secure_element")
+local digest = string.rep("\0", 32) -- a SHA-256 hash in practice
+local signature = se.sign(0, digest)
+```

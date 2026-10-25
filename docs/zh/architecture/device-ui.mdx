@@ -25,7 +25,7 @@ Barracuda 的设备 UI 由三层构成：**System<strong>、</strong>系统应�
 | `system-fonts` | 显示屏上所有视图绘制时使用的系统字体 |
 | `system-wifi` | System UI 中的 Wi-Fi：连接、离线卡片，以及门户磁贴打开的设置热点，通过 `app-manager` 的 `SystemNetwork` 实现 |
 
-应用套件不需要显示屏。在没有显示屏的开发板上，`app-manager` 插件不运行 UI 套件，也不运行 System UI：它只是无头应用的应用管理器，带视图的应用会返回 `no_display`。System UI 同样不需要网络：只有当某个插件通过 `SystemNetwork` 展示网络时（比如 `system-wifi`），它才会显示网络。带屏幕的开发板指定 `screen` profile（配置档）；从不联网的产品（没有 Wi-Fi、门户、Agent、Sessions 或 Settings）则指定 `screen-offline`。两者都包含 `ui` 层：`app-manager`、`system-fonts`，以及不需要网络的内置应用。各个 profile 见[开发板 profile](/zh/boards/profiles)。开发板不启用某个系统应用的插件，就能把它排除在外；没有显示屏的开发板既不启用系统应用，也不启用 `system-fonts`。
+应用套件不需要显示屏。在没有显示屏的开发板上，`app-manager` 插件不运行 UI 套件，也不运行 System UI：它只是无头应用的应用管理器，带视图的应用会返回 `no_display`。System UI 同样不需要网络：只有当某个插件通过 `SystemNetwork` 展示网络时（比如 `system-wifi`），它才会显示网络。带屏幕的开发板指定 `screen` profile（配置档）；Flash 装不下 Agent 的产品（没有 Agent 和 Sessions）指定 `screen-connected`；从不联网的产品（没有 Wi-Fi、门户、Agent、Sessions 或 Settings）则指定 `screen-offline`。三者都包含 `ui` 层：`app-manager`、`system-fonts`，以及不需要网络的内置应用。各个 profile 见[开发板 profile](/zh/boards/profiles)。开发板不启用某个系统应用的插件，就能把它排除在外；没有显示屏的开发板既不启用系统应用，也不启用 `system-fonts`。
 
 ## 确定所属的层
 

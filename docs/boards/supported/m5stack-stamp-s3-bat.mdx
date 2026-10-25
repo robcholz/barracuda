@@ -26,7 +26,18 @@ Install the toolchain first; see [ESP32](/platforms/esp32).
 
 ## Peripherals
 
-This Board declares no peripherals yet. The network, the Agent, and the
-portal run on it; add its devices to
-`boards/configs/m5stack-stamp-s3-bat/board.yml` to drive them. See
-[Peripheral composition](/boards/peripherals).
+| Device | What it is | Lua package |
+| --- | --- | --- |
+| `power-monitor` | Battery gauge (M5PM1) | [`power_monitor`](/plugins/vm-power-monitor) |
+| `power-button` | Power button (M5PM1 power key) | [`buttons`](/plugins/vm-buttons) |
+
+The M5PM1 measures the battery voltage only; whether the battery charges comes
+from the charger's status line on an M5PM1 pin.
+
+The power button is read from the M5PM1's button status and reads pressed while
+the key is down. The Board turns off the M5PM1's single-click reset, so a single click is an
+application button: scripts and Plugins receive it as a click instead of the
+Board resetting. A double click still turns the Board off, and a long press
+still enters download mode. The M5PM1 keeps this setting until it loses power,
+across resets and reflashing; `single-click-reset: keep` on the device brings
+back the factory single-click reset.

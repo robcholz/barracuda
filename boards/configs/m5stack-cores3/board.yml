@@ -1,7 +1,145 @@
 name: m5stack-cores3
+profile: screen
 hardware:
   chip: esp32s3
+  # ESP32-S3 with 16 MB flash and 8 MB quad PSRAM.
+  flash-size: 16mb
+  external-memory:
+    technology: psram
+    interface: quad-spi
+    size-bytes: 8388608
 toolchain:
   target: xtensa-esp32s3-none-elf
 native-layout:
   artifact: partitions.csv
+peripherals:
+  io:
+    i2c-device:
+      internal-i2c:
+        # M5GFX/M5Unified: the internal bus (I2C_NUM_1, 400 kHz) of the AXP2101
+        # at 34h and the AW9523B at 58h.
+        peripheral: I2C1
+        scl: GPIO11
+        sda: GPIO12
+        frequency-hz: 400000
+    spi-device:
+      display-spi:
+        # M5GFX CoreS3: SPI2_HOST at 40 MHz. GPIO35 is both MISO and LCD D/C;
+        # the display only writes, so it is the D/C output here.
+        peripheral: SPI2
+        sck: GPIO36
+        mosi: GPIO37
+        chip-select: GPIO3
+        frequency-hz: 40000000
+    i2s-stream:
+      audio-stream:
+        # M5Unified `_begin_audio` (board_M5StackCoreS3) and Espressif's board
+        # files: MCLK GPIO0, BCK GPIO34, WS GPIO33, speaker data out GPIO13,
+        # microphone data in GPIO14, on I2S1 as M5Unified does.
+        peripheral: I2S1
+        dma: DMA_CH1
+        bclk: GPIO34
+        ws: GPIO33
+        dout: GPIO13
+        din: GPIO14
+        mclk: GPIO0
+        sample-rate-hz: 48000
+        channels: 2
+        bits-per-sample: 16
+        dma-buffer-bytes: 4096
+    camera-capture:
+      camera-data:
+        # M5Stack CoreS3 pin map and Espressif's m5stack_cores3
+        # board_devices.yaml (`camera`, dvp_config): PCLK GPIO45, VSYNC
+        # GPIO46, HREF (DE) GPIO38, D0-D7 in bit order. No XCLK
+        # (`xclk_io: -1`, esp-bsp BSP_CAMERA_GPIO_XCLK not connected): the
+        # camera module clocks itself. One 320x240 RGB565 frame.
+        peripheral: LCD_CAM
+        dma: DMA_CH0
+        pclk: GPIO45
+        vsync: GPIO46
+        href: GPIO38
+        data: [GPIO39, GPIO40, GPIO41, GPIO42, GPIO15, GPIO16, GPIO48, GPIO47]
+        dma-buffer-bytes: 153600
+  devices:
+    audio-codec:
+      # AW88298 amplifier (36h) and ES7210 microphone ADC (40h) on the internal
+      # bus; AXP2101 ALDO1/ALDO2 supply them and AW9523B P0_2 releases the
+      # amplifier's reset.
+      implementation: aw88298-es7210-audio-codec
+      bindings: { control: internal-i2c, stream: audio-stream }
+    camera:
+      # GC0308 at 21h on the internal bus (M5Stack CoreS3 pin map). AXP2101
+      # ALDO3 supplies it and AW9523B P1_0 is its reset (CAM_RST).
+      implementation: gc0308-camera
+      bindings: { capture: camera-data, control: internal-i2c }
+      parameters:
+        power-layout: cores3
+    display:
+      # ILI9342C 320x240. AW9523B P1_1 resets it and AXP2101 DLDO1 lights it.
+      implementation: m5stack-pmic-display
+      bindings: { dc: GPIO35, i2c: internal-i2c, spi: display-spi }
+      parameters:
+        power-layout: cores3
+        controller: ili9342c
+        width: 320
+        height: 240
+        invert-colors: true
+    touch:
+      # FT6336U at 38h on the internal bus (M5GFX `Touch_M5StackCoreS3`); its
+      # interrupt reaches GPIO21 through the AW9523B, unused: the
+      # implementation polls. Its reset is AW9523B P0_0 (Espressif's
+      # m5stack_cores3 power manager).
+      implementation: ft5x06-touch
+      bindings: { i2c: internal-i2c }
+      parameters:
+        width: 320
+        height: 240
+        reset: cores3
+    # LTR-553ALS-WA ambient-light and proximity sensor at 23h on the internal
+    # bus (M5Stack CoreS3 pin map, I2C_SYS G12/G11). It shares the camera's
+    # ribbon; the implementation switches on AXP2101 ALDO3 at 3.3 V first, as
+    # M5Unified `Power_Class::begin` does.
+    environment-sensor:
+      implementation: ltr553-environment-sensor
+      bindings: { i2c: internal-i2c }
+      parameters:
+        address: 35
+        power-layout: cores3
+    # BM8563 at its fixed address 51h (M5Unified `RTC_Class`).
+    real-time-clock:
+      implementation: bm8563-rtc
+      bindings: { i2c: internal-i2c }
+    # The battery behind the AXP2101 the display also uses.
+    power-monitor:
+      implementation: axp192-axp2101-power-monitor
+      bindings: { i2c: internal-i2c }
+    # The power key on the PMIC's PWRON pin, M5Unified `BtnPWR`: the left
+    # power button, wired to the AXP2101 PWRON only (M5Unified
+    # `Power_Class::begin`).
+    power-button:
+      implementation: axp192-axp2101-buttons
+      bindings: { i2c: internal-i2c }
+    inertial-measurement:
+      implementation: bmi270-imu
+      bindings: { i2c: internal-i2c }
+      parameters:
+        # BMI270 at 69h, with the BMM150 behind its auxiliary bus (M5Stack CoreS3 pin
+        # map; M5Unified IMU_Class).
+        address: 105
+        # The BMM150 at 10h on the BMI270's auxiliary bus (M5Unified
+        # `BMI270_Class::begin`), its Y and Z inverted against the BMI270
+        # (M5Unified `IMU_Class::begin`, CoreS3 and StackChan at 69h).
+        magnetometer: bmm150
+        magnetometer-axis-y: "-y"
+        magnetometer-axis-z: "-z"
+exposed-io:
+  pins:
+    # Port A: M5Unified `_pin_table_i2c_ex_in` (external SCL/SDA); Ports B and C:
+    # M5Unified `_pin_table_port_bc`.
+    port-a-scl: { pin: GPIO1 }
+    port-a-sda: { pin: GPIO2 }
+    port-b-g8: { pin: GPIO8 }
+    port-b-g9: { pin: GPIO9 }
+    port-c-g17: { pin: GPIO17 }
+    port-c-g18: { pin: GPIO18 }
