@@ -335,7 +335,9 @@ VM 内置包之外的 Lua 包，由名为 `vm-<name>` 的插件在从 `vm` requi
 
 包用 `LuaPackage::interface` 说明它承诺了什么：环境的（它不给代码任何可能被滥用的东西）、稳定的（带有一个统计其函数新增次数的版本，以及一行说明代码可以用它做什么的文字），或者开发板特定的；`None` 不承诺任何东西。决定哪些代码获得哪些包的插件从注册表中读取这些信息，并且不提到任何不是它自己注册的包。需要某个开发板设备的包，在开发板缺少该设备时不承诺任何东西。
 
-每次运行的 Lua 堆都容纳内置包、每个已注册的包和脚本。VM 拥有这份预算：它最多容纳 `MAX_LUA_PACKAGES` 个包，并证明内置包、这么多个各自保留 `LUA_PACKAGE_HEAP_BUDGET_BYTES` 的包，再加上一次安装的瞬时峰值 `LUA_PACKAGE_INSTALL_PEAK_BYTES`，仍能给脚本留出它的预留空间。每个包插件的测试都要对它注册的每个包断言 `barracuda_vm_runtime::fits_package_budget(&package)`。这样任何包的组合都能容纳得下，也没有任何测试需要提到另一个包插件。
+包在一次运行的脚本第一次 require 它时才安装进这次运行，并用 `Lua::register_lib` 以自己的名字注册它的库。如果一个包是给内置的 `io` 或 `os` 表添加函数，脚本不 require 它就会使用这些函数，那么它的 `LuaPackage::loading` 返回 `PackageLoading::WithBuiltins`，在每个脚本开始之前随内置包一起安装；注册表最多容纳 `MAX_BUILTIN_EXTENSIONS` 个这样的包。
+
+每次运行的 Lua 堆都容纳内置包、它们的扩展、这次运行的脚本 require 过的包，以及脚本本身。VM 拥有这份预算：它证明内置包、`MAX_BUILTIN_EXTENSIONS` 个各自保留 `LUA_PACKAGE_HEAP_BUDGET_BYTES` 的扩展，再加上一次安装的瞬时峰值 `LUA_PACKAGE_INSTALL_PEAK_BYTES`，仍能给脚本留出它的预留空间。脚本自己的数据和它 require 的包共用这份预留空间，所以 require 了很多包的脚本留给自己的就少一些；空间用完时，这是该脚本的 Lua 内存错误，绝不是 VM 或系统的错误。每个包插件的测试都要对它注册的每个包断言 `barracuda_vm_runtime::fits_package_budget(&package)`。这样可以注册任意数量的包，也没有任何测试需要提到另一个包插件。
 
 ## 门户和 HTTP
 

@@ -25,4 +25,4 @@ VM 插件拥有隔离的 Lua 执行：它发布类型化的 `Vm` 能力、供 VM
 
 `vm.run` Workflow Action 会等待这个句柄，只有在 Lua 执行结束后才返回。VM 的输出和终止状态不会作为 Workflow Event 发出，输入进度也不会改变 Workflow Action 的契约。本插件拥有一个固定的池，包含四个 Embassy 执行槽；每个正在运行的执行都会从平台大块内存分配一个 1 MiB 的 Lua 堆。请求和响应使用普通的 Serde 值；没有 Event Router 通道，也没有由传输方式决定的源代码或输入限制。
 
-依赖它的 VM 包插件在插件注册期间，通过 `LuaPackageRegistry` 注册只能 require 的 Lua 包。
+依赖它的 VM 包插件在插件注册期间，通过 `LuaPackageRegistry` 注册只能 require 的 Lua 包。一次运行只在它的脚本第一次 require 某个包时才安装这个包，所以脚本只为它用到的包付出内存，注册表也可以容纳任意数量的包；预算参见 [Lua 包](/zh/architecture/plugin-api)。

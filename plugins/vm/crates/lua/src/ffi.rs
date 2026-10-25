@@ -84,6 +84,10 @@ pub const NO_REF: c_int = -2;
 pub const MASK_COUNT: c_int = 1 << 3;
 /// `LUA_ERRMEM`.
 pub const STATUS_MEMORY_ERROR: c_int = 4;
+/// `LUA_MINSTACK`.
+pub const MIN_STACK: c_int = 20;
+/// `LUA_GCCOLLECT`.
+pub const GC_COLLECT: c_int = 2;
 
 /// `LUAI_MAXALIGN`: the alignment of every block Lua allocates.
 #[repr(C)]
@@ -134,6 +138,8 @@ unsafe extern "C-unwind" {
     pub fn lua_newthread(state: *mut lua_State) -> *mut lua_State;
     pub fn lua_resetthread(state: *mut lua_State) -> c_int;
     pub fn lua_gc(state: *mut lua_State, what: c_int, ...) -> c_int;
+    pub fn lua_getallocf(state: *mut lua_State, userdata: *mut *mut c_void) -> lua_Alloc;
+    pub fn lua_checkstack(state: *mut lua_State, count: c_int) -> c_int;
 
     pub fn lua_gettop(state: *mut lua_State) -> c_int;
     pub fn lua_settop(state: *mut lua_State, index: c_int);
@@ -226,8 +232,11 @@ unsafe extern "C-unwind" {
     pub fn luaopen_string(state: *mut lua_State) -> c_int;
     pub fn luaopen_utf8(state: *mut lua_State) -> c_int;
 
-    /// Installs the preload-only `require` (`c/require.c`).
-    pub fn barracuda_lua_open_require(state: *mut lua_State);
+    /// Installs the preload-only `require` (`c/require.c`), which calls
+    /// `install` with a name nothing is registered under yet.
+    pub fn barracuda_lua_open_require(state: *mut lua_State, install: Option<lua_CFunction>);
+    /// Raises Lua's out-of-memory error (`c/require.c`).
+    pub fn barracuda_lua_memory_error(state: *mut lua_State) -> !;
 }
 
 /// `lua_upvalueindex`.

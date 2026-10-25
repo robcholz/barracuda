@@ -22,8 +22,9 @@ pub use barracuda_lua::{
 };
 pub use barracuda_vm_package_api::{
     BoardDevices, LentDevice, LuaPackage, LuaPackageRegistration, LuaPackageRegistry,
-    LuaPackageRegistryError, LuaPackageScope, PackageInterface, LUA_PACKAGE_HEAP_BUDGET_BYTES,
-    LUA_PACKAGE_INSTALL_PEAK_BYTES, MAX_LUA_PACKAGES,
+    LuaPackageRegistryError, LuaPackageScope, PackageInterface, PackageLoading,
+    LUA_PACKAGE_HEAP_BUDGET_BYTES, LUA_PACKAGE_INSTALL_HEADROOM_BYTES,
+    LUA_PACKAGE_INSTALL_PEAK_BYTES, MAX_BUILTIN_EXTENSIONS,
 };
 pub use barracuda_vm_runtime::{
     SeedSource, Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmListResponse,

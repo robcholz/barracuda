@@ -14,7 +14,7 @@ VM Filesystem 插件通过 Lua 标准的 `io` 和 `os` 文件 API，把它的插
 - 所需能力：来自 `vm` 的 `LuaPackageRegistry`
 - Workflow：无
 - Agent 工具：无
-- Lua 包：`filesystem`，它扩展内置的 `io` 和 `os` 表
+- Lua 包：`filesystem`，它扩展内置的 `io` 和 `os` 表，所以在每次运行中都随内置包一起安装
 - Web：无
 - 任务：无
 - 存储：本插件的私有文件系统（`PluginFilesystem::Private`）；Lua 脚本可以访问其挂载点上的任何路径，`os.tmpname` 和 `io.tmpfile` 在 `/cache` 下创建文件

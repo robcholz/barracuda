@@ -22,11 +22,17 @@ pub(crate) const VM_YIELD_DELAY_MILLIS: u64 = 100;
 /// One MiB holds a full 360x360 RGB565 frame or a 256 KiB PCM transfer as a
 /// Lua string with room for the script that produces or consumes it.
 pub(crate) const VM_MEMORY_BYTES_PER_RUN: usize = 1024 * 1024;
-/// Part of a run's heap kept for the script itself, with the built-ins and
-/// every package the registry can hold installed: a full 360x360 RGB565
-/// frame or a 256 KiB PCM transfer, with room to spare.
+/// Part of a run's heap kept for the script itself, beside the built-ins,
+/// the packages that extend them, and one package installation's peak.
+///
+/// The script's own data and the packages it requires share it, each
+/// package keeping at most `LUA_PACKAGE_HEAP_BUDGET_BYTES`: a script whose
+/// data and packages fit never runs out of memory, including while a package
+/// it requires installs, and a script that requires 30 packages still has
+/// 512 KiB for its data.
 #[cfg_attr(not(test), allow(dead_code))]
-pub(crate) const SCRIPT_HEAP_RESERVE_BYTES: usize = 400 * 1024;
+pub(crate) const SCRIPT_HEAP_RESERVE_BYTES: usize =
+    512 * 1024 + 30 * barracuda_vm_package_api::LUA_PACKAGE_HEAP_BUDGET_BYTES;
 
 #[derive(Clone, Default)]
 pub(crate) struct VmYieldSignal(Rc<Cell<bool>>);

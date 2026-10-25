@@ -498,15 +498,25 @@ which packages reads these from the registry and names no package it does not
 register itself. A package that needs a Board device promises nothing while
 the Board lacks it.
 
-Every run's Lua heap holds the built-ins, every registered package, and the
-script. The VM owns that budget: it holds at most `MAX_LUA_PACKAGES` packages,
-and proves the built-ins, that many packages keeping
+A package installs into a run the first time the run's script requires it,
+and registers its library under its own name with `Lua::register_lib`. A
+package that adds functions to the built-in `io` or `os` tables instead, which
+scripts use without requiring it, returns `PackageLoading::WithBuiltins` from
+`LuaPackage::loading` and installs with the built-ins before every script; the
+registry holds at most `MAX_BUILTIN_EXTENSIONS` of them.
+
+Every run's Lua heap holds the built-ins, their extensions, the packages its
+script required, and the script. The VM owns that budget: it proves the
+built-ins, `MAX_BUILTIN_EXTENSIONS` extensions keeping
 `LUA_PACKAGE_HEAP_BUDGET_BYTES` each, and one installation's transient
-`LUA_PACKAGE_INSTALL_PEAK_BYTES` leave the script its reserve. Each package
+`LUA_PACKAGE_INSTALL_PEAK_BYTES` leave the script its reserve. The script's
+own data and the packages it requires share that reserve, so a script that
+requires many packages has less left for itself, and running out is the
+script's Lua memory error, never the VM's or the System's. Each package
 Plugin's tests assert
 `barracuda_vm_runtime::fits_package_budget(&package)` for every package it
-registers. Any selection of packages then fits, and no test names another
-package Plugin.
+registers. Any number of packages can then be registered, and no test names
+another package Plugin.
 
 ## Portal and HTTP
 

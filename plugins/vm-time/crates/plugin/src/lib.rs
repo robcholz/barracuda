@@ -203,6 +203,11 @@ impl LuaPackage for TimePackage {
         Some(barracuda_vm_plugin::PackageInterface::Ambient { version: 1 })
     }
 
+    fn loading(&self) -> barracuda_vm_plugin::PackageLoading {
+        // It adds to the built-in tables, which scripts use without requiring it.
+        barracuda_vm_plugin::PackageLoading::WithBuiltins
+    }
+
     fn revoke(&self) {
         self.state.revoke();
     }
