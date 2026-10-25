@@ -6,7 +6,8 @@ use std::process::ExitCode;
 use anstream::{eprintln, println};
 use barracuda_cli_style::{DIM, EMPHASIS, ERROR, SUCCESS};
 use barracuda_system_image::{
-    build_selected, deploy_selected, flash_selected, package_selected, ResourcesFilesystem,
+    build_selected, deploy_selected, firmware_selected, flash_selected, package_selected,
+    ResourcesFilesystem,
 };
 use clap::{Parser, Subcommand};
 
@@ -36,6 +37,10 @@ enum Command {
     /// manifest of where each part is flashed. The version is the one the
     /// build was given in `BARRACUDA_VERSION`.
     Package,
+    /// Turn the selected Board's release build into its release firmware,
+    /// as `package` does, without the resource image. On ESP Platforms this
+    /// fails when the firmware does not fit the Board's app slot.
+    Firmware,
 }
 
 fn main() -> ExitCode {
@@ -44,6 +49,31 @@ fn main() -> ExitCode {
         Command::Flash => flash(),
         Command::Deploy => deploy(),
         Command::Package => package(),
+        Command::Firmware => firmware(),
+    }
+}
+
+fn firmware() -> ExitCode {
+    let Some(workspace) = workspace_root(Path::new(env!("CARGO_MANIFEST_DIR"))) else {
+        eprintln!(
+            "{ERROR}error:{ERROR:#} image tool crate is not located below the workspace root"
+        );
+        return ExitCode::FAILURE;
+    };
+    match firmware_selected(workspace) {
+        Ok(firmware) => {
+            println!(
+                "{SUCCESS}✔{SUCCESS:#} Wrote {DIM}{}-byte{DIM:#} release firmware for {EMPHASIS}Board `{}`{EMPHASIS:#} at `{}`.",
+                firmware.size(),
+                firmware.board(),
+                firmware.path().display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{ERROR}error:{ERROR:#} {error}");
+            ExitCode::FAILURE
+        }
     }
 }
 

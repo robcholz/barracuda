@@ -19,6 +19,9 @@ env:
   # esp 1.99.0.0 orders esp-hal's ESP32-S3 `__pre_init` literal pool after
   # its IRAM code in release builds, which no longer links.
   ESP_RUST_VERSION: 1.98.1.0
+  # The ESP Platforms' release driver, which the Boards job runs to check
+  # that each firmware fits its Board's app slot.
+  ESPFLASH_VERSION: v4.6.0
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_TERM_COLOR: always
@@ -607,16 +610,36 @@ jobs:
           ldproxy: false
           override: false
 
+      # `cargo board select` records PATH, so the release driver must be
+      # installed before any Board is selected.
+      - name: Install espflash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/espflash.zip" \
+            "https://github.com/esp-rs/espflash/releases/download/$ESPFLASH_VERSION/espflash-x86_64-unknown-linux-gnu.zip"
+          unzip -o -d "$HOME/.cargo/bin" "$RUNNER_TEMP/espflash.zip" espflash
+          espflash --version
+
+      # A device Board's selection forces LIBCLANG_PATH to Espressif's clang,
+      # which cannot generate the image tool's host LittleFS bindings, so the
+      # tool is built once with a host Board selected and then run directly.
+      - name: Build the image tool
+        run: |
+          cargo board select local-linux
+          cargo image --help >/dev/null
+          host=$(rustc -vV | sed -n 's/^host: //p')
+          echo "IMAGE_TOOL=$PWD/target/host-tools/$host/debug/barracuda-system-image" >> "$GITHUB_ENV"
+
       - name: Check, lint & build every Board
         if: matrix.toolchain != 'esp'
         run: |
           failed=0
           while IFS= read -r board; do
-            echo "::group::$board: cargo check, cargo clippy, cargo build --release"
+            echo "::group::$board: cargo check, cargo clippy, cargo build --release, image firmware"
             if cargo board select "$board" &&
               cargo check &&
               cargo clippy &&
-              cargo build --release; then
+              cargo build --release &&
+              "$IMAGE_TOOL" firmware; then
               echo "$board passed"
             else
               echo "::error title=Board validation failed::$board"
@@ -631,11 +654,12 @@ jobs:
         run: |
           failed=0
           while IFS= read -r board; do
-            echo "::group::$board: cargo check, clippy, build --release"
+            echo "::group::$board: cargo check, clippy, build --release, image firmware"
             if cargo board select "$board" &&
               cargo check &&
               cargo clippy &&
-              cargo build --release; then
+              cargo build --release &&
+              "$IMAGE_TOOL" firmware; then
               echo "$board passed"
             else
               echo "::error title=Board validation failed::$board"

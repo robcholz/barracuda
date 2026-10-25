@@ -14,6 +14,8 @@ use crate::{build_workspace, resources_region, write_image, Selection};
 
 /// Workspace-relative directory that holds one folder per packaged Board.
 pub const PACKAGE_OUTPUT: &str = "target/package";
+/// Workspace-relative directory that holds one firmware folder per Board.
+pub const FIRMWARE_OUTPUT: &str = "target/firmware";
 /// The application binary `cargo build --release` produces.
 const APPLICATION: &str = "barracuda-system";
 const RESOURCES: &str = "resources.img";
@@ -53,6 +55,41 @@ impl Package {
     #[must_use]
     pub fn parts(&self) -> &[PackagePart] {
         &self.parts
+    }
+}
+
+/// One Board's release firmware, written without a resource image.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Firmware {
+    board: String,
+    path: PathBuf,
+    offset: Option<u64>,
+    size: u64,
+}
+
+impl Firmware {
+    /// Returns the Board's name.
+    #[must_use]
+    pub fn board(&self) -> &str {
+        &self.board
+    }
+
+    /// Returns the firmware file.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Returns the flash offset of a raw image; `None` for an ELF.
+    #[must_use]
+    pub const fn offset(&self) -> Option<u64> {
+        self.offset
+    }
+
+    /// Returns the file's size in bytes.
+    #[must_use]
+    pub const fn size(&self) -> u64 {
+        self.size
     }
 }
 
@@ -120,83 +157,11 @@ struct ManifestPart<'a> {
 pub fn package_selected(workspace: &Path, version: &str) -> Result<Package, String> {
     let selection = Selection::read(workspace)?;
     let platform = &selection.platform;
-    let release = platform.application().release().ok_or_else(|| {
-        format!(
-            "Platform `{}` publishes no release firmware",
-            platform.name()
-        )
-    })?;
-    let target = selection
-        .board
-        .toolchain()
-        .map(|toolchain| toolchain.target())
-        .ok_or_else(|| {
-            format!(
-                "Board `{}` names no Rust target to release",
-                selection.board_name
-            )
-        })?;
-    let application = workspace
-        .join("target")
-        .join(target)
-        .join("release")
-        .join(APPLICATION);
-    if !application.is_file() {
-        return Err(format!(
-            "no release build at `{}`; run `cargo build --release` first",
-            application.display()
-        ));
-    }
     let region = resources_region(workspace, &selection)?;
     let directory = workspace
         .join(PACKAGE_OUTPUT)
         .join(format!("barracuda-{version}-{}", selection.board_name));
-    if directory.exists() {
-        fs::remove_dir_all(&directory)
-            .map_err(|error| format!("failed to clear `{}`: {error}", directory.display()))?;
-    }
-    fs::create_dir_all(&directory)
-        .map_err(|error| format!("failed to create `{}`: {error}", directory.display()))?;
-
-    let firmware = match release {
-        ReleaseDriver::Elf => {
-            let path = "firmware.elf";
-            fs::copy(&application, directory.join(path))
-                .map_err(|error| format!("failed to copy `{}`: {error}", application.display()))?;
-            (path, None)
-        }
-        ReleaseDriver::Command(release) => {
-            let path = "firmware.bin";
-            let output = directory.join(path);
-            let flash_size = flash_size(&selection)?;
-            let command = command::prepare_release(
-                release,
-                DriverContext {
-                    workspace,
-                    platform: platform.directory(),
-                    layout: &selection.layout_path,
-                    chip: selection.chip(),
-                    image: None,
-                    offset: None,
-                    size: None,
-                    release: Some(ReleaseContext {
-                        application: &application,
-                        output: &output,
-                        flash_size: flash_size.as_deref(),
-                    }),
-                },
-            )?;
-            command::status(&command)?;
-            if !output.is_file() {
-                return Err(format!(
-                    "`{}` wrote no `{}`",
-                    command::render(&command),
-                    output.display()
-                ));
-            }
-            (path, Some(release.offset()))
-        }
-    };
+    let firmware = write_firmware(workspace, &selection, &directory)?;
     let resources = build_workspace(workspace, region.size(), region.filesystem())
         .map_err(|error| error.to_string())?;
     write_image(&directory.join(RESOURCES), &resources)?;
@@ -237,6 +202,117 @@ pub fn package_selected(workspace: &Path, version: &str) -> Result<Package, Stri
         directory,
         parts,
     })
+}
+
+/// Turns the selected Board's release build into its release firmware in
+/// `target/firmware/<board>/`, as [`package_selected`] does, without the
+/// resource image.
+///
+/// The Platform's release driver writes the file, and the ESP driver
+/// refuses an application larger than the Board's first app slot, so this
+/// checks that the firmware fits.
+///
+/// # Errors
+///
+/// Returns an error when the selection is invalid, the Platform publishes no
+/// firmware, the release build is missing, or the release driver fails.
+pub fn firmware_selected(workspace: &Path) -> Result<Firmware, String> {
+    let selection = Selection::read(workspace)?;
+    let directory = workspace.join(FIRMWARE_OUTPUT).join(&selection.board_name);
+    let (path, offset) = write_firmware(workspace, &selection, &directory)?;
+    let path = directory.join(path);
+    let size = fs::metadata(&path)
+        .map_err(|error| format!("failed to read `{}`: {error}", path.display()))?
+        .len();
+    Ok(Firmware {
+        board: selection.board_name,
+        path,
+        offset,
+        size,
+    })
+}
+
+/// Writes the selected Board's release firmware into a fresh `directory` and
+/// returns its file name and flash offset (`None` for an ELF).
+fn write_firmware(
+    workspace: &Path,
+    selection: &Selection,
+    directory: &Path,
+) -> Result<(&'static str, Option<u64>), String> {
+    let platform = &selection.platform;
+    let release = platform.application().release().ok_or_else(|| {
+        format!(
+            "Platform `{}` publishes no release firmware",
+            platform.name()
+        )
+    })?;
+    let target = selection
+        .board
+        .toolchain()
+        .map(|toolchain| toolchain.target())
+        .ok_or_else(|| {
+            format!(
+                "Board `{}` names no Rust target to release",
+                selection.board_name
+            )
+        })?;
+    let application = workspace
+        .join("target")
+        .join(target)
+        .join("release")
+        .join(APPLICATION);
+    if !application.is_file() {
+        return Err(format!(
+            "no release build at `{}`; run `cargo build --release` first",
+            application.display()
+        ));
+    }
+    if directory.exists() {
+        fs::remove_dir_all(directory)
+            .map_err(|error| format!("failed to clear `{}`: {error}", directory.display()))?;
+    }
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("failed to create `{}`: {error}", directory.display()))?;
+
+    match release {
+        ReleaseDriver::Elf => {
+            let path = "firmware.elf";
+            fs::copy(&application, directory.join(path))
+                .map_err(|error| format!("failed to copy `{}`: {error}", application.display()))?;
+            Ok((path, None))
+        }
+        ReleaseDriver::Command(release) => {
+            let path = "firmware.bin";
+            let output = directory.join(path);
+            let flash_size = flash_size(selection)?;
+            let command = command::prepare_release(
+                release,
+                DriverContext {
+                    workspace,
+                    platform: platform.directory(),
+                    layout: &selection.layout_path,
+                    chip: selection.chip(),
+                    image: None,
+                    offset: None,
+                    size: None,
+                    release: Some(ReleaseContext {
+                        application: &application,
+                        output: &output,
+                        flash_size: flash_size.as_deref(),
+                    }),
+                },
+            )?;
+            command::status(&command)?;
+            if !output.is_file() {
+                return Err(format!(
+                    "`{}` wrote no `{}`",
+                    command::render(&command),
+                    output.display()
+                ));
+            }
+            Ok((path, Some(release.offset())))
+        }
+    }
 }
 
 /// The flash size a release image's header names: the Board's declared size,

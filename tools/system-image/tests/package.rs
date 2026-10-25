@@ -5,7 +5,9 @@
 use std::fs;
 use std::path::Path;
 
-use barracuda_system_image::{package_selected, PACKAGE_OUTPUT};
+use barracuda_system_image::{
+    firmware_selected, package_selected, FIRMWARE_OUTPUT, PACKAGE_OUTPUT,
+};
 use serde_json::Value;
 use tempfile::tempdir;
 
@@ -151,4 +153,36 @@ fn a_missing_release_build_points_at_cargo_build() {
     let error = package_selected(root.path(), "1.2.3").expect_err("no build");
 
     assert!(error.contains("cargo build --release"), "{error}");
+}
+
+#[test]
+fn firmware_writes_the_release_firmware_without_the_resources() {
+    let root = tempdir().expect("temporary workspace");
+    select_device_board(
+        root.path(),
+        "  release:\n    driver: command\n    program: cp\n    arguments: ['{application}', '{output}']\n    offset: 4096\n",
+    );
+
+    let firmware = firmware_selected(root.path()).expect("firmware");
+
+    let directory = root.path().join(FIRMWARE_OUTPUT).join("acme-board");
+    assert_eq!(firmware.board(), "acme-board");
+    assert_eq!(firmware.path(), directory.join("firmware.bin"));
+    assert_eq!(firmware.offset(), Some(4096));
+    assert_eq!(firmware.size(), 17);
+    assert!(!directory.join("resources.img").exists());
+}
+
+#[test]
+fn firmware_fails_when_the_release_driver_refuses_the_build() {
+    let root = tempdir().expect("temporary workspace");
+    // Stands in for espflash refusing an application larger than its slot.
+    select_device_board(
+        root.path(),
+        "  release:\n    driver: command\n    program: 'false'\n    arguments: ['{application}', '{output}']\n    offset: 0\n",
+    );
+
+    let error = firmware_selected(root.path()).expect_err("refused");
+
+    assert!(error.contains("false"), "{error}");
 }

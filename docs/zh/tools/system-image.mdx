@@ -11,9 +11,10 @@ cargo image build
 cargo image flash
 cargo image deploy
 cargo image package
+cargo image firmware
 ```
 
-所有操作都读取 `.barracuda/selected-board`；没有任何操作接受开发板或平台参数。`build` 读取开发板的原生物理布局，并写入 `target/barracuda-system.img`。`flash` 要求完整的镜像已经存在，并且只把它写入所选开发板的原生 `resources` 区域。`deploy` 构建一个全新的镜像，然后烧录它。`package` 打包所选开发板的 release 构建，参见下面的「打包发布」。开发板原生的 `resources` 分区条目决定使用 `fatfs` 还是 `littlefs`：文件区域布局使用该区域的 `filesystem` 字段，ESP 布局使用它的分区子类型，链接器布局使用它的内联 `filesystem` 注解。`resources` 区域在运行时必须是只读的。LittleFS 镜像占用的块数由 `barracuda_vfs_littlefs::filesystem_block_count` 根据该区域算出，与固件挂载它时使用的块数相同。
+所有操作都读取 `.barracuda/selected-board`；没有任何操作接受开发板或平台参数。`build` 读取开发板的原生物理布局，并写入 `target/barracuda-system.img`。`flash` 要求完整的镜像已经存在，并且只把它写入所选开发板的原生 `resources` 区域。`deploy` 构建一个全新的镜像，然后烧录它。`package` 打包所选开发板的 release 构建，参见下面的「打包发布」。`firmware` 只写出固件文件，参见下面的「检查固件」。开发板原生的 `resources` 分区条目决定使用 `fatfs` 还是 `littlefs`：文件区域布局使用该区域的 `filesystem` 字段，ESP 布局使用它的分区子类型，链接器布局使用它的内联 `filesystem` 注解。`resources` 区域在运行时必须是只读的。LittleFS 镜像占用的块数由 `barracuda_vfs_littlefs::filesystem_block_count` 根据该区域算出，与固件挂载它时使用的块数相同。
 
 共享的平台解析器发现 `platforms/*/platform.yml`，检查所选开发板的芯片和声明的工具链目标，并读取该平台的 `system-image` 驱动。因此，运行时构建和 System 镜像工具共用同一个平台目录，而无需集中式的芯片或平台注册表。
 
@@ -53,3 +54,14 @@ application:
 `ota_0` 是每块 ESP 开发板的第一个应用槽位，在 Flash 小于 16 MiB 的开发板上也是唯一一个，所以同一组参数适用于一个平台的所有开发板；参见[开发板](/zh/boards/overview)中的 ESP Flash 布局。
 
 命令不经过 shell 执行。除了 `{chip}` 和 `{layout}`，它还可以使用 `{application}`（构建出的应用）、`{output}`（要写出的文件）和 `{flash-size}`（开发板的 `hardware.flash-size`；ESP 分区表则取能容纳它的最小闪存大小）。没有 release 驱动的平台（例如主机平台）不发布固件。
+
+## 检查固件
+
+`cargo image firmware` 运行同一个 release 驱动，但不构建资源镜像，只把固件文件写到 `target/firmware/<board>/`：
+
+```bash terminal
+cargo build --release
+cargo image firmware
+```
+
+在 ESP 平台上，`espflash` 不接受大于 `ota_0` 的应用，所以固件放不进开发板的应用槽时这个命令会失败。CI 在 `cargo build --release` 之后对每块设备开发板运行它。
